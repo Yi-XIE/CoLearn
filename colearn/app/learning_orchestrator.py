@@ -11,7 +11,6 @@ from uuid import uuid4
 from colearn.compression import ProductCompressionBridge, ProductCompressionResult, RuntimeCompressionBridge
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.state_hooks import (
-    after_turn_payload,
     before_turn,
     build_learning_board,
     build_state_snapshot,
@@ -23,6 +22,7 @@ from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
 from colearn.runtime.context_bridge import build_learning_turn_request
 from colearn.runtime.turn_executor import NanobotTurnExecutor
+from colearn.runtime_v2 import build_learning_closure
 from colearn.sessions.store import LearningSession, SessionStore
 from .source_preflight import SourceReadinessPreflight
 
@@ -200,24 +200,21 @@ class LearningOrchestrator:
         )
         compressed = self.runtime_compression.compress(request=prepared_request)
         result = self.executor.run_turn(request=compressed.request)
-        after_payload = after_turn_payload(
+        closure_payload = build_learning_closure(
             project=project,
             session=session,
             request=compressed.request,
             final_text=result.final_text,
-            tool_events=list(result.tool_events or result.raw_learning_result.get("tool_events") or []),
+            raw_learning_result=result.raw_learning_result,
+            warnings=[
+                *list(result.warnings),
+                *compressed.notes,
+            ],
         )
         normalized = self.executor.finalize(
             request=compressed.request,
             final_text=result.final_text,
-            learning_result={
-                **result.raw_learning_result,
-                **after_payload,
-                "warnings": [
-                    *list(result.warnings),
-                    *compressed.notes,
-                ],
-            },
+            learning_result=closure_payload,
         )
         self._write_back(
             project=project,

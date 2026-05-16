@@ -12,7 +12,7 @@ from colearn.app.learning_orchestrator import LearningOrchestrator
 from colearn.compression import ProductCompressionResult
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.response_contract import LearningTurnResult
-from colearn.learning.state import BoardFacts
+from colearn.learning.state import BoardFacts, Blocker, GapsAndBlockers, LearningStateSnapshot, ProgressFacts, StudentSnapshot
 from colearn.learning.state_hooks import after_turn_payload
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.memory.store import EventMemoryStore, MemoryEvent
@@ -400,3 +400,125 @@ def test_default_nanobot_executor_receives_constructor_dependencies(tmp_path: Pa
     )
     assert getattr(orchestrator.executor, "retrieval_service", None) is orchestrator.retrieval_service
     assert getattr(orchestrator.executor, "memory_store", None) is memory_store
+
+
+def test_runtime_v2_prompt_includes_learning_state_lines() -> None:
+    from colearn.runtime_v2.prompting import build_turn_prompt
+
+    request = LearningTurnRequest(
+        session_id="sess-ls",
+        project_id="proj-ls",
+        project_title="Learning State",
+        user_message="Help me move forward",
+        continuation_prompt="Focus on the next proof step.",
+        board_facts=BoardFacts(
+            project_id="proj-ls",
+            session_id="sess-ls",
+            current_progress=ProgressFacts(
+                active_node_id="node-proof",
+                active_node_label="Proof by induction",
+            ),
+            student_snapshot=StudentSnapshot(
+                mastery_level=0.42,
+                cognitive_load="HIGH",
+            ),
+            gaps_and_blockers=GapsAndBlockers(
+                critical_blockers=[Blocker(id="blk-1", desc="Confuses base case and induction step")],
+                unverified_gaps=["Cannot explain why the induction hypothesis is sufficient"],
+            ),
+            evidence_refs=[{"source_ref": "note-1"}],
+        ),
+        state_projection=LearningStateSnapshot(
+            active_node_id="node-proof",
+            active_node_label="Proof by induction",
+            mastery_level=0.42,
+            cognitive_load="HIGH",
+        ),
+    )
+
+    prompt = build_turn_prompt(request)
+
+    assert "Learning focus: Proof by induction" in prompt
+    assert "Learner state: mastery=0.42; cognitive_load=HIGH" in prompt
+    assert "Critical blockers: Confuses base case and induction step" in prompt
+    assert "Unverified gaps: Cannot explain why the induction hypothesis is sufficient" in prompt
+    assert "Continuation hint: Focus on the next proof step." in prompt
+    assert "Evidence refs attached: 1" in prompt
+
+
+def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
+    from colearn.runtime_v2.result_bridge import normalize_learning_turn_result as normalize_v2_result
+
+    request = LearningTurnRequest(
+        session_id="sess-summary",
+        project_id="proj-summary",
+        project_title="Board Summary",
+        user_message="Summarize the current state",
+        turn_mode="VERIFY",
+        board_facts=BoardFacts(
+            project_id="proj-summary",
+            session_id="sess-summary",
+            current_turn_mode="VERIFY",
+            current_progress=ProgressFacts(
+                active_node_id="node-verify",
+                active_node_label="Verify inference",
+            ),
+            student_snapshot=StudentSnapshot(
+                mastery_level=0.75,
+                cognitive_load="NORMAL",
+            ),
+            gaps_and_blockers=GapsAndBlockers(
+                critical_blockers=[Blocker(id="blk-2", desc="Needs evidence for step 3")],
+                unverified_gaps=["Missing justification for the transformation"],
+            ),
+        ),
+        state_projection=LearningStateSnapshot(
+            active_node_id="node-verify",
+            active_node_label="Verify inference",
+            mastery_level=0.75,
+            cognitive_load="NORMAL",
+        ),
+    )
+
+    result = normalize_v2_result(
+        request=request,
+        final_text="Here is the current state.",
+        learning_result={"tool_events": [], "raw_messages": []},
+    )
+
+    board_summary = result.metadata["runtime_v2_board_summary"]
+    assert board_summary["turn_mode"] == "VERIFY"
+    assert board_summary["active_node_id"] == "node-verify"
+    assert board_summary["active_node_label"] == "Verify inference"
+    assert board_summary["mastery_level"] == 0.75
+    assert board_summary["cognitive_load"] == "NORMAL"
+    assert board_summary["critical_blocker_count"] == 1
+    assert board_summary["unverified_gap_count"] == 1
+    assert result.raw_learning_result["runtime_v2"]["board_summary"] == board_summary
+
+
+def test_runtime_v2_learning_closure_marks_runtime_metadata() -> None:
+    from colearn.runtime_v2.learning_closure import build_learning_closure
+
+    project = LearningProject(project_id="proj-closure", title="Closure")
+    session = SessionStore().create_session(session_id="sess-closure", project_id="proj-closure")
+    request = LearningTurnRequest(
+        session_id="sess-closure",
+        project_id="proj-closure",
+        user_message="Finish this learning turn",
+        board_facts=BoardFacts(project_id="proj-closure", session_id="sess-closure"),
+    )
+
+    payload = build_learning_closure(
+        project=project,
+        session=session,
+        request=request,
+        final_text="Turn finished.",
+        raw_learning_result={"tool_events": [{"tool_name": "lightrag"}]},
+        warnings=["runtime_note"],
+    )
+
+    assert payload["runtime_v2"]["closure_applied"] is True
+    assert payload["warnings"] == ["runtime_note"]
+    assert payload["tool_events"] == [{"tool_name": "lightrag"}]
+    assert "board_after" in payload

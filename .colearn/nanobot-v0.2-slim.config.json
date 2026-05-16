@@ -1,0 +1,65 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "./.colearn/nanobot-workspace",
+      "provider": "openai",
+      "model": "deepseek-v4-flash",
+      "fallbackModels": [],
+      "maxToolIterations": 80,
+      "maxConcurrentSubagents": 1,
+      "providerRetryMode": "standard",
+      "toolHintMaxLength": 48,
+      "timezone": "Asia/Shanghai",
+      "botName": "CoLearn",
+      "botIcon": "CL",
+      "unifiedSession": false,
+      "disabledSkills": [],
+      "idleCompactAfterMinutes": 0
+    }
+  },
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false,
+    "showReasoning": true,
+    "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765,
+      "path": "/",
+      "allowFrom": [
+        "*"
+      ],
+      "streaming": true,
+      "websocketRequiresToken": true,
+      "tokenIssuePath": "/auth/token",
+      "tokenIssueSecret": "${COLEARN_NANOBOT_TOKEN_ISSUE_SECRET}"
+    }
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8766,
+    "heartbeat": {
+      "enabled": false
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "web": {
+      "enable": false
+    },
+    "exec": {
+      "enable": true,
+      "timeout": 90
+    },
+    "imageGeneration": {
+      "enabled": false
+    },
+    "mcpServers": {}
+  },
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "apiBase": "${OPENAI_API_BASE}"
+    }
+  }
+}
