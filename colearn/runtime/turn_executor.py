@@ -85,6 +85,20 @@ class NanobotTurnExecutor:
             lines.append(f"Main goal: {policy.main_goal}")
         if request.continuation_prompt:
             lines.append(f"Continuation: {request.continuation_prompt}")
+        source_profile = dict(request.metadata.get("source_profile") or {})
+        if source_profile:
+            sync = dict(source_profile.get("sync") or {})
+            warnings = list(source_profile.get("warnings") or sync.get("warnings") or [])
+            readiness = str(source_profile.get("readiness") or "unknown")
+            sync_status = str(source_profile.get("sync_status") or sync.get("sync_status") or "unknown")
+            source_count = int(source_profile.get("source_count") or len(source_profile.get("sources") or []))
+            hint = (
+                f"Source readiness: readiness={readiness}; sync_status={sync_status}; "
+                f"available_sources={source_count}"
+            )
+            if warnings:
+                hint = f"{hint}; warnings={'; '.join(str(item) for item in warnings[:3])}"
+            lines.append(hint)
         restrictions = list(request.metadata.get("policy_restrictions") or [])
         if not restrictions and policy is not None:
             restrictions = list(getattr(policy, "restrictions", []) or [])
@@ -180,7 +194,7 @@ class NanobotTurnExecutor:
                     try:
                         question = str(kwargs.get("question") or "").strip() or request.user_message
                         if self_outer.retrieval_service is not None:
-                            bundle = self_outer.retrieval_service.build_bundle_for_source_refs(
+                            bundle = await self_outer.retrieval_service.async_build_bundle_for_source_refs(
                                 project_id=request.project_id,
                                 query=question,
                                 source_refs=[
@@ -211,7 +225,7 @@ class NanobotTurnExecutor:
                                     payload["source_path"] = str(candidate.resolve())
                                     payload.setdefault("source_id", str(candidate.resolve()))
                             normalized_refs.append(payload)
-                        result = client.retrieve_project_context(
+                        result = await client.async_retrieve_project_context(
                             project_id=request.project_id,
                             query=question,
                             source_refs=normalized_refs,

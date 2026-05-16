@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+import anyio
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from colearn.retrieval.adapters.lightrag import (  # noqa: E402
@@ -98,6 +101,36 @@ def test_lightrag_client_sync_and_retrieve_subset(tmp_path: Path) -> None:
     assert len(result.references or []) == 1
     assert backend.calls[0][0] == "initialize"
     assert any(call[0] == "search" for call in backend.calls)
+
+
+async def _run_lightrag_async_checks(tmp_path: Path) -> None:
+    config_path = tmp_path / ".colearn" / "lightrag.json"
+    LightRAGConfig(enabled=True).save(config_path)
+    source_file = tmp_path / "note.md"
+    source_file.write_text("hello", encoding="utf-8")
+    backend = FakeBackend(tmp_path)
+    client = LightRAGClient(
+        config=LightRAGConfig(enabled=True),
+        path=config_path,
+        workspace=tmp_path,
+        backend=backend,
+    )
+    result = await client.async_retrieve_project_context(
+        project_id="project-async",
+        query="fractions",
+        source_refs=[{"source_id": str(source_file), "source_path": str(source_file), "title": "note.md"}],
+    )
+    assert result.retrieval_status == "ready"
+    with pytest.raises(RuntimeError, match="async_retrieve_project_context"):
+        client.retrieve_project_context(
+            project_id="project-async",
+            query="fractions",
+            source_refs=[{"source_id": str(source_file), "source_path": str(source_file), "title": "note.md"}],
+        )
+
+
+def test_lightrag_async_methods_work_and_sync_rejects_event_loop(tmp_path: Path) -> None:
+    anyio.run(_run_lightrag_async_checks, tmp_path)
 
 
 def test_retrieval_service_uses_lightrag_adapter_when_available(tmp_path: Path) -> None:

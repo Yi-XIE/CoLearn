@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from colearn.storage import JsonStateStore
+from colearn.storage.records import session_from_record, session_to_record
 
 
 @dataclass
@@ -13,6 +14,8 @@ class LearningSession:
     session_id: str
     project_id: str = ""
     title: str = ""
+    created_at: int = 0
+    updated_at: int = 0
     turn_mode: str = "EXPLORE"
     board_facts: dict[str, Any] = field(default_factory=dict)
     board_version: int = 1
@@ -40,48 +43,12 @@ class SessionStore:
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            session = LearningSession(
-                session_id=str(item.get("session_id") or ""),
-                project_id=str(item.get("project_id") or ""),
-                title=str(item.get("title") or ""),
-                turn_mode=str(item.get("turn_mode") or "EXPLORE"),
-                board_facts=dict(item.get("board_facts") or {}),
-                board_version=int(item.get("board_version") or 1),
-                status=str(item.get("status") or "idle"),
-                source_refs=list(item.get("source_refs") or []),
-                memory_refs=list(item.get("memory_refs") or []),
-                messages=list(item.get("messages") or []),
-                continuation_prompt=str(item.get("continuation_prompt") or ""),
-                last_turn_result=dict(item.get("last_turn_result") or {}),
-                pending_review=dict(item.get("pending_review") or {}),
-                active_turn_id=item.get("active_turn_id"),
-                active_turns=list(item.get("active_turns") or []),
-            )
+            session = session_from_record(item)
             if session.session_id:
                 self._sessions[session.session_id] = session
 
     def _dump(self) -> None:
-        payload = []
-        for session in self._sessions.values():
-            payload.append(
-                {
-                    "session_id": session.session_id,
-                    "project_id": session.project_id,
-                    "title": session.title,
-                    "turn_mode": session.turn_mode,
-                    "board_facts": dict(session.board_facts),
-                    "board_version": session.board_version,
-                    "status": session.status,
-                    "source_refs": list(session.source_refs),
-                    "memory_refs": list(session.memory_refs),
-                    "messages": list(session.messages),
-                    "continuation_prompt": session.continuation_prompt,
-                    "last_turn_result": dict(session.last_turn_result),
-                    "pending_review": dict(session.pending_review),
-                    "active_turn_id": session.active_turn_id,
-                    "active_turns": list(session.active_turns),
-                }
-            )
+        payload = [session_to_record(session) for session in self._sessions.values()]
         self._state_store.write_json("sessions.json", payload)
 
     def create_session(

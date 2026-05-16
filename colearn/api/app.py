@@ -3,30 +3,51 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+from pathlib import Path
 import time
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from anyio import to_thread
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, StreamingResponse
 
+from colearn.api.state import (
+    AuthStateService,
+    KnowledgeTaskService,
+    MemoryDocStateService,
+    SettingsStateService,
+    SettingsTestRunService,
+    SkillStateService,
+)
 from colearn.api.schemas import (
+    AuthLoginPayload,
+    AuthRegisterPayload,
+    CancelTurnPayload,
+    MemoryFilePayload,
+    MemoryRefreshPayload,
+    MemoryUpdatePayload,
+    PingPayload,
     ProjectAnchorPayload,
     ProjectCreatePayload,
     ProjectSourcesPayload,
     ProjectUpdatePayload,
-    MemoryFilePayload,
-    MemoryUpdatePayload,
+    RegeneratePayload,
     SkillPayload,
     SkillTagPayload,
     SkillUpdatePayload,
     SessionCreatePayload,
     SessionUpdatePayload,
     SettingsCatalogPayload,
+    SettingsTestStartPayload,
     SettingsUiPayload,
     StartTurnPayload,
+    SubscribeTurnPayload,
 )
 from colearn.api.session_api import serialize_session_detail, serialize_session_summary, touch_session
 from colearn.app.learning_orchestrator import LearningOrchestrator
+from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
 from colearn.sessions.store import SessionStore
 from colearn.storage import JsonStateStore
@@ -49,109 +70,13 @@ orchestrator = LearningOrchestrator(
 app = FastAPI(title="CoLearn API", version="0.1.0")
 turn_streams: dict[str, list[dict[str, Any]]] = {}
 turn_index: dict[str, dict[str, Any]] = {}
-memory_docs: dict[str, str] = {"summary": "", "profile": ""}
-memory_updated_at: dict[str, str | None] = {"summary": None, "profile": None}
-skills_state: dict[str, Any] = {
-    "skills": {},
-    "tags": {},
-}
-settings_state: dict[str, Any] = {
-    "ui": {
-        "theme": "dark",
-        "language": "zh",
-    },
-    "catalog": {
-        "version": 1,
-        "services": {
-            "llm": {
-                "active_profile_id": "default-llm-profile",
-                "active_model_id": "default-llm-model",
-                "profiles": [
-                    {
-                        "id": "default-llm-profile",
-                        "name": "Default LLM",
-                        "binding": "openai",
-                        "base_url": "https://api.openai.com/v1",
-                        "api_key": "",
-                        "api_version": "",
-                        "extra_headers": {},
-                        "proxy": "",
-                        "models": [
-                            {
-                                "id": "default-llm-model",
-                                "name": "GPT-5",
-                                "model": "gpt-5",
-                                "context_window": "128000",
-                                "context_window_source": "default",
-                            }
-                        ],
-                    }
-                ],
-            },
-            "embedding": {
-                "active_profile_id": "default-embedding-profile",
-                "active_model_id": "default-embedding-model",
-                "profiles": [
-                    {
-                        "id": "default-embedding-profile",
-                        "name": "Default Embedding",
-                        "binding": "openai",
-                        "base_url": "https://api.openai.com/v1",
-                        "api_key": "",
-                        "api_version": "",
-                        "extra_headers": {},
-                        "proxy": "",
-                        "models": [
-                            {
-                                "id": "default-embedding-model",
-                                "name": "text-embedding-3-large",
-                                "model": "text-embedding-3-large",
-                                "dimension": "3072",
-                                "send_dimensions": True,
-                                "supported_dimensions": "256,1024,3072",
-                            }
-                        ],
-                    }
-                ],
-            },
-            "search": {
-                "active_profile_id": "default-search-profile",
-                "profiles": [
-                    {
-                        "id": "default-search-profile",
-                        "name": "Default Search",
-                        "provider": "brave",
-                        "binding": None,
-                        "base_url": "",
-                        "api_key": "",
-                        "api_version": "",
-                        "extra_headers": {},
-                        "proxy": "",
-                        "models": [],
-                    }
-                ],
-            },
-        },
-    },
-    "providers": {
-        "llm": [
-            {"value": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1"},
-        ],
-        "embedding": [
-            {
-                "value": "openai",
-                "label": "OpenAI",
-                "base_url": "https://api.openai.com/v1",
-                "default_dim": "3072",
-            },
-        ],
-        "search": [
-            {"value": "brave", "label": "Brave Search"},
-            {"value": "tavily", "label": "Tavily"},
-            {"value": "perplexity", "label": "Perplexity"},
-        ],
-    },
-}
+settings_service = SettingsStateService(JsonStateStore(state_store.root), Path.cwd() / ".env")
+memory_doc_service = MemoryDocStateService()
+skill_service = SkillStateService()
+auth_service = AuthStateService(JsonStateStore(state_store.root))
+knowledge_task_service = KnowledgeTaskService(state_root=state_store.root)
+settings_test_service = SettingsTestRunService()
+AUTH_COOKIE_NAME = "colearn_session"
 
 
 def _ws_event(
@@ -189,6 +114,48 @@ async def _send_ws_event(websocket: WebSocket, event: dict[str, Any]) -> None:
     await websocket.send_json(event)
 
 
+def _json_sse(events: list[dict[str, Any]]):
+    def generate():
+        for item in events:
+            event_name = str(item.get("event") or "message")
+            payload = json.dumps(item.get("data") or {}, ensure_ascii=False)
+            yield f"event: {event_name}\ndata: {payload}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _message_sse(events: list[dict[str, Any]]):
+    def generate():
+        for item in events:
+            payload = json.dumps(item, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _auth_status_payload(user: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "authenticated": bool(user),
+        "user_id": str((user or {}).get("user_id") or ""),
+        "username": str((user or {}).get("username") or ""),
+        "role": str((user or {}).get("role") or ""),
+        "is_admin": bool((user or {}).get("is_admin")),
+    }
+
+
+def _current_user(request: Request) -> dict[str, Any] | None:
+    return auth_service.user_for_session(request.cookies.get(AUTH_COOKIE_NAME))
+
+
+def _normalize_uploads(files: UploadFile | list[UploadFile] | None) -> list[UploadFile]:
+    if files is None:
+        return []
+    if isinstance(files, list):
+        return files
+    return [files]
+
+
 async def handle_ping(websocket: WebSocket) -> None:
     await websocket.send_json(
         {
@@ -202,9 +169,28 @@ async def handle_ping(websocket: WebSocket) -> None:
     )
 
 
-async def handle_subscribe_turn(websocket: WebSocket, payload: dict[str, Any]) -> None:
-    turn_id = str(payload.get("turn_id") or "").strip()
-    after_seq = int(payload.get("after_seq") or payload.get("seq") or 0)
+def _coerce_subscribe_turn_payload(payload: SubscribeTurnPayload | dict[str, Any]) -> SubscribeTurnPayload:
+    if isinstance(payload, SubscribeTurnPayload):
+        return payload
+    return SubscribeTurnPayload.model_validate(payload)
+
+
+def _coerce_cancel_turn_payload(payload: CancelTurnPayload | dict[str, Any]) -> CancelTurnPayload:
+    if isinstance(payload, CancelTurnPayload):
+        return payload
+    return CancelTurnPayload.model_validate(payload)
+
+
+def _coerce_ping_payload(payload: PingPayload | dict[str, Any] | None) -> PingPayload:
+    if isinstance(payload, PingPayload):
+        return payload
+    return PingPayload.model_validate(payload or {"type": "ping"})
+
+
+async def handle_subscribe_turn(websocket: WebSocket, payload: SubscribeTurnPayload | dict[str, Any]) -> None:
+    resolved = _coerce_subscribe_turn_payload(payload)
+    turn_id = str(resolved.turn_id or "").strip()
+    after_seq = int(resolved.after_seq or 0)
     events = list(turn_streams.get(turn_id) or [])
     if not events:
         record = turn_index.get(turn_id) or {}
@@ -223,8 +209,9 @@ async def handle_subscribe_turn(websocket: WebSocket, payload: dict[str, Any]) -
             await websocket.send_json(event)
 
 
-async def handle_cancel_turn(websocket: WebSocket, payload: dict[str, Any]) -> None:
-    turn_id = str(payload.get("turn_id") or "").strip()
+async def handle_cancel_turn(websocket: WebSocket, payload: CancelTurnPayload | dict[str, Any]) -> None:
+    resolved = _coerce_cancel_turn_payload(payload)
+    turn_id = str(resolved.turn_id or "").strip()
     record = turn_index.get(turn_id) or {}
     session_id = str(record.get("session_id") or "")
     if session_id:
@@ -261,7 +248,8 @@ async def _send_regenerate_rejected(websocket: WebSocket, session_id: str) -> No
     )
 
 
-async def _handle_ping_message(websocket: WebSocket, payload: dict[str, Any]) -> None:
+async def _handle_ping_message(websocket: WebSocket, payload: PingPayload | dict[str, Any] | None) -> None:
+    _ = _coerce_ping_payload(payload)
     await handle_ping(websocket)
 
 
@@ -305,10 +293,14 @@ def health() -> dict[str, Any]:
 
 @app.get("/api/v1/system/status")
 def system_status() -> dict[str, Any]:
+    catalog = settings_service.catalog()
+    services = dict(catalog.get("services") or {})
+    llm_profile, llm_model = settings_service._resolve_active_selection(services.get("llm"))
+    embedding_profile, embedding_model = settings_service._resolve_active_selection(services.get("embedding"))
     return {
         "backend": {"status": "running", "timestamp": str(int(time.time()))},
-        "llm": {"status": "ready", "model": "gpt-5"},
-        "embeddings": {"status": "ready", "model": "text-embedding-3-large"},
+        "llm": {"status": "ready", "model": str(llm_model.get("model") or "")},
+        "embeddings": {"status": "ready", "model": str(embedding_model.get("model") or "")},
         "search": {"status": "ready", "provider": "brave"},
         "services": {
             "api": "ready",
@@ -321,61 +313,55 @@ def system_status() -> dict[str, Any]:
 
 @app.get("/api/v1/settings")
 def get_settings() -> dict[str, Any]:
-    return {
-        "ui": dict(settings_state["ui"]),
-        "catalog": settings_state["catalog"],
-        "providers": settings_state["providers"],
-    }
+    return settings_service.settings()
 
 
 @app.get("/api/v1/settings/catalog")
 def get_settings_catalog() -> dict[str, Any]:
-    return {"catalog": settings_state["catalog"]}
+    return {"catalog": settings_service.catalog()}
 
 
 @app.get("/api/v1/settings/providers")
 def get_settings_providers() -> dict[str, Any]:
-    return {"providers": settings_state["providers"]}
+    return {"providers": settings_service.providers()}
 
 
 @app.get("/api/v1/settings/llm-options")
 def get_llm_options() -> dict[str, Any]:
+    catalog = settings_service.catalog()
+    llm = dict((catalog.get("services") or {}).get("llm") or {})
+    profiles = list(llm.get("profiles") or [])
     active = {
-        "profile_id": "default",
-        "model_id": "gpt-5",
+        "profile_id": str(llm.get("active_profile_id") or ""),
+        "model_id": str(llm.get("active_model_id") or ""),
     }
-    return {
-        "active": active,
-        "options": [
-            {
-                "profile_id": "default",
-                "profile_label": "Default",
-                "model_id": "gpt-5",
-                "model_label": "GPT-5",
-                "provider": "openai",
-                "is_default": True,
-            }
-        ],
-    }
+    options: list[dict[str, Any]] = []
+    for profile in profiles:
+        for model in list(profile.get("models") or []):
+            options.append(
+                {
+                    "profile_id": str(profile.get("id") or ""),
+                    "profile_label": str(profile.get("name") or ""),
+                    "model_id": str(model.get("id") or ""),
+                    "model_label": str(model.get("name") or model.get("model") or ""),
+                    "provider": str(profile.get("binding") or "openai"),
+                    "is_default": (
+                        str(profile.get("id") or "") == active["profile_id"]
+                        and str(model.get("id") or "") == active["model_id"]
+                    ),
+                }
+            )
+    return {"active": active, "options": options}
 
 
 @app.get("/api/v1/skills/list")
 def list_skills() -> dict[str, Any]:
-    skills = []
-    for name, record in skills_state["skills"].items():
-        skills.append(
-            {
-                "name": name,
-                "description": str(record.get("description") or ""),
-                "tags": list(record.get("tags") or []),
-            }
-        )
-    return {"skills": skills}
+    return {"skills": skill_service.list_skills()}
 
 
 @app.get("/api/v1/skills/{name}")
 def get_skill(name: str) -> dict[str, Any]:
-    record = dict(skills_state["skills"].get(name) or {})
+    record = skill_service.get_skill(name)
     if not record:
         raise HTTPException(status_code=404, detail="Skill not found")
     return {
@@ -388,11 +374,11 @@ def get_skill(name: str) -> dict[str, Any]:
 
 @app.post("/api/v1/skills/create")
 def create_skill(payload: SkillPayload) -> dict[str, Any]:
-    skills_state["skills"][payload.name] = {
+    skill_service.save_skill(payload.name, {
         "description": payload.description,
         "content": payload.content,
         "tags": list(payload.tags),
-    }
+    })
     return {
         "name": payload.name,
         "description": payload.description,
@@ -403,7 +389,7 @@ def create_skill(payload: SkillPayload) -> dict[str, Any]:
 
 @app.put("/api/v1/skills/{name}")
 def update_skill(name: str, payload: SkillUpdatePayload) -> dict[str, Any]:
-    record = dict(skills_state["skills"].get(name) or {})
+    record = skill_service.get_skill(name)
     if not record:
         raise HTTPException(status_code=404, detail="Skill not found")
     new_name = payload.rename_to or name
@@ -411,70 +397,118 @@ def update_skill(name: str, payload: SkillUpdatePayload) -> dict[str, Any]:
     record["content"] = payload.content if payload.content is not None else record.get("content", "")
     record["tags"] = list(payload.tags) if payload.tags else list(record.get("tags") or [])
     if new_name != name:
-        del skills_state["skills"][name]
-    skills_state["skills"][new_name] = record
+        skill_service.delete_skill(name)
+    skill_service.save_skill(new_name, record)
     return {"name": new_name, **record}
 
 
 @app.delete("/api/v1/skills/{name}")
 def delete_skill(name: str) -> dict[str, Any]:
-    skills_state["skills"].pop(name, None)
+    skill_service.delete_skill(name)
     return {"deleted": True}
 
 
 @app.get("/api/v1/skills/tags/list")
 def list_skill_tags() -> dict[str, Any]:
-    return {"tags": sorted(skills_state["tags"].keys())}
+    return {"tags": skill_service.list_tags()}
 
 
 @app.post("/api/v1/skills/tags/create")
 def create_skill_tag(payload: SkillTagPayload) -> dict[str, Any]:
-    skills_state["tags"][payload.name] = payload.name
+    skill_service.save_tag(payload.name)
     return {"name": payload.name}
 
 
 @app.put("/api/v1/skills/tags/{old_name}")
 def rename_skill_tag(old_name: str, payload: SkillTagPayload) -> dict[str, Any]:
     new_name = payload.rename_to or payload.name or old_name
-    if old_name in skills_state["tags"]:
-      skills_state["tags"].pop(old_name, None)
-    skills_state["tags"][new_name] = new_name
+    skill_service.rename_tag(old_name, new_name)
     return {"name": new_name}
 
 
 @app.delete("/api/v1/skills/tags/{name}")
 def delete_skill_tag(name: str) -> dict[str, Any]:
-    skills_state["tags"].pop(name, None)
+    skill_service.delete_tag(name)
     return {"deleted": True}
 
 
 @app.put("/api/v1/settings/ui")
 def update_settings_ui(payload: SettingsUiPayload) -> dict[str, Any]:
-    ui = settings_state["ui"]
-    ui["theme"] = str(payload.theme or ui["theme"])
-    ui["language"] = str(payload.language or ui["language"])
-    return {"ui": dict(ui)}
+    return {"ui": settings_service.update_ui(theme=payload.theme, language=payload.language)}
 
 
 @app.put("/api/v1/settings/catalog")
 def update_settings_catalog(payload: SettingsCatalogPayload) -> dict[str, Any]:
     catalog = payload.catalog
     if isinstance(catalog, dict):
-        settings_state["catalog"] = catalog
-    return {"catalog": settings_state["catalog"]}
+        return {"catalog": settings_service.update_catalog(catalog)}
+    return {"catalog": settings_service.catalog()}
 
 
 @app.post("/api/v1/settings/apply")
 def apply_settings_catalog(payload: SettingsCatalogPayload) -> dict[str, Any]:
     catalog = payload.catalog
-    if isinstance(catalog, dict):
-        settings_state["catalog"] = catalog
-    return {"catalog": settings_state["catalog"], "applied": True}
+    return {"catalog": settings_service.apply_catalog(catalog if isinstance(catalog, dict) else None), "applied": True}
 
 
 @app.post("/api/v1/settings/tests/{service}/start")
-def start_settings_test(service: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"run_id": f"{service}-dry-run", "detail": "", "accepted": True}
+def start_settings_test(service: str, payload: SettingsTestStartPayload) -> dict[str, Any]:
+    run = settings_test_service.create_run(service, payload.catalog if isinstance(payload.catalog, dict) else {})
+    return {"run_id": run["run_id"], "detail": "", "accepted": True}
+
+
+@app.get("/api/v1/settings/tests/{service}/{run_id}/events")
+def settings_test_events(service: str, run_id: str) -> StreamingResponse:
+    run = settings_test_service.get_run(run_id)
+    if not run or run.get("service") != service:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    return _message_sse(list(run.get("events") or []))
+
+
+@app.get("/api/v1/auth/status")
+def auth_status(request: Request) -> dict[str, Any]:
+    return _auth_status_payload(_current_user(request))
+
+
+@app.post("/api/v1/auth/login")
+def auth_login(payload: AuthLoginPayload, response: Response) -> dict[str, Any]:
+    user = auth_service.authenticate(payload.username, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = auth_service.create_session(str(user.get("username") or ""))
+    response.set_cookie(AUTH_COOKIE_NAME, token, httponly=True, samesite="lax", path="/")
+    return {"ok": True, "user": _auth_status_payload(user)}
+
+
+@app.post("/api/v1/auth/register")
+def auth_register(payload: AuthRegisterPayload, response: Response) -> dict[str, Any]:
+    try:
+        user = auth_service.register(payload.username, payload.password)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    token = auth_service.create_session(str(user.get("username") or ""))
+    response.set_cookie(AUTH_COOKIE_NAME, token, httponly=True, samesite="lax", path="/")
+    return {
+        "ok": True,
+        "role": user["role"],
+        "is_first_user": bool(user.get("is_first_user")),
+    }
+
+
+@app.get("/api/v1/auth/is_first_user")
+def auth_is_first_user() -> dict[str, Any]:
+    return {"is_first_user": auth_service.is_first_user()}
+
+
+@app.post("/api/v1/auth/logout")
+def auth_logout(request: Request, response: Response) -> dict[str, Any]:
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if token:
+        auth_service.delete_session(token)
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return {"ok": True}
 
 
 @app.get("/api/v1/knowledge/list")
@@ -524,30 +558,75 @@ def list_supported_file_types() -> dict[str, Any]:
 
 @app.get("/api/v1/knowledge/{name}/files")
 def list_knowledge_files(name: str) -> dict[str, Any]:
-    project = next((item for item in project_service.list_projects() if item.title == name or item.project_id == name), None)
-    if project is None:
-        return {"files": []}
-    files = []
-    for source_ref in list(project.source_refs or []):
-        files.append(
-            {
-                "name": source_ref.split("\\")[-1].split("/")[-1],
-                "size": 0,
-                "modified": 0,
-                "mime_type": None,
-            }
-        )
-    return {"files": files}
+    return {"files": knowledge_task_service.list_files(name)}
+
+
+@app.get("/api/v1/knowledge/{name}/files/{file_path:path}")
+def get_knowledge_file(name: str, file_path: str) -> FileResponse:
+    target = knowledge_task_service.resolve_file(name, file_path)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Knowledge file not found")
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(target, media_type=media_type or "application/octet-stream", filename=target.name)
 
 
 @app.post("/api/v1/knowledge/create")
-async def create_knowledge_base() -> dict[str, Any]:
-    return {"task_id": str(uuid4()), "message": "Knowledge base created"}
+async def create_knowledge_base(
+    name: str = Form(...),
+    rag_provider: str = Form("lightrag"),
+    files: UploadFile | list[UploadFile] | None = File(None),
+) -> dict[str, Any]:
+    uploads: list[tuple[str, bytes, str | None]] = []
+    for item in _normalize_uploads(files):
+        uploads.append((item.filename or "upload.bin", await item.read(), item.content_type))
+    saved = knowledge_task_service.save_files(name, uploads)
+    project = project_service.get_project(name) or project_service.create_project(name, title=name)
+    project.title = name
+    project.source_refs = [str(file["path"]) for file in saved]
+    project.retrieval_profile = {
+        **dict(project.retrieval_profile or {}),
+        "provider": rag_provider,
+        "last_retrieval_status": "ready",
+    }
+    project_service.save_project(project)
+    task = knowledge_task_service.create_task(
+        kb_name=name,
+        kind="create",
+        message="Knowledge base created",
+        files=saved,
+        should_fail=False,
+    )
+    return {"task_id": task["task_id"], "message": task["message"]}
 
 
 @app.post("/api/v1/knowledge/{name}/upload")
-async def upload_knowledge_files(name: str) -> dict[str, Any]:
-    return {"task_id": str(uuid4()), "message": f"Uploaded files to {name}"}
+async def upload_knowledge_files(
+    name: str,
+    rag_provider: str = Form(""),
+    files: UploadFile | list[UploadFile] | None = File(None),
+) -> dict[str, Any]:
+    uploads: list[tuple[str, bytes, str | None]] = []
+    for item in _normalize_uploads(files):
+        uploads.append((item.filename or "upload.bin", await item.read(), item.content_type))
+    saved = knowledge_task_service.save_files(name, uploads)
+    project = project_service.get_project(name) or project_service.create_project(name, title=name)
+    existing = {str(path) for path in project.source_refs}
+    existing.update(str(file["path"]) for file in saved)
+    project.source_refs = sorted(existing)
+    project.retrieval_profile = {
+        **dict(project.retrieval_profile or {}),
+        "provider": rag_provider or str((project.retrieval_profile or {}).get("provider") or "lightrag"),
+        "last_retrieval_status": "ready",
+    }
+    project_service.save_project(project)
+    task = knowledge_task_service.create_task(
+        kb_name=name,
+        kind="upload",
+        message=f"Uploaded files to {name}",
+        files=saved,
+        should_fail=False,
+    )
+    return {"task_id": task["task_id"], "message": task["message"]}
 
 
 @app.put("/api/v1/knowledge/default/{name}")
@@ -557,7 +636,30 @@ def set_default_knowledge_base(name: str) -> dict[str, Any]:
 
 @app.post("/api/v1/knowledge/{name}/reindex")
 def reindex_knowledge_base(name: str) -> dict[str, Any]:
-    return {"task_id": str(uuid4()), "message": f"Reindex started for {name}"}
+    files = knowledge_task_service.list_files(name)
+    if not files:
+        task = knowledge_task_service.create_task(
+            kb_name=name,
+            kind="reindex",
+            message=f"Reindex failed for {name}",
+            files=[],
+            should_fail=True,
+        )
+        return {"task_id": task["task_id"], "message": task["message"]}
+    project = project_service.get_project(name) or project_service.create_project(name, title=name)
+    project.retrieval_profile = {
+        **dict(project.retrieval_profile or {}),
+        "last_retrieval_status": "ready",
+    }
+    project_service.save_project(project)
+    task = knowledge_task_service.create_task(
+        kb_name=name,
+        kind="reindex",
+        message=f"Reindex started for {name}",
+        files=files,
+        should_fail=False,
+    )
+    return {"task_id": task["task_id"], "message": task["message"]}
 
 
 @app.delete("/api/v1/knowledge/{name}")
@@ -565,14 +667,38 @@ def delete_knowledge_base(name: str) -> dict[str, Any]:
     return {"deleted": True, "name": name}
 
 
+@app.get("/api/v1/knowledge/tasks/{task_id}/stream")
+def knowledge_task_stream(task_id: str) -> StreamingResponse:
+    task = knowledge_task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Knowledge task not found")
+    return _json_sse(knowledge_task_service.stream_events(task_id))
+
+
+@app.websocket("/api/v1/knowledge/{name}/progress/ws")
+async def knowledge_progress_ws(websocket: WebSocket, name: str, task_id: str | None = None) -> None:
+    await websocket.accept()
+    task = knowledge_task_service.latest_for_kb(name, task_id=task_id)
+    if task is None:
+        await websocket.send_json(
+            {
+                "task_id": task_id or "",
+                "stage": "idle",
+                "message": "",
+                "current": 0,
+                "total": 0,
+                "percent": 0,
+                "progress_percent": 0,
+            }
+        )
+    else:
+        await websocket.send_json(task.get("progress") or {})
+    await websocket.close()
+
+
 @app.get("/api/v1/memory")
 def get_memory() -> dict[str, Any]:
-    return {
-        "summary": memory_docs["summary"],
-        "profile": memory_docs["profile"],
-        "summary_updated_at": memory_updated_at["summary"],
-        "profile_updated_at": memory_updated_at["profile"],
-    }
+    return memory_doc_service.snapshot()
 
 
 @app.get("/api/v1/memory/projection")
@@ -607,31 +733,25 @@ def memory_projection() -> dict[str, Any]:
 @app.put("/api/v1/memory")
 def update_memory(payload: MemoryUpdatePayload) -> dict[str, Any]:
     file_name = payload.file
-    memory_docs[file_name] = payload.content
-    memory_updated_at[file_name] = str(int(time.time()))
-    return get_memory()
+    return memory_doc_service.update(file_name, payload.content)
 
 
 @app.post("/api/v1/memory/refresh")
-def refresh_memory(payload: dict[str, Any]) -> dict[str, Any]:
+def refresh_memory(payload: MemoryRefreshPayload | None = None) -> dict[str, Any]:
+    _ = payload
     latest_review = ""
     if session_store.list_sessions():
         latest_session = session_store.list_sessions()[-1]
         latest_review = str((latest_session.pending_review or {}).get("summary") or "")
     changed = False
-    if latest_review and latest_review != memory_docs["summary"]:
-        memory_docs["summary"] = latest_review
-        memory_updated_at["summary"] = str(int(time.time()))
-        changed = True
+    changed = memory_doc_service.refresh_summary(latest_review)
     return {**get_memory(), "changed": changed}
 
 
 @app.post("/api/v1/memory/clear")
 def clear_memory(payload: MemoryFilePayload) -> dict[str, Any]:
     file_name = payload.file
-    memory_docs[file_name] = ""
-    memory_updated_at[file_name] = str(int(time.time()))
-    return get_memory()
+    return memory_doc_service.update(file_name, "")
 
 
 @app.get("/api/v1/sessions")
@@ -841,13 +961,57 @@ async def unified_ws(websocket: WebSocket) -> None:
         while True:
             raw = await websocket.receive_text()
             payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "source": "server",
+                        "stage": "",
+                        "content": "WebSocket payload must be a JSON object.",
+                        "metadata": {"turn_terminal": True, "status": "failed"},
+                        "timestamp": 0,
+                    }
+                )
+                continue
             msg_type = str(payload.get("type") or "")
-            handler = WS_HANDLERS.get(msg_type)
-            if handler is not None:
-                await handler(websocket, payload)
+            try:
+                if msg_type == "ping":
+                    await _handle_ping_message(websocket, PingPayload.model_validate(payload))
+                    continue
+                if msg_type in {"subscribe_turn", "resume_from"}:
+                    await handle_subscribe_turn(websocket, SubscribeTurnPayload.model_validate(payload))
+                    continue
+                if msg_type == "cancel_turn":
+                    await handle_cancel_turn(websocket, CancelTurnPayload.model_validate(payload))
+                    continue
+            except Exception as exc:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "source": "server",
+                        "stage": "",
+                        "content": str(exc),
+                        "metadata": {"turn_terminal": True, "status": "failed"},
+                        "timestamp": 0,
+                    }
+                )
                 continue
             if msg_type == "regenerate":
-                session_id = str(payload.get("session_id") or "").strip()
+                try:
+                    regenerate = RegeneratePayload.model_validate(payload)
+                except Exception as exc:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "source": "server",
+                            "stage": "",
+                            "content": str(exc),
+                            "metadata": {"turn_terminal": True, "status": "failed"},
+                            "timestamp": 0,
+                        }
+                    )
+                    continue
+                session_id = str(regenerate.session_id or "").strip()
                 session = session_store.get_session(session_id)
                 if session is None or not session.messages:
                     await _send_regenerate_rejected(websocket, session_id)
@@ -880,7 +1044,20 @@ async def unified_ws(websocket: WebSocket) -> None:
                     }
                 )
                 continue
-            message = StartTurnPayload.model_validate(payload)
+            try:
+                message = StartTurnPayload.model_validate(payload)
+            except Exception as exc:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "source": "server",
+                        "stage": "",
+                        "content": str(exc),
+                        "metadata": {"turn_terminal": True, "status": "failed"},
+                        "timestamp": 0,
+                    }
+                )
+                continue
             session_id = message.session_id or str(uuid4())
             project_id = message.project_id or "default-project"
             project_title = message.project_title or project_id
@@ -951,12 +1128,14 @@ async def unified_ws(websocket: WebSocket) -> None:
             await websocket.send_json(stage_event)
             seq += 1
             try:
-                result = orchestrator.run_turn(
-                    session_id=session_id,
-                    project_id=project_id,
-                    user_message=message.content,
-                    language=message.language,
-                    attachments=message.attachments,
+                result = await to_thread.run_sync(
+                    lambda: orchestrator.run_turn(
+                        session_id=session_id,
+                        project_id=project_id,
+                        user_message=message.content,
+                        language=message.language,
+                        attachments=message.attachments,
+                    )
                 )
             except Exception as exc:
                 session = session_store.get_session(session_id)
@@ -1049,7 +1228,7 @@ async def unified_ws(websocket: WebSocket) -> None:
         return
 
 
-def _serialize_project(project) -> dict[str, Any]:
+def _serialize_project(project: LearningProject) -> dict[str, Any]:
     source_refs = list(project.source_refs or [])
     memory_refs = list(project.memory_refs or [])
     board_facts = dict(project.board_facts or {})

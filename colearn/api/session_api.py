@@ -74,7 +74,7 @@ def serialize_session_detail(
 
 def touch_session(session: LearningSession) -> LearningSession:
     now = int(time.time())
-    if not hasattr(session, "created_at"):
-        setattr(session, "created_at", now)
-    setattr(session, "updated_at", now)
+    if not session.created_at:
+        session.created_at = now
+    session.updated_at = now
     return session

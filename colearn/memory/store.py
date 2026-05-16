@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from colearn.storage import JsonStateStore
+from colearn.storage.records import memory_event_from_record, memory_event_to_record
 
 
 @dataclass
@@ -29,25 +30,14 @@ class EventMemoryStore:
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            event = MemoryEvent(
-                event_id=str(item.get("event_id") or ""),
-                kind=str(item.get("kind") or "event"),
-                payload=dict(item.get("payload") or {}),
-            )
+            event = memory_event_from_record(item)
             if event.event_id:
                 self._events.append(event)
 
     def _dump(self) -> None:
         self._state_store.write_json(
             "memory.json",
-            [
-                {
-                    "event_id": event.event_id,
-                    "kind": event.kind,
-                    "payload": event.payload,
-                }
-                for event in self._events
-            ],
+            [memory_event_to_record(event) for event in self._events],
         )
 
     def append(self, event: MemoryEvent) -> None:
@@ -110,4 +100,3 @@ class EventMemoryStore:
             if len(deduped) >= limit:
                 break
         return deduped
-

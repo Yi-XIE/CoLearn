@@ -1,258 +1,160 @@
 # CoLearn 顶层组装路径
 
-日期：2026-05-16  
-归属架构层：02-Architecture / 顶层组装路径
+## 文档目的
 
-替代关系：
-- 本文档替代 `D:\CoLearn-release\CoLearn-docs\02-Architecture\CoLearn-组装执行路径.md`
-- 学习状态细则以 [CoLearn-LearningState-协议.md](D:/Colearn-nightly/CoLearn-docs/02-Architecture/CoLearn-LearningState-%E5%8D%8F%E8%AE%AE.md) 为准
+这份文档只描述当前后端的顶层组装关系、主链边界和工具定位，不记录阶段性完成度。它对应的是 `colearn/api/app.py`、`colearn/app/learning_orchestrator.py`、`colearn/runtime/turn_executor.py` 以及相关状态、检索、压缩模块的当前实现。
 
-## 文档角色
+## 一次学习回合的主链
 
-这份文档只回答一件事：
+当前单轮学习回合的组装顺序如下：
 
-**CoLearn 的顶层主链应该怎么收口。**
+1. `FastAPI / WebSocket` 接收请求。
+2. `LearningOrchestrator.run_turn()` 负责回合级装配。
+3. `SourceReadinessPreflight` 同步 source refs，并生成 source readiness 概览。
+4. `state_hooks` 从 session / project 重建 `BoardFacts`，再计算 `TurnPolicy` 和 `LearningStateSnapshot`。
+5. `build_learning_turn_request()` 把运行时上下文压成 `LearningTurnRequest`。
+6. `RuntimeCompressionBridge` 对请求做运行时压缩。
+7. `NanobotTurnExecutor` 执行主回合，并在 bot registry 中按需挂载 `memory` 与 `lightrag` 工具。
+8. `after_turn_payload()` 生成 `board_after`、`learning_events`、`board_patch`、`memory_events`。
+9. `normalize_learning_turn_result()` 产出统一的 `LearningTurnResult`。
+10. orchestrator 同步写回 session / project，并异步安排 product compression。
+11. `apply_background_result()` 在后台结果返回后，仅补充 review / continuation / product compression 状态。
 
-它不是实现细节文档，也不负责列施工步骤。施工顺序看
-[CoLearn-学习循环实施手册.md](D:/Colearn-nightly/CoLearn-docs/02-Architecture/CoLearn-%E5%AD%A6%E4%B9%A0%E5%BE%AA%E7%8E%AF%E5%AE%9E%E6%96%BD%E6%89%8B%E5%86%8C.md)。
+## 入口层
 
-## 顶层结论
+### HTTP
 
-CoLearn 的主链不该是传统流水线长鞭。
+当前保留的主要 HTTP 路由包括：
 
-顶层只保留三步：
+- `/api/v1/sessions`
+- `/api/v1/projects`
+- `/api/v1/knowledge`
+- `/api/v1/memory`
+- `/api/v1/settings`
+- `/api/v1/auth`
 
-`装配核心上下文 -> 丢给 nanobot 跑 ReAct 循环 -> 把结果流式返回`
+这些接口主要负责资源管理、配置读写、知识库任务流、以及会话与项目的列表详情。
 
-其他动作全部归到下面两类：
+### WebSocket
 
-1. 折叠进装配阶段的轻量动作  
-   例如会话读取、Learning Board 读取、运行时截断。
-2. 从主路剥离出去的异步动作  
-   例如学习摘要、长期记忆沉淀、复盘整理。
+实时学习回合继续走 `/api/v1/ws`。当前支持的消息类型有：
 
-## 核心架构
+- `ping`
+- `subscribe_turn`
+- `resume_from`
+- `cancel_turn`
+- `regenerate`
+- `message`
+- `start_turn`
 
-CoLearn 的目标架构是：
+WebSocket 事件流保持同一路径输出，当前会发送 `session`、`stage_start`、`content`、`done` 以及错误事件；如果 executor 返回真实 `stream_events`，API 层会原样补齐公共元数据后转发，不再合成一套假的 tool / thinking 事件序列。
 
-1. **产品壳**
-   - 前端和 API 继续暴露 CoLearn 语义
-   - `chat / knowledge / memory / sessions / settings` 仍然是产品入口
-2. **Learning Board**
-   - 持久化学习看板
-   - 记录当前状态、主目标、下一动作、已完成、未完成、阻塞项
-3. **nanobot runtime**
-   - 唯一执行 loop
-   - 真正跑的是一个极简 ReAct 循环
-4. **工具箱**
-   - Memory tool
-   - LightRAG tool
-   - 其他后续学习工具
-5. **压缩层**
-   - runtime compression
-   - product compression
+## Orchestrator 的职责
 
-一句话概括：
+`LearningOrchestrator` 是当前后端的主装配层，负责：
 
-**CoLearn 用 Learning Board 约束回合边界，用 nanobot 跑唯一 ReAct 循环，用工具箱按需取资料。**
+- 解析或创建 session / project
+- 执行 source readiness preflight
+- 构建 Board / Policy / Snapshot
+- 构建 `LearningTurnRequest`
+- 调用 runtime compression 和 executor
+- 把学习结果转成 session / project / memory 的持久化状态
+- 安排后台 product compression
 
-这里的学习闭环口径，与 [CoLearn-LearningState-协议.md](D:/Colearn-nightly/CoLearn-docs/02-Architecture/CoLearn-LearningState-%E5%8D%8F%E8%AE%AE.md) 保持一致：
+它不直接承担模型推理细节，也不直接承担 LightRAG HTTP 调用；这些能力分别下沉到 executor 和 retrieval adapter。
 
-- `Learning Board` 只保存事实
-- `policy()` 只产出当轮投影
-- `after_turn()` 只提取事件并回写事实
+## Learning State 的位置
 
-## 主链重定义
+当前学习状态是三层结构：
 
-旧式表达：
+1. `BoardFacts`：跨回合持久事实。
+2. `TurnPolicy`：每轮即时策略投影。
+3. `LearningEvent`：回合后对 Board 的增量更新来源。
 
-`project -> source -> anchor -> retrieval bundle -> turn -> review -> memory`
+运行时的事实源以 session 为主，project 上的 `board_facts` 是镜像副本，用于项目列表展示和跨 session 恢复。
 
-不再作为顶层主链表达。
+## Source Readiness 与检索
 
-新的顶层表达只有：
+当前检索链路分成两部分：
 
-### 1. 装配核心上下文
+### preflight
 
-只装这一轮必须知道的最小信息：
+`SourceReadinessPreflight` 会做两件事：
 
-- `project`
-- `session`
-- `Learning Board`
-- 最近必要 history
-- continuation
-- 轻量 runtime compression 结果
-- policy 边界
+- 调用 `RetrievalService.sync_source_refs()` 同步 source refs
+- 调用 `KnowledgeWorkspaceService.build_project_source_profile()` 生成 readiness 概览
 
-这里的重点是：
+其结果会同时进入：
 
-- **不默认前置检索**
-- **不默认前置 LightRAG**
-- **不默认前置产品压缩**
+- `project.retrieval_profile`
+- `LearningTurnRequest.metadata["source_profile"]`
 
-### 2. nanobot 跑 ReAct 循环
+### 实际知识检索
 
-nanobot 在这一轮里自己判断：
+真正的文本检索不是在 orchestrator 前置完成，而是在 `NanobotTurnExecutor` 安装的 `lightrag` tool 中按需触发。也就是说：
 
-- 直接回答够不够
-- 要不要查 Memory
-- 要不要调 LightRAG
-- 要不要继续追问用户
+- preflight 负责告诉模型“知识源现在准没准备好”
+- 实际拉取知识文本由模型在回合中决定是否调用 tool
 
-所以：
+这是当前明确采用的 tool-mode 设计，不是每轮固定前置 retrieval。
 
-- `LightRAG` 不是每轮固定前置步骤
-- `Memory` 也不是每轮固定前置步骤
-- 它们都只是工具
+## Memory 的位置
 
-### 3. 结果流式返回
+Memory 也保持工具模式：
 
-用户感知到的主路只应该是：
+- `memory` tool 优先从 `EventMemoryStore` 搜索事件
+- 如果搜索不到，再回退到 request 附带的 `memory_references`
 
-- 输入发出
-- 回答开始流出
-- 回合结束
+会话结束后，`after_turn_payload()` 会把关键结果落成 `memory_events`，再由 orchestrator 追加到 `EventMemoryStore`。
 
-同步主路只做必要写回：
+## 压缩链路
 
-- session 基本结果
-- board 最小 patch
+当前压缩分两层：
 
-重量级整理动作留到后台。
+- `RuntimeCompressionBridge`：回合执行前压缩 prompt / request
+- `ProductCompressionBridge`：回合完成后生成 review summary 和 continuation prompt
 
-## LightRAG 的定位修正
+后台压缩不会再次整对象覆盖 session / project。当前实现改成：
 
-这是本轮最关键的架构纠偏。
+- 后台线程只计算 `ProductCompressionResult`
+- 结果统一回到 `apply_background_result()`
+- 仅 patch `pending_review`、`continuation_prompt`、`last_turn_result.product_compression`、`project.latest_review`
 
-LightRAG 不再定义为：
+这样可以避免后台线程和主链并发整对象写回。
 
-- 每轮必经的前置检索层
+## 持久化边界
 
-LightRAG 应定义为：
+当前仍然使用 JSON state store，而不是数据库。重要边界如下：
 
-- **nanobot 工具箱里的一个 retrieval tool**
+- `SessionStore`、`LearningProjectService`、`EventMemoryStore` 都通过 `colearn.storage.records` 做统一编解码
+- `JsonStateStore` 对同一路径写入使用共享 `RLock`
+- 写入采用原子替换，降低文件损坏风险
 
-也就是：
+这套方案已经解决了之前 session / project / memory 三套序列化风格不一致的问题，但仍然属于轻量文件存储方案，不包含 schema migration 机制。
 
-```text
-用户提问
-  -> nanobot 读取当前上下文
-  -> 判断是否需要外部资料
-  -> 需要时主动调用 LightRAG
-  -> 拿到 observation 后继续 ReAct
-```
+## Knowledge 模块的当前位置
 
-这意味着：
+当前知识库能力分成两层：
 
-1. 没有检索需求的轮次，不应该为 LightRAG 付额外延迟
-2. 有检索需求的轮次，由 agent 在循环内自主决定调用时机
-3. LightRAG 对 CoLearn 来说是能力，不是主路关卡
+1. API 层的 knowledge task / file 服务
+   - 支持创建知识库、上传文件、列文件、查看文件、触发 reindex、查看 task stream
+2. `KnowledgeWorkspaceService`
+   - 负责 source readiness 计算与轻量 source library 管理
 
-## Policy 的定位修正
+需要注意：
 
-`policy()` 不是什么重规划器。
+- `KnowledgeWorkspaceService` 仍是内存态服务，没有单独持久化
+- 它当前最重要的职责是支撑 source readiness，而不是承担完整知识库主存储
 
-它只是：
+## 当前明确保留的技术债
 
-**基于 Learning Board 的轻量规则拦截器。**
+以下内容在当前代码中仍然保留，但已知不是这一轮要继续扩修的范围：
 
-职责只有三件事：
+- `LearningTurnRequest.retrieval_bundle` 仍在 contract 中，尚未移出到纯运行时上下文
+- `board_version` 当前是 stale write 保护与冲突跳过，不是严格单步递增写入
+- `BoardFacts` 在运行时是 dataclass，在持久化层仍以 `dict` 形式保存
+- knowledge workspace 本身没有独立持久化
 
-1. 读取当前 Learning Board
-2. 决定这一轮有哪些边界
-3. 给 nanobot 的 ReAct 循环加约束
+## 回归入口
 
-例子：
-
-- 当前处于 `REVIEW`，禁止直接给答案，必须反问
-- 当前 `ANCHORING` 未完成，禁止进入深学习解释
-- 当前资料未就绪，允许先澄清，不允许假装引用资料
-
-所以 `policy()` 管的是：
-
-- 权限
-- 约束
-- 边界
-
-它不负责：
-
-- 重规划整条学习路径
-- 决定每一步要不要查工具
-- 替代 nanobot 做推理
-
-它产出的不是长期状态真相，而是当轮 `turn_mode`、边界、工具权限和回复契约。
-
-## Compression 分层
-
-Compression 必须分成两层。
-
-### runtime compression
-
-这是运行时压缩。
-
-目标：
-
-- 防止 prompt 超长
-- 防止窗口爆掉
-- 保证这一轮能发给模型
-
-它属于装配阶段的一部分，而且必须很快。
-
-它处理的对象包括：
-
-- history
-- retrieval 内容
-- tool result
-- 长文档片段
-- session summary
-
-它只管容量，不管学习流程。
-
-### product compression
-
-这是产品压缩。
-
-目标：
-
-- 生成学习摘要
-- 生成 continuation
-- 生成 review summary
-- 沉淀长期记忆
-
-它不应该阻塞用户这一轮回复。
-
-它必须放到：
-
-- 后台 worker
-- 或者回合结束后的异步任务
-
-它只管产品表达，不管 token 预算。
-
-## Learning Board 与 ReAct 的关系
-
-固定关系如下：
-
-```text
-Learning Board
-  -> policy() 读取边界
-  -> 装配最小上下文
-  -> nanobot 跑单轮 ReAct
-  -> after_turn() 提取 learning events
-  -> reducer / patcher 最小写回 board
-  -> 后台异步做 review / memory / summary
-```
-
-这里没有第二条 agent loop。
-
-Learning Board 是外部看板，nanobot 是唯一执行 loop。
-
-## 成功判断
-
-这条顶层路径成立，必须同时满足：
-
-1. 顶层主链被收成三步，而不是串行长鞭
-2. nanobot 是唯一执行 loop，并且跑 ReAct
-3. LightRAG 是工具，不是每轮前置关卡
-4. runtime compression 在主路里，但足够轻
-5. product compression 在主路外异步执行
-6. Learning Board 负责边界和下一动作，不负责代替 agent 推理
+当前后端继续以 `python -m pytest tests` 作为主回归入口。文档对齐后，如果接口或状态协议继续演化，应优先更新本目录中的协议与装配文档，再补代码说明。

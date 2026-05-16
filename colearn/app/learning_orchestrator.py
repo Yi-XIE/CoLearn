@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Thread
 from time import time
+from typing import Any, Callable
 from uuid import uuid4
 
-from colearn.compression import ProductCompressionBridge, RuntimeCompressionBridge
+from colearn.compression import ProductCompressionBridge, ProductCompressionResult, RuntimeCompressionBridge
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.state_hooks import (
     after_turn_payload,
@@ -23,6 +24,7 @@ from colearn.retrieval.service import RetrievalService
 from colearn.runtime.context_bridge import build_learning_turn_request
 from colearn.runtime.turn_executor import NanobotTurnExecutor
 from colearn.sessions.store import LearningSession, SessionStore
+from .source_preflight import SourceReadinessPreflight
 
 
 class BackgroundTurnFinalizer:
@@ -30,14 +32,10 @@ class BackgroundTurnFinalizer:
         self,
         *,
         product_compression: ProductCompressionBridge,
-        memory_store: EventMemoryStore,
-        session_store: SessionStore,
-        project_service: LearningProjectService,
+        on_result: Callable[..., None],
     ) -> None:
         self.product_compression = product_compression
-        self.memory_store = memory_store
-        self.session_store = session_store
-        self.project_service = project_service
+        self.on_result = on_result
 
     def schedule(
         self,
@@ -48,6 +46,13 @@ class BackgroundTurnFinalizer:
         request,
         result,
     ) -> None:
+        status_payload = {
+            "status": "scheduled",
+            "started_at": int(time()),
+            "finished_at": None,
+            "error": "",
+            "base_board_version": int(board.board_version or 1),
+        }
         worker = Thread(
             target=self._run,
             kwargs={
@@ -56,6 +61,7 @@ class BackgroundTurnFinalizer:
                 "board": board,
                 "request": request,
                 "result": result,
+                "status_payload": status_payload,
             },
             daemon=True,
         )
@@ -69,22 +75,8 @@ class BackgroundTurnFinalizer:
         board,
         request,
         result,
+        status_payload: dict[str, Any],
     ) -> None:
-        started_at = int(time())
-        session = self.session_store.get_session(session.session_id) or session
-        project = self.project_service.get_project(project.project_id) or project
-        status_payload = {
-            "status": "running",
-            "started_at": started_at,
-            "finished_at": None,
-            "error": "",
-            "base_board_version": int(board.board_version or 1),
-        }
-        session.last_turn_result = {
-            **session.last_turn_result,
-            "product_compression": status_payload,
-        }
-        self.session_store.save_session(session)
         try:
             product_output = self.product_compression.compress(
                 project=project,
@@ -93,67 +85,25 @@ class BackgroundTurnFinalizer:
                 request=request,
                 final_text=result.final_text,
             )
-            current_board_version = int(session.board_version or 1)
-            stale_board = current_board_version > int(board.board_version or 1) + 1
-            warnings = list(session.last_turn_result.get("warnings") or [])
-            if stale_board:
-                warnings.append("product_compression_stale_board_skipped")
-            session.continuation_prompt = product_output.continuation_prompt
-            session.pending_review = {
-                "summary": product_output.review_summary,
-                "points": [request.policy_decision.main_goal] if request.policy_decision else [],
-                "confusion_points": list(request.policy_decision.review_focus or []) if request.policy_decision else [],
-                "status": "ready",
-            }
-            session.last_turn_result = {
-                **session.last_turn_result,
-                "warnings": warnings,
-                "review_summary": product_output.review_summary,
-                "product_board_patch": product_output.board_patch,
-                "product_compression": {
-                    **status_payload,
-                    "status": "completed",
-                    "finished_at": int(time()),
-                    "stale_board": stale_board,
-                },
-            }
-            project.latest_review = dict(session.pending_review)
-            project.retrieval_profile = {
-                **project.retrieval_profile,
-                "last_product_compression": {
-                    "status": "completed",
-                    "summary": product_output.review_summary,
-                    "continuation_prompt": product_output.continuation_prompt,
-                    "finished_at": int(time()),
-                    "stale_board": stale_board,
-                },
-            }
-            self.session_store.save_session(session)
-            self.project_service.save_project(project)
+            self.on_result(
+                session_id=session.session_id,
+                project_id=project.project_id,
+                request=request,
+                board=board,
+                product_output=product_output,
+                error=None,
+                status_payload=status_payload,
+            )
         except Exception as exc:
-            warning = f"product_compression_failed: {exc}"
-            session = self.session_store.get_session(session.session_id) or session
-            project = self.project_service.get_project(project.project_id) or project
-            session.last_turn_result = {
-                **session.last_turn_result,
-                "warnings": [*list(session.last_turn_result.get("warnings") or []), warning],
-                "product_compression": {
-                    **status_payload,
-                    "status": "failed",
-                    "finished_at": int(time()),
-                    "error": str(exc),
-                },
-            }
-            project.retrieval_profile = {
-                **project.retrieval_profile,
-                "last_product_compression": {
-                    "status": "failed",
-                    "finished_at": int(time()),
-                    "error": str(exc),
-                },
-            }
-            self.session_store.save_session(session)
-            self.project_service.save_project(project)
+            self.on_result(
+                session_id=session.session_id,
+                project_id=project.project_id,
+                request=request,
+                board=board,
+                product_output=None,
+                error=exc,
+                status_payload=status_payload,
+            )
 
 
 class LearningOrchestrator:
@@ -174,6 +124,10 @@ class LearningOrchestrator:
         self.memory_store = memory_store or EventMemoryStore()
         self.knowledge_service = knowledge_service or KnowledgeWorkspaceService()
         self.retrieval_service = retrieval_service or RetrievalService()
+        self.source_preflight = SourceReadinessPreflight(
+            retrieval_service=self.retrieval_service,
+            knowledge_service=self.knowledge_service,
+        )
         self.executor = executor or NanobotTurnExecutor(
             workspace=Path.cwd(),
             retrieval_service=self.retrieval_service,
@@ -183,9 +137,7 @@ class LearningOrchestrator:
         self.product_compression = product_compression or ProductCompressionBridge()
         self.background_finalizer = BackgroundTurnFinalizer(
             product_compression=self.product_compression,
-            memory_store=self.memory_store,
-            session_store=self.session_store,
-            project_service=self.project_service,
+            on_result=self.apply_background_result,
         )
 
     def run_turn(
@@ -199,15 +151,10 @@ class LearningOrchestrator:
     ):
         session = self._get_or_create_session(session_id=session_id, project_id=project_id)
         project = self._get_or_create_project(project_id=project_id, session=session)
-        sync_result = self.retrieval_service.sync_source_refs(
+        source_refs = list(session.source_refs or project.source_subset or project.source_refs)
+        source_profile = self.source_preflight.run(
             project_id=project.project_id,
-            source_refs=list(session.source_refs or project.source_subset or project.source_refs),
-        )
-        source_profile = self.knowledge_service.build_project_source_profile(
-            source_refs=list(session.source_refs or project.source_subset or project.source_refs),
-            indexed_paths=list(sync_result.get("indexed_paths") or []),
-            sync_status=str(sync_result.get("sync_status") or "unavailable"),
-            warnings=list(sync_result.get("warnings") or []),
+            source_refs=source_refs,
         )
         board = build_learning_board(
             project=project,
@@ -244,7 +191,7 @@ class LearningOrchestrator:
             continuation_prompt=session.continuation_prompt,
             enabled_tools=turn_policy.enabled_tools or turn_policy.allowed_tools,
             attachments=attachments or [],
-            metadata={"turn_id": str(uuid4())},
+            metadata={"turn_id": str(uuid4()), "source_profile": dict(source_profile)},
         )
         prepared_request = before_turn(
             request=request,
@@ -351,6 +298,13 @@ class LearningOrchestrator:
             "board_patch": result.board_patch,
             "tool_events": list(result.tool_events),
             "stream_events": list(result.stream_events),
+            "product_compression": {
+                "status": "scheduled",
+                "started_at": None,
+                "finished_at": None,
+                "error": "",
+                "base_board_version": int(base_version or 1),
+            },
         }
         session.messages.extend(
             [
@@ -393,5 +347,66 @@ class LearningOrchestrator:
             )
         if not session.source_refs and project.source_refs:
             session.source_refs = list(project.source_refs)
+        self.session_store.save_session(session)
+        self.project_service.save_project(project)
+
+    def apply_background_result(
+        self,
+        *,
+        session_id: str,
+        project_id: str,
+        request,
+        board,
+        product_output: ProductCompressionResult | None,
+        error: BaseException | None,
+        status_payload: dict[str, Any],
+    ) -> None:
+        session = self.session_store.get_session(session_id)
+        project = self.project_service.get_project(project_id)
+        if session is None or project is None:
+            return
+
+        last_turn_result = dict(session.last_turn_result or {})
+        warnings = list(last_turn_result.get("warnings") or [])
+        if error is not None:
+            warning = f"product_compression_failed: {error}"
+            if warning not in warnings:
+                warnings.append(warning)
+            last_turn_result["warnings"] = warnings
+            last_turn_result["product_compression"] = {
+                **status_payload,
+                "status": "failed",
+                "finished_at": int(time()),
+                "error": str(error),
+            }
+            session.last_turn_result = last_turn_result
+            self.session_store.save_session(session)
+            return
+
+        if product_output is None:
+            return
+        stale_board = int(session.board_version or 1) > int(board.board_version or 1) + 1
+        if stale_board and "product_compression_stale_board_skipped" not in warnings:
+            warnings.append("product_compression_stale_board_skipped")
+        pending_review = {
+            "summary": product_output.review_summary,
+            "points": [request.policy_decision.main_goal] if request.policy_decision else [],
+            "confusion_points": list(request.policy_decision.review_focus or []) if request.policy_decision else [],
+            "status": "ready",
+        }
+        session.continuation_prompt = product_output.continuation_prompt
+        session.pending_review = pending_review
+        last_turn_result["warnings"] = warnings
+        last_turn_result["product_compression"] = {
+            **status_payload,
+            "status": "completed",
+            "finished_at": int(time()),
+            "error": "",
+            "stale_board": stale_board,
+            "review_summary": product_output.review_summary,
+            "continuation_prompt": product_output.continuation_prompt,
+        }
+        session.last_turn_result = last_turn_result
+        project.latest_review = dict(pending_review)
         self.session_store.save_session(session)
         self.project_service.save_project(project)

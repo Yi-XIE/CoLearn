@@ -18,9 +18,12 @@ htmlcov/
 # Node / frontend build output
 web/node_modules/
 web/dist/
+web/dist/node-tests/
 web/.next/
 web/out/
 web/coverage/
+web/playwright-report/
+web/test-results/
 
 # Virtual environments
 .venv/

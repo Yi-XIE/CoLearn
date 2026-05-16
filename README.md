@@ -1,34 +1,74 @@
-# Colearn-nightly
+# CoLearn Nightly
 
-这是一个从 `nanobot core` 出发的独立 CoLearn 组装工作区。
+这个仓库是 Yi 的 CoLearn 独立工作区，目标是把学习主链、检索、记忆、知识库和前端壳稳定在一个可持续打磨的 nightly 版本里。
 
-当前位置：
+## 目录
 
-1. 已复制裁剪后的 `third_party/nanobot-core`
-2. 已复制相关架构文档到 `CoLearn-docs/`
-3. 已完成组装路径第一步的最小骨架：
-   - `colearn/learning`
-   - `colearn/runtime`
-   - `colearn/projects`
-   - `colearn/sessions`
-   - `colearn/knowledge`
-   - `colearn/memory`
-4. 已从 `D:\CoLearn-release\web` 裁剪并复制一份 CoLearn 前端壳到 `web/`
-   - 保留 `chat / knowledge / memory / settings`
-   - 保留 `sidebar / session 管理 / chat composer / message list / preview drawer`
-   - 不带 `admin / agents / playground / co-writer / book` 等无关产品面
+- `colearn/`：后端主代码
+- `tests/`：后端测试
+- `web/`：Next.js 前端
+- `CoLearn-docs/`：架构与维护文档
+- `.colearn/state/`：本地运行状态
+- `third_party/nanobot-core/`：裁剪后的 nanobot core
 
-当前目标：
+## 常用命令
 
-1. 先固定 CoLearn 主协议
-2. 再把 LightRAG 收成独立 retrieval 层
-3. 再把 nanobot core 接成真实底层执行器
+### 后端
 
-文档入口：
+- 跑后端测试：
+  `python -m pytest tests`
+- 当前基线：
+  `32 passed`
+- 清本地状态预览：
+  `python -m colearn.devtools reset-state --dry-run`
+- 清本地状态：
+  `python -m colearn.devtools reset-state`
+- 启动后端 API：
+  `uvicorn colearn.api.app:app --reload --host 127.0.0.1 --port 8000`
 
-1. `CoLearn-docs/02-Architecture/CoLearn-顶层组装路径.md`
-2. `CoLearn-docs/02-Architecture/CoLearn-学习循环实施手册.md`
+### 前端
 
-说明：
+- 安装依赖：
+  `cd web`
+  `npm install`
+- 启动开发服务器：
+  `npm run dev`
+- 跑前端 node tests：
+  `npm run test:node`
+- 跑 UI audit：
+  `npm run audit`
+- 构建：
+  `npm run build`
 
-这套目录不再以旧 `CoLearn-release` 作为宿主壳，而是从独立工作区开始组装。
+## 本地状态
+
+默认本地状态会写到这些位置：
+
+- `.colearn/state/`
+- `.colearn/test-state/`
+- `.colearn/pytest-cache/`
+- `web/test-results/`
+- `web/playwright-report/`
+
+这些目录都属于本地调试产物，不应该进入 git。
+
+## 常见问题
+
+### 为什么 `pytest` 可能报临时目录权限问题
+
+在当前 Windows 环境里，`tmp_path` 相关测试有时需要更高权限访问系统临时目录。代码本身如果没有失败，可以用已授权的方式重跑：
+
+`python -m pytest tests`
+
+### 为什么 git status 里会出现前端报告目录
+
+旧的 `.gitignore` 没有完整覆盖 Playwright 产物。当前仓库已经补齐对 `web/playwright-report/`、`web/test-results/`、`web/dist/` 的忽略。
+
+### 从哪里看当前后端架构
+
+优先看这些文档：
+
+- `CoLearn-docs/02-Architecture/CoLearn-顶层组装路径.md`
+- `CoLearn-docs/02-Architecture/CoLearn-LearningState-协议.md`
+- `CoLearn-docs/02-Architecture/CoLearn-学习循环实施手册.md`
+- `CoLearn-docs/02-Architecture/CoLearn-后端代码补全计划.md`

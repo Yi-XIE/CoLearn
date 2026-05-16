@@ -6,7 +6,6 @@ import asyncio
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import threading
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -51,7 +50,22 @@ class LightRAGClientProtocol(Protocol):
         source_refs: list[dict[str, Any]],
     ) -> dict[str, Any]: ...
 
+    async def async_sync_project_sources(
+        self,
+        project_id: str,
+        source_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]: ...
+
     def retrieve_project_context(
+        self,
+        *,
+        project_id: str,
+        query: str,
+        source_refs: list[dict[str, Any]],
+        top_k: int = DEFAULT_TOP_K,
+    ) -> LightRAGRetrievalResult: ...
+
+    async def async_retrieve_project_context(
         self,
         *,
         project_id: str,
@@ -146,6 +160,13 @@ class NoOpLightRAGClient:
             "warnings": ["lightrag_disabled"],
         }
 
+    async def async_sync_project_sources(
+        self,
+        project_id: str,
+        source_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self.sync_project_sources(project_id, source_refs)
+
     def retrieve_project_context(
         self,
         *,
@@ -162,6 +183,21 @@ class NoOpLightRAGClient:
             chunks=[],
             retrieval_status="unavailable",
             fallback_reason="lightrag_disabled",
+        )
+
+    async def async_retrieve_project_context(
+        self,
+        *,
+        project_id: str,
+        query: str,
+        source_refs: list[dict[str, Any]],
+        top_k: int = DEFAULT_TOP_K,
+    ) -> LightRAGRetrievalResult:
+        return self.retrieve_project_context(
+            project_id=project_id,
+            query=query,
+            source_refs=source_refs,
+            top_k=top_k,
         )
 
 
@@ -344,6 +380,14 @@ class LightRAGClient:
         project_id: str,
         source_refs: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        self._reject_sync_inside_event_loop("async_sync_project_sources")
+        return asyncio.run(self.async_sync_project_sources(project_id, source_refs))
+
+    async def async_sync_project_sources(
+        self,
+        project_id: str,
+        source_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         project_key = str(project_id or "").strip()
         registry = self._load_registry()
         indexed_paths = sorted(
@@ -381,7 +425,7 @@ class LightRAGClient:
                 "warnings": [],
             }
         try:
-            backend_result = self._run_async(self._backend.initialize(self._kb_name, indexed_paths))
+            backend_result = await self._backend.initialize(self._kb_name, indexed_paths)
         except Exception as exc:
             return {
                 "project_id": project_key,
@@ -413,6 +457,24 @@ class LightRAGClient:
         source_refs: list[dict[str, Any]],
         top_k: int = DEFAULT_TOP_K,
     ) -> LightRAGRetrievalResult:
+        self._reject_sync_inside_event_loop("async_retrieve_project_context")
+        return asyncio.run(
+            self.async_retrieve_project_context(
+                project_id=project_id,
+                query=query,
+                source_refs=source_refs,
+                top_k=top_k,
+            )
+        )
+
+    async def async_retrieve_project_context(
+        self,
+        *,
+        project_id: str,
+        query: str,
+        source_refs: list[dict[str, Any]],
+        top_k: int = DEFAULT_TOP_K,
+    ) -> LightRAGRetrievalResult:
         if not self.enabled:
             return LightRAGRetrievalResult(
                 query=query,
@@ -422,7 +484,7 @@ class LightRAGClient:
                 retrieval_status="unavailable",
                 fallback_reason="lightrag_disabled",
             )
-        sync_result = self.sync_project_sources(project_id, source_refs)
+        sync_result = await self.async_sync_project_sources(project_id, source_refs)
         indexed_paths = list(sync_result.get("indexed_paths") or [])
         if not indexed_paths:
             return LightRAGRetrievalResult(
@@ -434,13 +496,11 @@ class LightRAGClient:
                 fallback_reason="project_index_empty",
             )
         try:
-            result = self._run_async(
-                self._backend.search(
-                    query=query,
-                    kb_name=self._kb_name,
-                    top_k=max(int(top_k or DEFAULT_TOP_K), self.config.top_k),
-                    file_paths=indexed_paths,
-                )
+            result = await self._backend.search(
+                query=query,
+                kb_name=self._kb_name,
+                top_k=max(int(top_k or DEFAULT_TOP_K), self.config.top_k),
+                file_paths=indexed_paths,
             )
         except Exception as exc:
             return LightRAGRetrievalResult(
@@ -509,26 +569,14 @@ class LightRAGClient:
             metadata={"indexed_paths": indexed_paths},
         )
 
-    def _run_async(self, awaitable: Any) -> Any:
+    def _reject_sync_inside_event_loop(self, async_method: str) -> None:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(awaitable)
-        result: dict[str, Any] = {}
-        errors: list[BaseException] = []
-
-        def _runner() -> None:
-            try:
-                result["value"] = asyncio.run(awaitable)
-            except BaseException as exc:
-                errors.append(exc)
-
-        thread = threading.Thread(target=_runner, daemon=True)
-        thread.start()
-        thread.join()
-        if errors:
-            raise errors[0]
-        return result.get("value")
+            return
+        raise RuntimeError(
+            f"LightRAG synchronous API cannot run inside an active event loop; use {async_method} instead."
+        )
 
     def _load_registry(self) -> dict[str, Any]:
         if not self._registry_path.exists():

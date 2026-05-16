@@ -8,4 +8,5 @@ __all__ = [
     "knowledge",
     "sessions",
     "sources",
+    "devtools",
 ]

@@ -9,6 +9,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from colearn.app.learning_orchestrator import LearningOrchestrator
+from colearn.compression import ProductCompressionResult
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.state import BoardFacts
@@ -25,6 +26,7 @@ from colearn.storage.json_store import JsonStateStore
 @dataclass
 class FakeExecutor:
     def run_turn(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+        self.last_request = request
         return LearningTurnResult(
             final_text=f"Answering: {request.user_message}",
             board_before=request.board_facts,
@@ -137,6 +139,60 @@ def test_product_compression_failure_keeps_main_result(tmp_path):
     assert saved_session.last_turn_result["final_text"] == result.final_text
     assert saved_session.last_turn_result["product_compression"]["status"] == "failed"
     assert any("product_compression_failed" in item for item in saved_session.last_turn_result["warnings"])
+
+
+def test_background_result_only_patches_review_fields(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-bg", "Background")
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-bg", project_id="proj-bg")
+    session.status = "completed"
+    session.active_turn_id = None
+    session.active_turns = []
+    session.messages = [{"role": "assistant", "content": "main result"}]
+    session.board_version = 7
+    session.board_facts = {"board_version": 7, "current_turn_mode": "VERIFY"}
+    session.last_turn_result = {"final_text": "main result", "warnings": [], "product_compression": {"status": "scheduled"}}
+    session_store.save_session(session)
+
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+    )
+    request = LearningTurnRequest(
+        session_id="sess-bg",
+        project_id="proj-bg",
+        user_message="background",
+        board_facts=BoardFacts(project_id="proj-bg", session_id="sess-bg", board_version=1),
+    )
+    orchestrator.apply_background_result(
+        session_id="sess-bg",
+        project_id="proj-bg",
+        request=request,
+        board=request.board_facts,
+        product_output=ProductCompressionResult(
+            review_summary="review",
+            continuation_prompt="continue",
+            board_patch={"board_version": 2},
+        ),
+        error=None,
+        status_payload={"status": "scheduled", "started_at": 1, "finished_at": None, "error": "", "base_board_version": 1},
+    )
+
+    saved_session = session_store.get_session("sess-bg")
+    assert saved_session is not None
+    assert saved_session.messages == [{"role": "assistant", "content": "main result"}]
+    assert saved_session.board_version == 7
+    assert saved_session.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_session.status == "completed"
+    assert saved_session.active_turns == []
+    assert saved_session.pending_review["summary"] == "review"
+    assert saved_session.continuation_prompt == "continue"
+    assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
+    assert "product_compression_stale_board_skipped" in saved_session.last_turn_result["warnings"]
 
 
 def test_board_version_conflict_keeps_newer_board(tmp_path):
@@ -295,6 +351,43 @@ def test_knowledge_workspace_builds_source_profile(tmp_path: Path) -> None:
     )
     assert profile["readiness"] == "ready"
     assert profile["sources"][0]["indexed"] is True
+
+
+def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-source", "Sources")
+    source_file = tmp_path / "source.md"
+    source_file.write_text("source body", encoding="utf-8")
+    project.source_refs = [str(source_file)]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-source", project_id="proj-source")
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+    )
+
+    orchestrator.run_turn(
+        session_id="sess-source",
+        project_id="proj-source",
+        user_message="Use sources",
+    )
+
+    request = executor.last_request
+    profile = request.metadata["source_profile"]
+    assert profile["readiness"] in {"ready", "partial", "empty", "unavailable"}
+    assert "sync" in profile
+    saved_project = project_service.get_project("proj-source")
+    assert saved_project is not None
+    assert saved_project.retrieval_profile["readiness"] == profile["readiness"]
+    from colearn.runtime.turn_executor import NanobotTurnExecutor
+
+    prompt = NanobotTurnExecutor()._build_prompt(request)
+    assert "Source readiness:" in prompt
 
 
 def test_default_nanobot_executor_receives_constructor_dependencies(tmp_path: Path) -> None:

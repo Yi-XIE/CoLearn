@@ -81,6 +81,10 @@ class SubscribeTurnPayload(BaseModel):
     after_seq: int = 0
 
 
+class PingPayload(BaseModel):
+    type: Literal["ping"] = "ping"
+
+
 class SkillPayload(BaseModel):
     name: str
     description: str = ""
@@ -109,9 +113,27 @@ class SettingsCatalogPayload(BaseModel):
     catalog: dict[str, Any] = Field(default_factory=dict)
 
 
+class SettingsTestStartPayload(BaseModel):
+    catalog: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuthLoginPayload(BaseModel):
+    username: str
+    password: str
+
+
+class AuthRegisterPayload(BaseModel):
+    username: str
+    password: str
+
+
 class MemoryUpdatePayload(BaseModel):
     file: Literal["summary", "profile"]
     content: str = ""
+
+
+class MemoryRefreshPayload(BaseModel):
+    pass
 
 
 class MemoryFilePayload(BaseModel):
