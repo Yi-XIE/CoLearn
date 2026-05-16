@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, BookOpen, ChevronRight, Code2, LayoutGrid, Lightbulb, MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -47,15 +46,6 @@ function toLearningGoalLabel(goalState: { active?: boolean; ui_summary?: string 
   if (objective) return `Learning goal: ${objective}`;
   return "Learning goal in progress";
 }
-
-const QUICK_ACTION_KEYS = [
-  { key: "plan", icon: LayoutGrid, tone: "text-[#f25b8f]" },
-  { key: "analyze", icon: BarChart3, tone: "text-[#4f9de8]" },
-  { key: "brainstorm", icon: Lightbulb, tone: "text-[#53c59d]" },
-  { key: "code", icon: Code2, tone: "text-[#eba45d]" },
-  { key: "summarize", icon: BookOpen, tone: "text-[#a877e7]" },
-  { key: "more", icon: MoreHorizontal, tone: "text-muted-foreground/65" },
-] as const;
 
 interface PendingFirstMessage {
   content: string;
@@ -256,43 +246,6 @@ export function ThreadShell({
     [send],
   );
 
-  const handleQuickAction = useCallback(
-    (prompt: string) => {
-      if (session) {
-        handleThreadSend(prompt);
-        return;
-      }
-      void handleWelcomeSend(prompt);
-    },
-    [handleThreadSend, handleWelcomeSend, session],
-  );
-
-  const quickActionItems = QUICK_ACTION_KEYS;
-  const quickActionPrefix = "thread.empty.quickActions";
-  const quickActions = (
-    <div className="mx-auto grid w-full max-w-[58rem] grid-cols-2 gap-3 pt-4 sm:grid-cols-3 lg:grid-cols-6 lg:gap-4">
-      {quickActionItems.map(({ key, icon: Icon, tone }) => {
-        const title = t(`${quickActionPrefix}.${key}.title`);
-        const prompt = t(`${quickActionPrefix}.${key}.prompt`);
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => handleQuickAction(prompt)}
-            disabled={booting || isStreaming}
-            className="group flex min-h-[136px] flex-col justify-between rounded-[20px] border border-black/[0.035] bg-card px-5 py-5 text-left shadow-[0_14px_34px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_42px_rgba(15,23,42,0.10)] disabled:pointer-events-none disabled:opacity-60 dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]"
-          >
-            <Icon className={`h-[18px] w-[18px] ${tone}`} strokeWidth={2} />
-            <span className="max-w-[7.5rem] text-[15px] font-medium leading-[1.28] tracking-[-0.01em] text-foreground/82">
-              {title}
-            </span>
-            <ChevronRight className="h-4 w-4 self-end text-muted-foreground/45 transition-colors group-hover:text-muted-foreground" />
-          </button>
-        );
-      })}
-    </div>
-  );
-
   const composer = (
     <>
       {streamError ? (
@@ -335,7 +288,6 @@ export function ThreadShell({
           goalState={goalState}
         />
       )}
-      {showHeroComposer ? quickActions : null}
     </>
   );
 
