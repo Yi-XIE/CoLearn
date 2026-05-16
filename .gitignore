@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local CoLearn runtime state
+.colearn/state/
+.colearn/test-state/
+.colearn/pytest-cache/
+.colearn/tmp/
+
+# Node / frontend build output
+web/node_modules/
+web/dist/
+web/.next/
+web/out/
+web/coverage/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets and machine-specific config
+.env
+.env.*
+*.local
+*.secret
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Editor/application backup files
+*.bkp
+.$*

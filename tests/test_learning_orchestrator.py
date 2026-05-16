@@ -1,0 +1,309 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from colearn.app.learning_orchestrator import LearningOrchestrator
+from colearn.knowledge import KnowledgeWorkspaceService
+from colearn.learning.response_contract import LearningTurnResult
+from colearn.learning.state import BoardFacts
+from colearn.learning.state_hooks import after_turn_payload
+from colearn.learning.turn_contract import LearningTurnRequest
+from colearn.memory.store import EventMemoryStore, MemoryEvent
+from colearn.projects.models import LearningProject
+from colearn.projects.service import LearningProjectService
+from colearn.runtime.nanobot_bridge import normalize_learning_turn_result
+from colearn.sessions.store import SessionStore
+from colearn.storage.json_store import JsonStateStore
+
+
+@dataclass
+class FakeExecutor:
+    def run_turn(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+        return LearningTurnResult(
+            final_text=f"Answering: {request.user_message}",
+            board_before=request.board_facts,
+            board_after=request.board_facts,
+            turn_mode_before=request.metadata.get("turn_mode_before", "EXPLORE"),
+            turn_mode_after=request.turn_mode,
+            retrieval_bundle=request.retrieval_bundle,
+            raw_learning_result={"tool_events": [], "raw_messages": []},
+        )
+
+    def finalize(
+        self,
+        *,
+        request: LearningTurnRequest,
+        final_text: str,
+        learning_result: dict | None = None,
+    ) -> LearningTurnResult:
+        return normalize_learning_turn_result(
+            request=request,
+            final_text=final_text,
+            learning_result=learning_result,
+        )
+
+
+class FailingProductCompression:
+    def compress(self, **kwargs):
+        raise RuntimeError("compression offline")
+
+
+def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-1", "Linear Algebra")
+    project.anchor = {"topic": "matrix multiplication"}
+    project.anchor_status = "ready"
+    source_file = tmp_path / "source.md"
+    source_file.write_text("Matrix multiplication composes linear maps.", encoding="utf-8")
+    project.source_refs = [str(source_file)]
+    project_service.save_project(project)
+
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-1", project_id="proj-1")
+    session.source_refs = [str(source_file)]
+    session_store.save_session(session)
+
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+    )
+
+    result = orchestrator.run_turn(
+        session_id="sess-1",
+        project_id="proj-1",
+        user_message="Explain why matrix multiplication is not commutative.",
+    )
+
+    saved_session = session_store.get_session("sess-1")
+    saved_project = project_service.get_project("proj-1")
+
+    assert result.turn_mode_after == "EXPLORE"
+    assert saved_session is not None
+    assert saved_project is not None
+    assert len(saved_session.messages) == 2
+    assert "board_patch" in saved_session.last_turn_result
+    assert saved_session.continuation_prompt
+    assert saved_session.board_facts["current_turn_mode"] == "EXPLORE"
+    assert saved_project.board_facts["current_turn_mode"] == "EXPLORE"
+
+    time.sleep(0.05)
+    saved_session = session_store.get_session("sess-1")
+    saved_project = project_service.get_project("proj-1")
+    assert saved_session is not None
+    assert saved_project is not None
+    assert saved_session.pending_review["summary"]
+    assert saved_project.latest_review["summary"]
+    assert len(orchestrator.memory_store.list_events_for_session("sess-1")) == 3
+    assert saved_session.board_facts["updated_at"]
+    assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
+
+
+def test_product_compression_failure_keeps_main_result(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-fail", "Failure Safety")
+    project.anchor = {"topic": "safety"}
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-fail", project_id="proj-fail")
+
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        product_compression=FailingProductCompression(),
+    )
+
+    result = orchestrator.run_turn(
+        session_id="sess-fail",
+        project_id="proj-fail",
+        user_message="Explain safe async writeback.",
+    )
+
+    time.sleep(0.05)
+    saved_session = session_store.get_session("sess-fail")
+    assert saved_session is not None
+    assert result.final_text
+    assert saved_session.last_turn_result["final_text"] == result.final_text
+    assert saved_session.last_turn_result["product_compression"]["status"] == "failed"
+    assert any("product_compression_failed" in item for item in saved_session.last_turn_result["warnings"])
+
+
+def test_board_version_conflict_keeps_newer_board(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    current_project = project_service.create_project("proj-conflict", "Conflict")
+    current_project.board_version = 3
+    current_project.board_facts = {
+        "project_id": "proj-conflict",
+        "session_id": "sess-conflict",
+        "current_turn_mode": "VERIFY",
+        "board_version": 3,
+    }
+    project_service.save_project(current_project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    current_session = session_store.create_session(session_id="sess-conflict", project_id="proj-conflict")
+    current_session.board_version = 3
+    current_session.board_facts = {
+        "project_id": "proj-conflict",
+        "session_id": "sess-conflict",
+        "current_turn_mode": "VERIFY",
+        "board_version": 3,
+    }
+    session_store.save_session(current_session)
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+    )
+
+    stale_board = BoardFacts(project_id="proj-conflict", session_id="sess-conflict", board_version=1)
+    result_board = BoardFacts(
+        project_id="proj-conflict",
+        session_id="sess-conflict",
+        current_turn_mode="EXPLORE",
+        board_version=2,
+    )
+    request = LearningTurnRequest(
+        session_id="sess-conflict",
+        project_id="proj-conflict",
+        user_message="stale turn",
+        board_facts=stale_board,
+    )
+    result = LearningTurnResult(
+        final_text="stale answer",
+        board_before=stale_board,
+        board_after=result_board,
+        turn_mode_after="EXPLORE",
+    )
+    stale_session = current_session.__class__(
+        session_id="sess-conflict",
+        project_id="proj-conflict",
+        board_facts=stale_board.to_dict(),
+        board_version=1,
+    )
+    stale_project = LearningProject(
+        project_id="proj-conflict",
+        title="Conflict",
+        board_facts=stale_board.to_dict(),
+        board_version=1,
+    )
+
+    orchestrator._write_back(
+        project=stale_project,
+        session=stale_session,
+        request=request,
+        result=result,
+    )
+
+    saved_session = session_store.get_session("sess-conflict")
+    saved_project = project_service.get_project("proj-conflict")
+    assert saved_session is not None
+    assert saved_project is not None
+    assert saved_session.board_version == 3
+    assert saved_session.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_project.board_version == 3
+    assert saved_project.board_facts["current_turn_mode"] == "VERIFY"
+    assert "board_version_conflict_session_write_skipped" in saved_session.last_turn_result["warnings"]
+    assert "board_version_conflict_project_write_skipped" in saved_session.last_turn_result["warnings"]
+
+
+def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-events", "Events")
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-events", project_id="proj-events")
+    request = LearningTurnRequest(
+        session_id="sess-events",
+        project_id="proj-events",
+        user_message="我有点不懂这个节点，但完成了第一步",
+        source_references=[{"source_ref": str(tmp_path / "note.md")}],
+    )
+    request = request.__class__(
+        **{
+            **request.__dict__,
+            "board_facts": request.board_facts.__class__(
+                project_id="proj-events",
+                session_id="sess-events",
+                current_progress=request.board_facts.current_progress.__class__(
+                    active_node_id="node-1",
+                    active_node_label="Node 1",
+                ),
+            ),
+        }
+    )
+
+    payload = after_turn_payload(
+        project=project,
+        session=session,
+        request=request,
+        final_text="已经完成 Node 1",
+        tool_events=[{"tool_name": "lightrag"}],
+    )
+
+    json.dumps([event.__dict__ for event in payload["learning_events"]], ensure_ascii=False)
+    event_types = {event.type for event in payload["learning_events"]}
+    assert "NODE_COMPLETED" in event_types
+    assert "BLOCKER_FOUND" in event_types
+    assert "EVIDENCE_ATTACHED" in event_types
+    assert payload["board_after"].evidence_refs[0]["tool_name"] == "lightrag"
+
+
+def test_memory_store_search_events() -> None:
+    store = EventMemoryStore(state_store=JsonStateStore(Path.cwd() / ".colearn" / "test-state"))
+    store.append(
+        MemoryEvent(
+            event_id="1",
+            kind="review_written",
+            payload={"session_id": "s1", "project_id": "p1", "summary": "matrix multiplication is not commutative"},
+        )
+    )
+    store.append(
+        MemoryEvent(
+            event_id="2",
+            kind="turn_completed",
+            payload={"session_id": "s1", "project_id": "p1", "turn_mode": "EXPLORE", "summary": "matrix multiplication is not commutative"},
+        )
+    )
+    hits = store.search_events(query="matrix", session_id="s1")
+    assert len(hits) == 1
+    assert hits[0].event_id == "1"
+
+
+def test_knowledge_workspace_builds_source_profile(tmp_path: Path) -> None:
+    service = KnowledgeWorkspaceService()
+    library = service.create_library("lib-1", "Math")
+    source_file = tmp_path / "note.md"
+    source_file.write_text("matrix", encoding="utf-8")
+    service.attach_source(library_id=library.library_id, source_path=str(source_file))
+    profile = service.build_project_source_profile(
+        source_refs=[str(source_file)],
+        indexed_paths=[str(source_file)],
+        sync_status="synced",
+    )
+    assert profile["readiness"] == "ready"
+    assert profile["sources"][0]["indexed"] is True
+
+
+def test_default_nanobot_executor_receives_constructor_dependencies(tmp_path: Path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    memory_store = EventMemoryStore(state_store=JsonStateStore(root))
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        memory_store=memory_store,
+    )
+    assert getattr(orchestrator.executor, "retrieval_service", None) is orchestrator.retrieval_service
+    assert getattr(orchestrator.executor, "memory_store", None) is memory_store

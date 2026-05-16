@@ -1,0 +1,397 @@
+"""Main assembly entrypoint for a single CoLearn learning turn."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from threading import Thread
+from time import time
+from uuid import uuid4
+
+from colearn.compression import ProductCompressionBridge, RuntimeCompressionBridge
+from colearn.knowledge import KnowledgeWorkspaceService
+from colearn.learning.state_hooks import (
+    after_turn_payload,
+    before_turn,
+    build_learning_board,
+    build_state_snapshot,
+    policy,
+)
+from colearn.memory.store import EventMemoryStore, MemoryEvent
+from colearn.projects.models import LearningProject
+from colearn.projects.service import LearningProjectService
+from colearn.retrieval.service import RetrievalService
+from colearn.runtime.context_bridge import build_learning_turn_request
+from colearn.runtime.turn_executor import NanobotTurnExecutor
+from colearn.sessions.store import LearningSession, SessionStore
+
+
+class BackgroundTurnFinalizer:
+    def __init__(
+        self,
+        *,
+        product_compression: ProductCompressionBridge,
+        memory_store: EventMemoryStore,
+        session_store: SessionStore,
+        project_service: LearningProjectService,
+    ) -> None:
+        self.product_compression = product_compression
+        self.memory_store = memory_store
+        self.session_store = session_store
+        self.project_service = project_service
+
+    def schedule(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        board,
+        request,
+        result,
+    ) -> None:
+        worker = Thread(
+            target=self._run,
+            kwargs={
+                "project": project,
+                "session": session,
+                "board": board,
+                "request": request,
+                "result": result,
+            },
+            daemon=True,
+        )
+        worker.start()
+
+    def _run(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        board,
+        request,
+        result,
+    ) -> None:
+        started_at = int(time())
+        session = self.session_store.get_session(session.session_id) or session
+        project = self.project_service.get_project(project.project_id) or project
+        status_payload = {
+            "status": "running",
+            "started_at": started_at,
+            "finished_at": None,
+            "error": "",
+            "base_board_version": int(board.board_version or 1),
+        }
+        session.last_turn_result = {
+            **session.last_turn_result,
+            "product_compression": status_payload,
+        }
+        self.session_store.save_session(session)
+        try:
+            product_output = self.product_compression.compress(
+                project=project,
+                session=session,
+                board=board,
+                request=request,
+                final_text=result.final_text,
+            )
+            current_board_version = int(session.board_version or 1)
+            stale_board = current_board_version > int(board.board_version or 1) + 1
+            warnings = list(session.last_turn_result.get("warnings") or [])
+            if stale_board:
+                warnings.append("product_compression_stale_board_skipped")
+            session.continuation_prompt = product_output.continuation_prompt
+            session.pending_review = {
+                "summary": product_output.review_summary,
+                "points": [request.policy_decision.main_goal] if request.policy_decision else [],
+                "confusion_points": list(request.policy_decision.review_focus or []) if request.policy_decision else [],
+                "status": "ready",
+            }
+            session.last_turn_result = {
+                **session.last_turn_result,
+                "warnings": warnings,
+                "review_summary": product_output.review_summary,
+                "product_board_patch": product_output.board_patch,
+                "product_compression": {
+                    **status_payload,
+                    "status": "completed",
+                    "finished_at": int(time()),
+                    "stale_board": stale_board,
+                },
+            }
+            project.latest_review = dict(session.pending_review)
+            project.retrieval_profile = {
+                **project.retrieval_profile,
+                "last_product_compression": {
+                    "status": "completed",
+                    "summary": product_output.review_summary,
+                    "continuation_prompt": product_output.continuation_prompt,
+                    "finished_at": int(time()),
+                    "stale_board": stale_board,
+                },
+            }
+            self.session_store.save_session(session)
+            self.project_service.save_project(project)
+        except Exception as exc:
+            warning = f"product_compression_failed: {exc}"
+            session = self.session_store.get_session(session.session_id) or session
+            project = self.project_service.get_project(project.project_id) or project
+            session.last_turn_result = {
+                **session.last_turn_result,
+                "warnings": [*list(session.last_turn_result.get("warnings") or []), warning],
+                "product_compression": {
+                    **status_payload,
+                    "status": "failed",
+                    "finished_at": int(time()),
+                    "error": str(exc),
+                },
+            }
+            project.retrieval_profile = {
+                **project.retrieval_profile,
+                "last_product_compression": {
+                    "status": "failed",
+                    "finished_at": int(time()),
+                    "error": str(exc),
+                },
+            }
+            self.session_store.save_session(session)
+            self.project_service.save_project(project)
+
+
+class LearningOrchestrator:
+    def __init__(
+        self,
+        *,
+        project_service: LearningProjectService | None = None,
+        session_store: SessionStore | None = None,
+        memory_store: EventMemoryStore | None = None,
+        knowledge_service: KnowledgeWorkspaceService | None = None,
+        retrieval_service: RetrievalService | None = None,
+        executor: NanobotTurnExecutor | None = None,
+        runtime_compression: RuntimeCompressionBridge | None = None,
+        product_compression: ProductCompressionBridge | None = None,
+    ) -> None:
+        self.project_service = project_service or LearningProjectService()
+        self.session_store = session_store or SessionStore()
+        self.memory_store = memory_store or EventMemoryStore()
+        self.knowledge_service = knowledge_service or KnowledgeWorkspaceService()
+        self.retrieval_service = retrieval_service or RetrievalService()
+        self.executor = executor or NanobotTurnExecutor(
+            workspace=Path.cwd(),
+            retrieval_service=self.retrieval_service,
+            memory_store=self.memory_store,
+        )
+        self.runtime_compression = runtime_compression or RuntimeCompressionBridge()
+        self.product_compression = product_compression or ProductCompressionBridge()
+        self.background_finalizer = BackgroundTurnFinalizer(
+            product_compression=self.product_compression,
+            memory_store=self.memory_store,
+            session_store=self.session_store,
+            project_service=self.project_service,
+        )
+
+    def run_turn(
+        self,
+        *,
+        session_id: str,
+        user_message: str,
+        project_id: str = "",
+        language: str = "zh",
+        attachments: list[dict[str, object]] | None = None,
+    ):
+        session = self._get_or_create_session(session_id=session_id, project_id=project_id)
+        project = self._get_or_create_project(project_id=project_id, session=session)
+        sync_result = self.retrieval_service.sync_source_refs(
+            project_id=project.project_id,
+            source_refs=list(session.source_refs or project.source_subset or project.source_refs),
+        )
+        source_profile = self.knowledge_service.build_project_source_profile(
+            source_refs=list(session.source_refs or project.source_subset or project.source_refs),
+            indexed_paths=list(sync_result.get("indexed_paths") or []),
+            sync_status=str(sync_result.get("sync_status") or "unavailable"),
+            warnings=list(sync_result.get("warnings") or []),
+        )
+        board = build_learning_board(
+            project=project,
+            session=session,
+            latest_review=project.latest_review,
+        )
+        snapshot = build_state_snapshot(
+            project=project,
+            session=session,
+            latest_review=project.latest_review,
+        )
+        project.retrieval_profile = {
+            **project.retrieval_profile,
+            **source_profile,
+            "board": board.to_dict(),
+        }
+        turn_policy = policy(
+            board=board,
+            user_message=user_message,
+        )
+        request = build_learning_turn_request(
+            session_id=session.session_id,
+            user_message=user_message,
+            project_id=project.project_id,
+            project_title=project.title,
+            language=language,
+            turn_mode=board.current_turn_mode,
+            board_facts=board,
+            turn_policy=turn_policy,
+            anchor=project.anchor,
+            source_references=[{"source_ref": item} for item in (session.source_refs or project.source_refs)],
+            memory_references=session.memory_refs or project.memory_refs,
+            state_projection=snapshot,
+            continuation_prompt=session.continuation_prompt,
+            enabled_tools=turn_policy.enabled_tools or turn_policy.allowed_tools,
+            attachments=attachments or [],
+            metadata={"turn_id": str(uuid4())},
+        )
+        prepared_request = before_turn(
+            request=request,
+            snapshot=snapshot,
+            decision=turn_policy,
+        )
+        compressed = self.runtime_compression.compress(request=prepared_request)
+        result = self.executor.run_turn(request=compressed.request)
+        after_payload = after_turn_payload(
+            project=project,
+            session=session,
+            request=compressed.request,
+            final_text=result.final_text,
+            tool_events=list(result.tool_events or result.raw_learning_result.get("tool_events") or []),
+        )
+        normalized = self.executor.finalize(
+            request=compressed.request,
+            final_text=result.final_text,
+            learning_result={
+                **result.raw_learning_result,
+                **after_payload,
+                "warnings": [
+                    *list(result.warnings),
+                    *compressed.notes,
+                ],
+            },
+        )
+        self._write_back(
+            project=project,
+            session=session,
+            request=compressed.request,
+            result=normalized,
+        )
+        self.background_finalizer.schedule(
+            project=project,
+            session=session,
+            board=board,
+            request=compressed.request,
+            result=normalized,
+        )
+        return normalized
+
+    def _get_or_create_session(
+        self,
+        *,
+        session_id: str,
+        project_id: str,
+    ) -> LearningSession:
+        session = self.session_store.get_session(session_id)
+        if session is None:
+            session = self.session_store.create_session(
+                session_id=session_id,
+                project_id=project_id,
+                title="",
+            )
+        return session
+
+    def _get_or_create_project(
+        self,
+        *,
+        project_id: str,
+        session: LearningSession,
+    ) -> LearningProject:
+        resolved_project_id = project_id or session.project_id or "default-project"
+        project = self.project_service.get_project(resolved_project_id)
+        if project is None:
+            project = self.project_service.create_project(
+                resolved_project_id,
+                title=resolved_project_id,
+            )
+        session.project_id = resolved_project_id
+        return project
+
+    def _write_back(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        request,
+        result,
+    ) -> None:
+        # Session Board is the runtime source of truth; project.board_facts is a
+        # denormalized mirror for project lists and cross-session recovery.
+        current_session = self.session_store.get_session(session.session_id)
+        current_session_version = int(getattr(current_session, "board_version", session.board_version) or 1)
+        base_version = int(getattr(request.board_facts, "board_version", session.board_version) or 1)
+        session_conflict = current_session_version > base_version and current_session is not session
+        if session_conflict and current_session is not None:
+            session = current_session
+        session.turn_mode = result.turn_mode_after
+        warnings = list(result.warnings)
+        if session_conflict:
+            warnings.append("board_version_conflict_session_write_skipped")
+        else:
+            session.board_facts = dict(result.board_after.to_dict())
+            session.board_version = int(result.board_after.board_version or 1)
+        session.status = "completed"
+        session.active_turn_id = None
+        session.active_turns = []
+        session.continuation_prompt = result.continuation_prompt
+        session.last_turn_result = {
+            "final_text": result.final_text,
+            "warnings": warnings,
+            "board_patch": result.board_patch,
+            "tool_events": list(result.tool_events),
+            "stream_events": list(result.stream_events),
+        }
+        session.messages.extend(
+            [
+                {"role": "user", "content": request.user_message},
+                {"role": "assistant", "content": result.final_text},
+            ]
+        )
+        current_project = self.project_service.get_project(project.project_id)
+        current_project_version = int(getattr(current_project, "board_version", project.board_version) or 1)
+        project_conflict = current_project_version > base_version and current_project is not project
+        if project_conflict and current_project is not None:
+            project = current_project
+        project.turn_mode = result.turn_mode_after
+        if project_conflict:
+            warnings.append("board_version_conflict_project_write_skipped")
+        else:
+            project.board_facts = dict(result.board_after.to_dict())
+            project.board_version = int(result.board_after.board_version or 1)
+        session.last_turn_result = {
+            **session.last_turn_result,
+            "warnings": warnings,
+        }
+        project.anchor_status = "ready" if project.anchor else "missing"
+        project.current_main_goal = (
+            request.turn_policy.main_goal if request.turn_policy else project.current_main_goal
+        )
+        project.retrieval_profile = {
+            **project.retrieval_profile,
+            "last_stream_events": list(result.stream_events),
+            "last_tool_events": list(result.tool_events),
+            "board": dict(project.board_facts or result.board_after.to_dict()),
+        }
+        for item in result.memory_events:
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind=str(item.get("kind") or "event"),
+                    payload=dict(item.get("payload") or {}),
+                )
+            )
+        if not session.source_refs and project.source_refs:
+            session.source_refs = list(project.source_refs)
+        self.session_store.save_session(session)
+        self.project_service.save_project(project)
