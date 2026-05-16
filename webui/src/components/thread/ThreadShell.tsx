@@ -361,6 +361,7 @@ export function ThreadShell({
         onToggleTheme={onToggleTheme}
         hideSidebarToggleOnDesktop={hideSidebarToggleOnDesktop}
         minimal={!session && !loading}
+        titleStyle={session ? "chat" : "page"}
       />
       <ThreadViewport
         messages={displayMessages}

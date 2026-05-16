@@ -12,6 +12,7 @@ interface ThreadHeaderProps {
   onToggleTheme: () => void;
   hideSidebarToggleOnDesktop?: boolean;
   minimal?: boolean;
+  titleStyle?: "chat" | "page";
 }
 
 export function ThreadHeader({
@@ -22,6 +23,7 @@ export function ThreadHeader({
   onToggleTheme,
   hideSidebarToggleOnDesktop = false,
   minimal = false,
+  titleStyle = "page",
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
   if (minimal) {
@@ -60,7 +62,14 @@ export function ThreadHeader({
           <Menu className="h-3.5 w-3.5" />
         </Button>
         <div className="flex min-w-0 flex-col rounded-md py-0.5">
-          <span className="max-w-[min(60vw,32rem)] truncate text-[22px] font-bold leading-tight text-black dark:text-white sm:text-[26px]">
+          <span
+            className={cn(
+              "max-w-[min(60vw,32rem)] truncate leading-tight",
+              titleStyle === "page"
+                ? "text-[22px] font-bold text-black dark:text-white sm:text-[26px]"
+                : "text-[14px] font-medium text-foreground/78 sm:text-[15px]",
+            )}
+          >
             {title}
           </span>
           {subtitle ? (
