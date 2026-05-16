@@ -1,46 +1,81 @@
-﻿# CoLearn Docs
+# CoLearn Docs
 
-`D:\CoLearn-release\CoLearn-docs` 只保留当前主线真正还会被继续使用的文档。
+这份目录只保留 CoLearn 当前主线仍然会继续使用的文档。
 
-当前文档分 4 类：
+这里的文档不是为了堆历史，而是为了帮当前代码保持清晰边界、维护路径和接手上下文。
 
-1. `01-Blueprints`
-   - 产品蓝图与产品边界
-2. `02-Architecture`
-   - 架构路径与专项技术规格
-3. `03-Execution`
-   - 当前里程碑执行计划、验收结论、仍在使用的架构图
-4. `archive`
-   - 只保留明确标注为历史归档的材料
+## Directory Map
 
-当前有效主线文档：
+### `01-Blueprints`
 
-- `01-Blueprints/CoLearn-产品蓝图.md`
-  - 长期产品真源，定义 CoLearn 的产品目标、最小闭环和稳定边界
-- `02-Architecture/CoLearn-顶层组装路径.md`
-  - 当前长期路线真源，定义 CoLearn 的固定分层、组装顺序和完成判断
-- `02-Architecture/CoLearn-蓝图达成路径.md`
-  - 历史路线说明，已被新的组装执行路径替代
-- `02-Architecture/CoLearn-学习循环实施手册.md`
-  - 当前学习循环主线，替代旧的 Agent Loop 技术规格
-- `03-Execution/CoLearn-里程碑3-执行计划.md`
-- `03-Execution/CoLearn-里程碑3-验收收口结论.md`
-- `03-Execution/CoLearn-里程碑4-执行计划.md`
-  - 当前阶段执行真源，定义里程碑4的工作包、顺序、测试、风险和验收
+产品蓝图与长期边界。
 
-当前保留的可复用图示：
+适合回答：
 
-- `03-Execution/CoLearn-代码架构现状图.drawio`
-- `03-Execution/CoLearn-代码架构现状图-v3.png`
-- `03-Execution/CoLearn-产品架构图-Agent-Loop-mermaid.md`
-- `03-Execution/CoLearn-产品架构图-Agent-Loop-汇报版-mermaid.md`
+- CoLearn 想成为什么
+- 产品边界放在哪里
+- 最小闭环是什么
 
-维护规则：
+### `02-Architecture`
 
-1. 蓝图定义产品目标、边界和核心能力。
-2. 组装执行路径定义当前长期路线、固定分层、组装顺序和完成判断，不承担当前阶段任务排期。
-3. 学习循环实施手册定义 CoLearn 当前主执行 loop、状态控制器、上下文适配方式和分阶段落地步骤。
-4. 执行文档只保留当前仍会被对照、复用或继续推进的计划、结论和图示。
-5. 如果长期路线文档与当前阶段执行文档在粒度上不同，以当前阶段执行文档作为当下推进口径。
-6. 已被新版本替代的草稿、重复导出图、一次性收口清单应及时删除或归档。
-7. 文档只服务 CoLearn 当前主线，不维护 donor 产品叙事。
+当前后端与主链的架构事实文档。
+
+适合回答：
+
+- 当前主链怎么组装
+- LearningState 协议是什么
+- 学习循环现在已经落到什么程度
+- 哪些边界已经收口，哪些还保留
+
+当前重点文档：
+
+- `CoLearn-顶层组装路径.md`
+- `CoLearn-LearningState-协议.md`
+- `CoLearn-学习循环实施手册.md`
+- `CoLearn-后端代码补全计划.md`
+- `CoLearn-个人开发维护手册.md`
+
+### `03-Execution`
+
+阶段性执行计划、验收结论、仍有复用价值的图示。
+
+适合回答：
+
+- 某个阶段当时打算怎么推进
+- 某一轮验收当时如何定义
+- 某张结构图是否仍值得参考
+
+### `04-Claude-Handoffs`
+
+给外部接手者或下一轮协作者准备的交接材料。
+
+当前已放入：
+
+- `CoLearn-Claude-联调补强交接说明.md`
+
+它主要用于：
+
+- 让 Claude 或其他远端协作者快速同步当前事实
+- 明确应该优先发力的区域
+- 说明依赖安装、联调命令、远端同步约束与验收口径
+
+### `archive`
+
+只保留明确标记为历史归档的材料。
+
+## How To Use This Folder
+
+建议按下面顺序阅读：
+
+1. 先看 `01-Blueprints`
+2. 再看 `02-Architecture`
+3. 有阶段任务时再看 `03-Execution`
+4. 涉及外部接手或跨机器协作时看 `04-Claude-Handoffs`
+
+## Maintenance Rules
+
+1. 文档必须服务当前主线，不维护无效历史包袱。
+2. 架构文档写“当前代码事实”，不要把未落地计划写成已完成。
+3. 阶段执行文档只保留仍会被复用或对照的部分。
+4. 新增交接文档时，优先放到独立 handoff 目录，不把交接材料混进架构主文档。
+5. 写入前保持 UTF-8 干净编码，不保留乱码、占位符或损坏字符。

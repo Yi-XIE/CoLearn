@@ -2,7 +2,9 @@
 
 ## 文档目的
 
-这份文档描述当前代码里的 Learning State 三层协议，以及它们在运行时和持久化层之间的映射关系。对应实现主要在：
+这份文档描述当前代码中的 Learning State 三层协议，以及它们在运行时和持久化层之间的映射关系。
+
+对应实现主要在：
 
 - `colearn/learning/state.py`
 - `colearn/learning/state_hooks.py`
@@ -68,7 +70,9 @@
 
 ### 当前事实源
 
-当前运行时以 session 上的 `board_facts` 为主要事实源，project 上的 `board_facts` 是镜像副本。构板顺序是：
+当前运行时以 session 上的 `board_facts` 为主要事实源，project 上的 `board_facts` 是镜像副本。
+
+组装顺序是：
 
 1. 优先读取 `session.board_facts`
 2. 否则回退到 `project.board_facts`
@@ -76,7 +80,9 @@
 
 ### 当前持久化形态
 
-`BoardFacts` 在运行时是 dataclass，但当前持久化时仍会转成字典落盘。也就是说，Board 的类型边界还没有完全收紧到单一表示形式。
+`BoardFacts` 在运行时是 dataclass，但当前持久化时仍会转成字典落盘。
+
+也就是说，Board 的类型边界还没有完全收紧到单一表示形式。
 
 ## TurnMode
 
@@ -133,7 +139,7 @@
 - `board_version`
 - `blocker_count`
 
-同时，`before_turn()` 会把部分策略信息复制到 `LearningTurnRequest.metadata`，用于 executor prompt 侧读取：
+同时，`before_turn()` 会把部分策略信息复制到 `LearningTurnRequest.metadata`，供 executor prompt 读取：
 
 - `turn_mode_before`
 - `policy_restrictions`
@@ -223,7 +229,7 @@
 
 需要注意：
 
-- `retrieval_bundle` 字段仍然存在于 contract 中
+- `retrieval_bundle` 字段仍存在于 contract 中
 - orchestrator 当前不会在回合开始前把真实 retrieval 文本塞进 request
 - source readiness 会通过 `metadata["source_profile"]` 进入 prompt
 
@@ -234,6 +240,6 @@
 - Session 是 Board 的事实主源，project 是镜像
 - 事件抽取仍是轻量启发式，不是完整状态机
 - `BoardFacts` 的运行时类型和持久化类型仍是双重表示
-- `board_version` 具备 stale write 保护，但不是严格的 compare-and-swap 协议
+- `board_version` 具备 stale write 保护，但不是严格 compare-and-swap 协议
 
-这份文档记录的是现在的协议真相，后续如果要推进强类型 Board 存储、严格版本写入或 retrieval contract 收紧，应同步更新本文件。
+这份文档记录的是当前协议事实。后续如果推进强类型 Board 存储、严格版本写入或 retrieval contract 收紧，应同步更新本文档。

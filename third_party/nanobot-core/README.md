@@ -2,13 +2,13 @@
 
 This directory contains a pruned vendor snapshot derived from [HKUDS/nanobot](https://github.com/HKUDS/nanobot).
 
-Purpose:
+Its role inside CoLearn is intentionally narrow:
 
-- keep a small, inspectable agent runtime inside CoLearn
-- preserve the reusable nanobot core pieces we want to study and adapt
-- avoid bringing chat channels, gateway, WebUI, and other broad product surfaces into CoLearn
+- keep a small, inspectable agent runtime in-repo
+- preserve reusable lower-level turn-loop pieces
+- avoid dragging broad upstream product surfaces into CoLearn
 
-Kept on purpose:
+## Kept On Purpose
 
 - `nanobot/agent/*`
 - `nanobot/session/*`
@@ -19,30 +19,47 @@ Kept on purpose:
 - `nanobot/templates/*`
 - `nanobot/skills/*`
 
-Trimmed or intentionally not wired as the main path:
+## Trimmed Or Not Wired As Main Path
 
-- no `api/`
-- no `cli/`
+- no upstream `api/`
+- no upstream `cli/`
 - no `channels/`
 - no `webui/`
-- no `bridge/`
+- no broad bridge / gateway surfaces
 - no upstream `tests/`
 - command surface reduced to minimal local control commands
 - default tool registration reduced to a small core set
 
-How to read this snapshot:
+## How To Read This Snapshot
 
-- treat it as a reference runtime, not as CoLearn's final product architecture
-- CoLearn learning states should stay in `deeptutor/learning/state_machine.py`
-- this vendor snapshot is mainly for the lower-level agent turn loop, memory, session, and prompt/context assembly
+Treat this directory as a reference runtime, not as CoLearn's final product architecture.
 
-Next intended integration points:
+The current CoLearn mainline lives in:
 
-- `deeptutor/services/session/*`
-- `deeptutor/memory/*`
-- `deeptutor/integrations/lightrag_client.py`
-- `deeptutor/learning/*`
+- `colearn/api/*`
+- `colearn/app/*`
+- `colearn/learning/*`
+- `colearn/runtime/*`
+- `colearn/memory/*`
+- `colearn/retrieval/*`
 
-Upstream license:
+This vendor snapshot is mainly useful for:
 
-- see `LICENSE.nanobot`
+- lower-level agent turn loop ideas
+- memory and session runtime patterns
+- prompt / context assembly references
+- provider integration references
+
+## Important Boundary
+
+Do not re-center the product around upstream nanobot structure.
+
+CoLearn now has its own mainline architecture and its own docs under:
+
+- `CoLearn-docs/02-Architecture`
+
+Use this vendor snapshot as a source of implementation material, not as the product truth.
+
+## Upstream License
+
+See `LICENSE.nanobot`.

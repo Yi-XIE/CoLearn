@@ -2,7 +2,9 @@
 
 ## 文档目的
 
-这份手册面向工程实现，记录当前学习循环已经落地的形态、回归方式，以及还保留的缺口。它不是目标蓝图，而是当前代码的施工说明。
+这份手册面向工程实现，记录当前学习循环已经落地的形态、回归方式，以及仍保留的实现边界。
+
+它不是目标蓝图，而是当前代码的施工说明。
 
 ## 当前最小闭环
 
@@ -12,7 +14,7 @@
 - `/api/v1/ws` 可发起实时学习回合
 - `LearningOrchestrator` 可组装单轮学习请求
 - `BoardFacts -> TurnPolicy -> LearningEvent` 三层状态链已接入
-- `NanobotTurnExecutor` 已作为当前执行器
+- `NanobotTurnExecutor` 作为当前执行器
 - `memory` 和 `lightrag` 以工具方式接入
 - runtime compression 与 product compression 都已接上
 - session / project / memory 均可落到 JSON state store
@@ -28,7 +30,7 @@ WebSocket `start_turn` 或 `message` 进入 `/api/v1/ws` 后，API 层会：
 - 写入 `active_turn_id` 和 `active_turns`
 - 先发 `session` 与 `stage_start` 事件
 
-### 2. orchestrator 装配
+### 2. orchestrator 组装
 
 `LearningOrchestrator.run_turn()` 当前执行顺序：
 
@@ -80,15 +82,15 @@ WebSocket `start_turn` 或 `message` 进入 `/api/v1/ws` 后，API 层会：
 
 ## 已完成的对齐项
 
-### 状态持久化
+### 1. 状态持久化
 
 以下问题已经收口：
 
 - `LearningSession.created_at / updated_at` 已是正式字段
-- `touch_session()` 直接写 dataclass 字段，不再动态 `setattr`
+- `touch_session()` 直接写 dataclass 字段
 - `SessionStore`、`LearningProjectService`、`EventMemoryStore` 已统一改用 `colearn.storage.records`
 
-### JSON 写入保护
+### 2. JSON 写入保护
 
 `JsonStateStore` 当前已经具备：
 
@@ -97,7 +99,7 @@ WebSocket `start_turn` 或 `message` 进入 `/api/v1/ws` 后，API 层会：
 
 这解决了多实例或后台结果写回时最明显的文件覆盖风险。
 
-### 后台压缩竞态缓解
+### 3. 后台压缩竞态缓解
 
 后台线程不再直接重复整对象写 store。当前模式是：
 
@@ -106,7 +108,7 @@ WebSocket `start_turn` 或 `message` 进入 `/api/v1/ws` 后，API 层会：
 
 这样避免了后台线程把主链刚写入的 messages / board / status 整体冲掉。
 
-### source readiness 真正进入请求
+### 4. source readiness 真正进入请求
 
 当前 preflight 结果不只写到 `project.retrieval_profile`，还会进入：
 
@@ -115,7 +117,7 @@ WebSocket `start_turn` 或 `message` 进入 `/api/v1/ws` 后，API 层会：
 
 这意味着 preflight 已经有下游消费者，不再是纯展示字段。
 
-### LightRAG async 边界
+### 5. LightRAG async 边界
 
 LightRAG 适配层已经改成显式 async / sync 双入口：
 
@@ -124,13 +126,23 @@ LightRAG 适配层已经改成显式 async / sync 双入口：
 
 旧的 `_run_async()` 线程绕行逻辑已经移除。
 
-### API 层状态拆分
+### 6. API 状态拆分
 
 `settings_state`、`memory_docs`、`skills_state` 这类全局可变字典已经拆到 `colearn.api.state` 中的可重置 service。
 
+### 7. 本轮联调补齐
+
+为配合前端联调，当前后端已补齐：
+
+- auth 状态与登录注册
+- knowledge task stream / progress ws / file route
+- settings diagnostics events
+
+这使当前学习循环不再只停留在聊天主链，而是补到了知识库与 settings 配套入口。
+
 ## 当前仍保留的实现边界
 
-### API schema 只做到部分收口
+### 1. API schema 只做到重点收口
 
 当前已经 schema 化的重点入口包括：
 
@@ -140,26 +152,30 @@ LightRAG 适配层已经改成显式 async / sync 双入口：
 - session / project 主要写接口
 - WebSocket `start_turn`
 
-但“全部 payload 都已强类型化”这件事还没成立。当前仍有继续收口空间，尤其是部分工具型接口和 WebSocket 消息分发层。
+但“全部 payload 都已强类型化”还不成立。
 
-### Board version
+### 2. Board version
 
 当前 `board_version` 的能力是：
 
 - 防止明显 stale write 覆盖较新 Board
 - 发生冲突时跳过写入并记录 warning
 
-它还不是严格的 compare-and-swap 或严格递增写入协议。
+它还不是严格 compare-and-swap 或严格单步递增写入协议。
 
-### BoardFacts 的双重表示
+### 3. BoardFacts 的双重表示
 
-当前 Board 在运行时是 dataclass，在 session / project JSON 中仍是 dict。这个边界是可用的，但还没有收紧成单一类型流。
+当前 Board 在运行时是 dataclass，在 session / project JSON 中仍是 dict。
 
-### retrieval_bundle
+这个边界是可用的，但还没有收紧成单一类型流。
 
-`LearningTurnRequest.retrieval_bundle` 仍保留在 request contract 中。当前主链仍以 tool-mode retrieval 为主，没有在回合前把真实检索文本写进去。
+### 4. retrieval_bundle
 
-### KnowledgeWorkspaceService
+`LearningTurnRequest.retrieval_bundle` 仍保留在 request contract 中。
+
+当前主链仍以 tool-mode retrieval 为主，没有在回合开始前把真实检索文本写进去。
+
+### 5. KnowledgeWorkspaceService
 
 `KnowledgeWorkspaceService` 当前主要负责 source readiness 与轻量 source library 管理，仍是内存态服务，不是完整知识库主存储。
 
@@ -171,23 +187,29 @@ LightRAG 适配层已经改成显式 async / sync 双入口：
 python -m pytest tests
 ```
 
-当前仓库的已知基线是 `32 passed`。后续如果补充测试导致用例数变化，应同步更新本目录文档中的基线描述。
+前端与契约侧的当前回归入口包括：
+
+```bash
+cd web
+npm run test:node
+```
 
 ## 本轮之后优先关注的事项
 
 如果继续推进后端收口，建议优先看这几项：
 
-1. WebSocket 消息分发层继续强类型化
-2. `memory refresh` 等剩余裸 payload 入口收口
-3. BoardFacts 持久化边界进一步统一
-4. `retrieval_bundle` 是否从 request contract 移出
-5. knowledge workspace 是否需要持久化
+1. 真实页面联调是否闭环
+2. WebSocket 消息分发层继续强类型化
+3. `memory refresh` 等剩余裸 payload 入口收口
+4. BoardFacts 持久化边界进一步统一
+5. `retrieval_bundle` 是否从 request contract 移出
+6. knowledge workspace 是否需要持久化
 
 ## 使用建议
 
 维护学习循环时，建议遵守两个顺序：
 
-1. 先更新本目录协议和装配文档
+1. 先更新本目录协议与装配文档
 2. 再修改 orchestrator、executor、API 或状态层代码
 
 这样前后端和文档更容易保持同一个事实面。

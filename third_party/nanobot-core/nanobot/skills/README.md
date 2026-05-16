@@ -1,31 +1,42 @@
 # nanobot Skills
 
-This directory contains built-in skills that extend nanobot's capabilities.
+This directory contains built-in skills carried with the vendored nanobot snapshot.
+
+Inside CoLearn, these files are reference material first. They are not the primary extension surface for the current CoLearn product workflow.
 
 ## Skill Format
 
 Each skill is a directory containing a `SKILL.md` file with:
-- YAML frontmatter (name, description, metadata)
+
+- YAML frontmatter
+- a short description
 - Markdown instructions for the agent
 
-When skills reference large local documentation or logs, prefer nanobot's built-in
-`grep` tool to narrow the search space before loading full files.
-Use `grep(output_mode="count")` / `files_with_matches` for broad searches first,
-use `head_limit` / `offset` to page through large result sets,
-and `grep(glob="*.md")` to filter by file name pattern.
+When a skill references large local documentation or logs, prefer narrowing the search space first instead of loading everything at once.
 
 ## Attribution
 
 These skills are adapted from [OpenClaw](https://github.com/openclaw/openclaw)'s skill system.
-The skill format and metadata structure follow OpenClaw's conventions to maintain compatibility.
 
-## Available Skills
+The skill format and metadata structure follow OpenClaw's conventions to preserve compatibility with the upstream vendor snapshot.
+
+## Available Skills In This Snapshot
 
 | Skill | Description |
 |-------|-------------|
 | `github` | Interact with GitHub using the `gh` CLI |
-| `weather` | Get weather info using wttr.in and Open-Meteo |
-| `summarize` | Summarize URLs, files, and YouTube videos |
+| `weather` | Get weather information |
+| `summarize` | Summarize URLs, files, and videos |
 | `tmux` | Remote-control tmux sessions |
-| `clawhub` | Search and install skills from ClawHub registry |
+| `clawhub` | Search and install skills from a registry |
 | `skill-creator` | Create new skills |
+
+## CoLearn Boundary
+
+These vendor skills are not the main source of truth for CoLearn's current local workflow.
+
+For CoLearn-specific architecture, maintenance, and handoff context, prefer:
+
+- `CoLearn-docs/README.md`
+- `CoLearn-docs/02-Architecture/*`
+- `CoLearn-docs/04-Claude-Handoffs/*`
