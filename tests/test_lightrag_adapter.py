@@ -12,8 +12,8 @@ from colearn.retrieval.adapters.lightrag import (  # noqa: E402
     HttpLightRAGBackend,
     LightRAGClient,
     LightRAGConfig,
+    LightRAGConfigurationError,
     LightRAGRetrievalResult,
-    NoOpLightRAGClient,
     get_lightrag_client,
 )
 from colearn.retrieval.service import RetrievalService  # noqa: E402
@@ -52,15 +52,9 @@ class FakeBackend:
         }
 
 
-def test_get_lightrag_client_returns_noop_when_backend_missing(tmp_path: Path) -> None:
-    client = get_lightrag_client(workspace=tmp_path)
-    assert isinstance(client, NoOpLightRAGClient)
-    result = client.retrieve_project_context(
-        project_id="p1",
-        query="hello",
-        source_refs=[],
-    )
-    assert result.fallback_reason == "lightrag_disabled"
+def test_get_lightrag_client_requires_enabled_config(tmp_path: Path) -> None:
+    with pytest.raises(LightRAGConfigurationError, match="LightRAG is required"):
+        get_lightrag_client(workspace=tmp_path)
 
 
 def test_get_lightrag_client_builds_http_backend_from_config(tmp_path: Path) -> None:

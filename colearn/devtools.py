@@ -12,8 +12,12 @@ DEFAULT_RESET_PATHS = [
     ".colearn/state",
     ".colearn/test-state",
     ".colearn/pytest-cache",
-    "web/test-results",
-    "web/playwright-report",
+    ".colearn/tmp",
+    ".colearn/logs",
+    ".colearn/nanobot-workspace",
+    ".colearn/webui",
+    ".colearn/test-results",
+    ".colearn/playwright-report",
 ]
 
 

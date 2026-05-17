@@ -14,7 +14,7 @@ from colearn.learning.retrieval_bundle import (
 )
 from colearn.projects.models import LearningProject
 from colearn.sessions.store import LearningSession
-from .adapters import LightRAGClientProtocol, get_lightrag_client
+from .adapters import LightRAGClientProtocol, LightRAGConfigurationError, get_lightrag_client
 
 
 class RetrievalService:
@@ -27,7 +27,13 @@ class RetrievalService:
     ) -> None:
         self._library_root = Path(library_root).resolve() if library_root else None
         self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
-        self._lightrag_client = lightrag_client or get_lightrag_client(workspace=self._workspace)
+        self._lightrag_client = lightrag_client
+        self._lightrag_error: Exception | None = None
+        if self._lightrag_client is None:
+            try:
+                self._lightrag_client = get_lightrag_client(workspace=self._workspace)
+            except LightRAGConfigurationError as exc:
+                self._lightrag_error = exc
 
     def build_bundle(
         self,
@@ -62,7 +68,7 @@ class RetrievalService:
             )
 
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        lightrag_result = self._lightrag_client.retrieve_project_context(
+        lightrag_result = self._require_lightrag_client().retrieve_project_context(
             project_id=project_id,
             query=query,
             source_refs=normalized_refs,
@@ -94,7 +100,8 @@ class RetrievalService:
             )
 
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        async_retrieve = getattr(self._lightrag_client, "async_retrieve_project_context", None)
+        client = self._require_lightrag_client()
+        async_retrieve = getattr(client, "async_retrieve_project_context", None)
         if async_retrieve is not None:
             lightrag_result = await async_retrieve(
                 project_id=project_id,
@@ -104,7 +111,7 @@ class RetrievalService:
             )
         else:
             lightrag_result = await asyncio.to_thread(
-                self._lightrag_client.retrieve_project_context,
+                client.retrieve_project_context,
                 project_id=project_id,
                 query=query,
                 source_refs=normalized_refs,
@@ -227,7 +234,7 @@ class RetrievalService:
     ) -> dict[str, Any]:
         source_refs = session.source_refs or project.source_subset or project.source_refs
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        return self._lightrag_client.sync_project_sources(project.project_id, normalized_refs)
+        return self._require_lightrag_client().sync_project_sources(project.project_id, normalized_refs)
 
     def sync_source_refs(
         self,
@@ -237,7 +244,7 @@ class RetrievalService:
         libraries: list[SourceLibrary] | None = None,
     ) -> dict[str, Any]:
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        return self._lightrag_client.sync_project_sources(project_id, normalized_refs)
+        return self._require_lightrag_client().sync_project_sources(project_id, normalized_refs)
 
     async def async_sync_source_refs(
         self,
@@ -247,14 +254,22 @@ class RetrievalService:
         libraries: list[SourceLibrary] | None = None,
     ) -> dict[str, Any]:
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        async_sync = getattr(self._lightrag_client, "async_sync_project_sources", None)
+        client = self._require_lightrag_client()
+        async_sync = getattr(client, "async_sync_project_sources", None)
         if async_sync is not None:
             return await async_sync(project_id, normalized_refs)
         return await asyncio.to_thread(
-            self._lightrag_client.sync_project_sources,
+            client.sync_project_sources,
             project_id,
             normalized_refs,
         )
+
+    def _require_lightrag_client(self) -> LightRAGClientProtocol:
+        if self._lightrag_client is None and self._lightrag_error is not None:
+            raise self._lightrag_error
+        if self._lightrag_client is None:
+            raise RuntimeError("LightRAG client is unavailable.")
+        return self._lightrag_client
 
     def _normalize_source_refs(
         self,

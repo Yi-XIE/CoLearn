@@ -21,8 +21,8 @@
 - `.colearn/state/`
 - `.colearn/test-state/`
 - `.colearn/pytest-cache/`
-- `web/test-results/`
-- `web/playwright-report/`
+- `.colearn/test-results/`
+- `.colearn/playwright-report/`
 
 `.env` 默认视为个人配置，不参与常规 reset，只有显式带 `--include-env` 才清理。
 

@@ -4,8 +4,8 @@ from .lightrag import (
     LightRAGClient,
     LightRAGClientProtocol,
     LightRAGConfig,
+    LightRAGConfigurationError,
     LightRAGRetrievalResult,
-    NoOpLightRAGClient,
     get_lightrag_client,
 )
 
@@ -13,7 +13,7 @@ __all__ = [
     "LightRAGClient",
     "LightRAGClientProtocol",
     "LightRAGConfig",
+    "LightRAGConfigurationError",
     "LightRAGRetrievalResult",
-    "NoOpLightRAGClient",
     "get_lightrag_client",
 ]

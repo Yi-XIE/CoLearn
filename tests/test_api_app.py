@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import json
@@ -8,6 +8,7 @@ import sys
 
 import anyio
 import httpx
+from colearn.memory.store import MemoryEvent
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -488,6 +489,48 @@ async def _run_settings_events_checks() -> None:
 
 def test_settings_test_events_endpoint() -> None:
     anyio.run(_run_settings_events_checks)
+
+
+async def _run_memory_summary_checks() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    app_module.memory_doc_service.reset()
+    app_module.memory_doc_service.update("summary", "已沉淀的长期记忆")
+    session = app_module.session_store.create_session(
+        session_id="memory-summary-session",
+        project_id="memory-summary-project",
+        title="Memory Summary",
+    )
+    session.continuation_prompt = "继续验证关键结论。"
+    session.board_facts = {
+        "continuation": {"next_prompt_hint": "继续验证关键结论。"},
+        "gaps_and_blockers": {
+            "critical_blockers": [{"id": "blk-1", "desc": "缺少证据支持"}],
+        },
+        "evidence_refs": [{"source_ref": "note.md", "tool_name": "lightrag"}],
+    }
+    app_module.session_store.save_session(session)
+    app_module.orchestrator.memory_store.append(
+        MemoryEvent(
+            event_id="evt-1",
+            kind="review_written",
+            payload={"summary": "需要进一步核对证据", "session_id": session.session_id},
+        )
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/memory/summary")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["summary"] == "已沉淀的长期记忆"
+        assert payload["current_continuity"] == "继续验证关键结论。"
+        assert payload["blockers"][0]["label"] == "缺少证据支持"
+        assert payload["long_term_facts"][0]["label"] == "note.md"
+        assert payload["recent_events"][0]["summary"] == "需要进一步核对证据"
+
+
+def test_memory_summary_endpoint() -> None:
+    anyio.run(_run_memory_summary_checks)
 
 
 async def _run_settings_apply_persistence_checks() -> None:

@@ -75,9 +75,7 @@ git pull
 
 相关文件：
 
-- `web/tests/e2e/live-backend-flow.audit.ts`
-- `web/tests/e2e/fixtures/kb-live-sample.txt`
-- `web/package.json` 中的 `audit:live`
+- `webui` 的联调审计与样本数据
 
 ### 还没有完全收口的地方
 

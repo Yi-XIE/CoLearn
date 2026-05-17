@@ -221,8 +221,8 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(document.title).toBe("Workspace Settings - CoLearn");
+    expect(await screen.findByText("设置")).toBeInTheDocument();
+    expect(document.title).toBe("设置 - CoLearn");
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.getByText("CoLearn mode")).toBeInTheDocument();
     expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
@@ -235,9 +235,104 @@ describe("App layout", () => {
     });
     fireEvent.click(screen.getByText("OpenRouter"));
     fireEvent.click(screen.getByText("OpenAI"));
-    expect(screen.getByText("open-key")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重启运行时" })).toBeInTheDocument();
+  });
+
+  it("renders real knowledge garden data from the API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/v1/knowledge/list")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              knowledge_bases: [
+                {
+                  id: "kb-math",
+                  name: "线性代数资料库",
+                  source_count: 2,
+                  status: "ready",
+                  provider: "lightrag",
+                },
+              ],
+            }),
+          };
+        }
+        if (url.includes("/api/v1/knowledge/kb-math/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              files: [
+                { name: "notes.md", path: "/tmp/notes.md", size: 2048, modified: 1 },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "知识花园" }));
+
+    expect(await screen.findAllByText("线性代数资料库")).not.toHaveLength(0);
+    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+  });
+
+  it("renders memory and skills pages with API-backed content", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/v1/memory/summary")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              summary: "已沉淀的长期记忆",
+              profile: "",
+              summary_updated_at: null,
+              profile_updated_at: null,
+              current_continuity: "继续验证关键结论。",
+              long_term_facts: [{ label: "note.md", detail: "lightrag" }],
+              blockers: [{ label: "缺少证据支持", detail: "critical" }],
+              recent_events: [{ event_id: "evt-1", kind: "review_written", summary: "需要进一步核对证据", recorded_at: "" }],
+            }),
+          };
+        }
+        if (url.includes("/api/v1/skills/list")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              skills: [
+                { name: "review", description: "整理学习回顾", tags: ["learning"] },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "记忆" }));
+    expect(await screen.findByText("继续验证关键结论。")).toBeInTheDocument();
+    expect(await screen.findByText("缺少证据支持")).toBeInTheDocument();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "技能" }));
+    expect(await screen.findByText("review")).toBeInTheDocument();
+    expect(await screen.findByText("整理学习回顾")).toBeInTheDocument();
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {

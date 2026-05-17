@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -18,7 +19,7 @@ from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.memory.store import EventMemoryStore, MemoryEvent
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
-from colearn.runtime.nanobot_bridge import normalize_learning_turn_result
+from colearn.runtime_v2.result_bridge import normalize_learning_turn_result
 from colearn.sessions.store import SessionStore
 from colearn.storage.json_store import JsonStateStore
 
@@ -107,6 +108,68 @@ def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert len(orchestrator.memory_store.list_events_for_session("sess-1")) == 3
     assert saved_session.board_facts["updated_at"]
     assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
+
+
+def test_orchestrator_persists_learning_state_writeback(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-learning", "Learning")
+    project.anchor = {"topic": "learning state"}
+    project.anchor_status = "ready"
+    project_service.save_project(project)
+
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-learning", project_id="proj-learning")
+    session.board_facts = {
+        "project_id": "proj-learning",
+        "session_id": "sess-learning",
+        "current_turn_mode": "EXPLORE",
+        "board_version": 1,
+        "current_progress": {
+            "active_node_id": "node-1",
+            "active_node_label": "Node 1",
+            "completed_node_ids": [],
+            "path_node_ids": [],
+        },
+        "student_snapshot": {
+            "mastery_level": 0.1,
+            "cognitive_load": "NORMAL",
+            "last_user_intent_raw": "",
+        },
+        "gaps_and_blockers": {
+            "critical_blockers": [],
+            "unverified_gaps": [],
+        },
+        "continuation": {
+            "next_prompt_hint": "继续推进",
+            "last_completed_turn_id": "",
+        },
+        "evidence_refs": [],
+    }
+    session_store.save_session(session)
+
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+    )
+
+    result = orchestrator.run_turn(
+        session_id="sess-learning",
+        project_id="proj-learning",
+        user_message="Please continue.",
+    )
+
+    saved_session = session_store.get_session("sess-learning")
+    saved_project = project_service.get_project("proj-learning")
+
+    assert result.final_text
+    assert saved_session is not None
+    assert saved_project is not None
+    assert saved_session.board_facts["continuation"]["next_prompt_hint"]
+    assert saved_session.last_turn_result["runtime_v2"]["closure_applied"] is True
+    assert saved_project.board_facts["continuation"]["next_prompt_hint"]
 
 
 def test_product_compression_failure_keeps_main_result(tmp_path):
@@ -384,7 +447,7 @@ def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> N
     saved_project = project_service.get_project("proj-source")
     assert saved_project is not None
     assert saved_project.retrieval_profile["readiness"] == profile["readiness"]
-    from colearn.runtime.turn_executor import NanobotTurnExecutor
+    from colearn.runtime_v2.executor import NanobotTurnExecutor
 
     prompt = NanobotTurnExecutor()._build_prompt(request)
     assert "Source readiness:" in prompt
@@ -522,3 +585,56 @@ def test_runtime_v2_learning_closure_marks_runtime_metadata() -> None:
     assert payload["warnings"] == ["runtime_note"]
     assert payload["tool_events"] == [{"tool_name": "lightrag"}]
     assert "board_after" in payload
+
+
+def test_runtime_v2_tooling_registers_memory_and_lightrag(monkeypatch) -> None:
+    from colearn.runtime_v2.tooling import install_colearn_tools
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.items: dict[str, object] = {}
+
+        def has(self, name: str) -> bool:
+            return name in self.items
+
+        def unregister(self, name: str) -> None:
+            self.items.pop(name, None)
+
+        def register(self, tool: object) -> None:
+            self.items[getattr(tool, "name")] = tool
+
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.tools = FakeRegistry()
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self._loop = FakeLoop()
+
+    class FakeTool:
+        async def execute(self, **kwargs):
+            return ""
+
+    def fake_tool_parameters(_schema):
+        def decorator(cls):
+            return cls
+        return decorator
+
+    monkeypatch.setitem(
+        sys.modules,
+        "nanobot.agent.tools.base",
+        SimpleNamespace(Tool=FakeTool, tool_parameters=fake_tool_parameters),
+    )
+
+    bot = FakeBot()
+    request = LearningTurnRequest(
+        session_id="sess-tools",
+        project_id="proj-tools",
+        user_message="Find the source",
+        enabled_tools=["memory", "lightrag"],
+    )
+
+    install_colearn_tools(bot=bot, request=request, workspace=Path.cwd())
+
+    assert "memory" in bot._loop.tools.items
+    assert "lightrag" in bot._loop.tools.items

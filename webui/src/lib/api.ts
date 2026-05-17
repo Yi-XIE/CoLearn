@@ -1,9 +1,14 @@
 import type {
   ChatSummary,
+  KnowledgeBaseSummary,
+  KnowledgeFileSummary,
+  KnowledgeTaskResult,
+  MemorySummaryPayload,
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
   SlashCommand,
+  SkillSummary,
   WebSearchSettingsUpdate,
   WebuiThreadPersistedPayload,
 } from "./types";
@@ -164,4 +169,88 @@ export async function updateWebSearchSettings(
     `${base}/api/settings/web-search/update?${query}`,
     token,
   );
+}
+
+export async function listKnowledgeBases(
+  token: string,
+  base: string = "",
+): Promise<KnowledgeBaseSummary[]> {
+  const body = await request<{ knowledge_bases: KnowledgeBaseSummary[] }>(
+    `${base}/api/v1/knowledge/list`,
+    token,
+  );
+  return body.knowledge_bases;
+}
+
+export async function listKnowledgeFiles(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<KnowledgeFileSummary[]> {
+  const body = await request<{ files: KnowledgeFileSummary[] }>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/files`,
+    token,
+  );
+  return body.files;
+}
+
+export async function createKnowledgeBase(
+  token: string,
+  params: { name: string; files: File[]; ragProvider?: string },
+  base: string = "",
+): Promise<KnowledgeTaskResult> {
+  const form = new FormData();
+  form.append("name", params.name);
+  form.append("rag_provider", params.ragProvider ?? "lightrag");
+  for (const file of params.files) form.append("files", file);
+  return request<KnowledgeTaskResult>(
+    `${base}/api/v1/knowledge/create`,
+    token,
+    { method: "POST", body: form },
+  );
+}
+
+export async function uploadKnowledgeFiles(
+  token: string,
+  params: { name: string; files: File[]; ragProvider?: string },
+  base: string = "",
+): Promise<KnowledgeTaskResult> {
+  const form = new FormData();
+  form.append("rag_provider", params.ragProvider ?? "lightrag");
+  for (const file of params.files) form.append("files", file);
+  return request<KnowledgeTaskResult>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(params.name)}/upload`,
+    token,
+    { method: "POST", body: form },
+  );
+}
+
+export async function reindexKnowledgeBase(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<KnowledgeTaskResult> {
+  return request<KnowledgeTaskResult>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/reindex`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export async function fetchMemorySummary(
+  token: string,
+  base: string = "",
+): Promise<MemorySummaryPayload> {
+  return request<MemorySummaryPayload>(`${base}/api/v1/memory/summary`, token);
+}
+
+export async function listSkills(
+  token: string,
+  base: string = "",
+): Promise<SkillSummary[]> {
+  const body = await request<{ skills: SkillSummary[] }>(
+    `${base}/api/v1/skills/list`,
+    token,
+  );
+  return body.skills;
 }

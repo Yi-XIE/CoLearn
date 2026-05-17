@@ -9,7 +9,7 @@ from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.memory.store import EventMemoryStore
 from colearn.retrieval.adapters import get_lightrag_client
 from colearn.retrieval.service import RetrievalService
-from colearn.runtime.tool_adapters import normalize_enabled_tools
+from colearn.runtime_v2.tool_adapters import normalize_enabled_tools
 
 from .profile import DEFAULT_ENABLED_TOOLS
 

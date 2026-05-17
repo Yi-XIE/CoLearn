@@ -1,4 +1,0 @@
-{"event":"user","chat_id":"3a1cb113-1c35-4b9d-b072-6838b259183b","text":"Create a concise project plan for what I should build next."}
-{"event":"stream_end","chat_id":"3a1cb113-1c35-4b9d-b072-6838b259183b","stream_id":"websocket:3a1cb113-1c35-4b9d-b072-6838b259183b:1778952311096119500:0"}
-{"event":"message","chat_id":"3a1cb113-1c35-4b9d-b072-6838b259183b","text":"Error: {'message': 'Incorrect API key provided: sk-a7diz***************************************9Rls. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}","latency_ms":23514}
-{"event":"turn_end","chat_id":"3a1cb113-1c35-4b9d-b072-6838b259183b","latency_ms":23514,"goal_state":{"active":false}}

@@ -35,6 +35,7 @@ export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
+
   const filteredSessions = useMemo(() => {
     if (!normalizedQuery) return props.sessions;
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
@@ -137,6 +138,7 @@ export function Sidebar(props: SidebarProps) {
           })}
         </div>
       </div>
+
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ChatList
           sessions={filteredSessions}
@@ -149,6 +151,7 @@ export function Sidebar(props: SidebarProps) {
           onRequestDelete={props.onRequestDelete}
         />
       </div>
+
       <div className="space-y-1 px-2.5 py-2.5 text-xs">
         <Button
           type="button"

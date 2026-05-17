@@ -15,6 +15,10 @@ DEFAULT_TOP_K = 5
 DEFAULT_BASE_URL = "http://127.0.0.1:9621"
 
 
+class LightRAGConfigurationError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class LightRAGRetrievalResult:
     query: str = ""
@@ -606,13 +610,21 @@ def get_lightrag_client(
     config_path = path or (workspace / ".colearn" / "lightrag.json")
     config = LightRAGConfig.load(config_path, env=env)
     resolved_backend = backend
-    if resolved_backend is None and config.enabled and config.provider == "server":
+    if not config.enabled:
+        raise LightRAGConfigurationError(
+            f"LightRAG is required for the mainline but disabled in {config_path}."
+        )
+    if resolved_backend is None and config.provider == "server":
         resolved_backend = HttpLightRAGBackend(
             base_url=config.base_url,
             api_key=config.api_key,
         )
-    if enabled is False or not config.enabled or resolved_backend is None:
-        return NoOpLightRAGClient(path=config_path)
+    if enabled is False:
+        raise LightRAGConfigurationError("LightRAG was explicitly disabled by the caller.")
+    if resolved_backend is None:
+        raise LightRAGConfigurationError(
+            f"LightRAG provider '{config.provider}' is not available for {config_path}."
+        )
     return LightRAGClient(
         config=config,
         path=config_path,
@@ -628,7 +640,7 @@ __all__ = [
     "LightRAGClient",
     "LightRAGClientProtocol",
     "LightRAGConfig",
+    "LightRAGConfigurationError",
     "LightRAGRetrievalResult",
-    "NoOpLightRAGClient",
     "get_lightrag_client",
 ]

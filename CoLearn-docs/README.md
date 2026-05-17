@@ -1,81 +1,15 @@
 # CoLearn Docs
 
-这份目录只保留 CoLearn 当前主线仍然会继续使用的文档。
+This folder keeps the documents the current CoLearn mainline still uses.
 
-这里的文档不是为了堆历史，而是为了帮当前代码保持清晰边界、维护路径和接手上下文。
+## What to read
 
-## Directory Map
-
-### `01-Blueprints`
-
-产品蓝图与长期边界。
-
-适合回答：
-
-- CoLearn 想成为什么
-- 产品边界放在哪里
-- 最小闭环是什么
-
-### `02-Architecture`
-
-当前后端与主链的架构事实文档。
-
-适合回答：
-
-- 当前主链怎么组装
-- LearningState 协议是什么
-- 学习循环现在已经落到什么程度
-- 哪些边界已经收口，哪些还保留
-
-当前重点文档：
-
-- `CoLearn-顶层组装路径.md`
-- `CoLearn-LearningState-协议.md`
-- `CoLearn-学习循环实施手册.md`
-- `CoLearn-后端代码补全计划.md`
-- `CoLearn-个人开发维护手册.md`
-
-### `03-Execution`
-
-阶段性执行计划、验收结论、仍有复用价值的图示。
-
-适合回答：
-
-- 某个阶段当时打算怎么推进
-- 某一轮验收当时如何定义
-- 某张结构图是否仍值得参考
-
-### `04-Claude-Handoffs`
-
-给外部接手者或下一轮协作者准备的交接材料。
-
-当前已放入：
-
-- `CoLearn-Claude-联调补强交接说明.md`
-
-它主要用于：
-
-- 让 Claude 或其他远端协作者快速同步当前事实
-- 明确应该优先发力的区域
-- 说明依赖安装、联调命令、远端同步约束与验收口径
-
-### `archive`
-
-只保留明确标记为历史归档的材料。
-
-## How To Use This Folder
-
-建议按下面顺序阅读：
-
-1. 先看 `01-Blueprints`
-2. 再看 `02-Architecture`
-3. 有阶段任务时再看 `03-Execution`
-4. 涉及外部接手或跨机器协作时看 `04-Claude-Handoffs`
+- `02-Architecture`: current runtime, state, and writeback facts
+- `04-Claude-Handoffs`: handoff notes for collaborators
+- `05-Nanobot-v0.2`: adoption and compatibility notes for the runtime line
 
 ## Maintenance Rules
 
-1. 文档必须服务当前主线，不维护无效历史包袱。
-2. 架构文档写“当前代码事实”，不要把未落地计划写成已完成。
-3. 阶段执行文档只保留仍会被复用或对照的部分。
-4. 新增交接文档时，优先放到独立 handoff 目录，不把交接材料混进架构主文档。
-5. 写入前保持 UTF-8 干净编码，不保留乱码、占位符或损坏字符。
+- Keep documents aligned with the current mainline.
+- Do not rewrite finished plans as finished facts.
+- Keep UTF-8 clean and avoid damaged text or placeholders in formal docs.

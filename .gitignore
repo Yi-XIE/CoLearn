@@ -14,6 +14,11 @@ htmlcov/
 .colearn/test-state/
 .colearn/pytest-cache/
 .colearn/tmp/
+.colearn/nanobot-workspace/
+.colearn/webui/
+.colearn/*.jsonl
+.tmp-pytest/
+.tmp-pytest-*/
 
 # Node / frontend build output
 web/node_modules/

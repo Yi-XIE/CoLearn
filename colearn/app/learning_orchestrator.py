@@ -20,8 +20,8 @@ from colearn.memory.store import EventMemoryStore, MemoryEvent
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
-from colearn.runtime.context_bridge import build_learning_turn_request
-from colearn.runtime.turn_executor import NanobotTurnExecutor
+from colearn.runtime_v2.context_bridge import build_learning_turn_request
+from colearn.runtime_v2.executor import NanobotTurnExecutor
 from colearn.runtime_v2 import build_learning_closure
 from colearn.sessions.store import LearningSession, SessionStore
 from .source_preflight import SourceReadinessPreflight
@@ -295,6 +295,8 @@ class LearningOrchestrator:
             "board_patch": result.board_patch,
             "tool_events": list(result.tool_events),
             "stream_events": list(result.stream_events),
+            "raw_learning_result": dict(result.raw_learning_result or {}),
+            "runtime_v2": dict((result.raw_learning_result or {}).get("runtime_v2") or {}),
             "product_compression": {
                 "status": "scheduled",
                 "started_at": None,
@@ -323,6 +325,8 @@ class LearningOrchestrator:
         session.last_turn_result = {
             **session.last_turn_result,
             "warnings": warnings,
+            "raw_learning_result": dict(result.raw_learning_result or {}),
+            "runtime_v2": dict((result.raw_learning_result or {}).get("runtime_v2") or {}),
         }
         project.anchor_status = "ready" if project.anchor else "missing"
         project.current_main_goal = (

@@ -79,7 +79,7 @@
 - WebSocket 还能单独发 `goal_state` / `goal_status`
 - 活动目标存在时会放宽 wall timeout
 
-这套机制和 CoLearn 高度兼容，因为我们本来就有：
+这套机制和 CoLearn 的主线一致，因为我们本来就有：
 
 - `LearningState`
 - 项目 goal

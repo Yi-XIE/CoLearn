@@ -144,6 +144,28 @@ def _auth_status_payload(user: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _latest_session() -> Any | None:
+    sessions = session_store.list_sessions()
+    if not sessions:
+        return None
+    return sessions[-1]
+
+
+def _extract_blocker_summaries(board_facts: dict[str, Any] | None) -> list[dict[str, str]]:
+    blockers = list(dict(board_facts or {}).get("gaps_and_blockers", {}).get("critical_blockers", []) or [])
+    results: list[dict[str, str]] = []
+    for item in blockers[:6]:
+        if isinstance(item, dict):
+            label = str(item.get("desc") or item.get("id") or "").strip()
+            detail = str(item.get("status") or "critical").strip()
+        else:
+            label = str(item).strip()
+            detail = "critical"
+        if label:
+            results.append({"label": label, "detail": detail})
+    return results
+
+
 def _current_user(request: Request) -> dict[str, Any] | None:
     return auth_service.user_for_session(request.cookies.get(AUTH_COOKIE_NAME))
 
@@ -520,6 +542,9 @@ def list_knowledge_bases() -> dict[str, Any]:
             "name": project.title,
             "source_count": len(project.source_refs or []),
             "status": str((project.retrieval_profile or {}).get("last_retrieval_status") or "empty"),
+            "provider": str((project.retrieval_profile or {}).get("provider") or "lightrag"),
+            "updated_at": str((project.board_facts or {}).get("updated_at") or ""),
+            "files": knowledge_task_service.list_files(project.project_id),
         }
         for project in projects
     ]
@@ -699,6 +724,45 @@ async def knowledge_progress_ws(websocket: WebSocket, name: str, task_id: str | 
 @app.get("/api/v1/memory")
 def get_memory() -> dict[str, Any]:
     return memory_doc_service.snapshot()
+
+
+@app.get("/api/v1/memory/summary")
+def get_memory_summary() -> dict[str, Any]:
+    snapshot = memory_doc_service.snapshot()
+    session = _latest_session()
+    board_facts = dict((session.board_facts if session else {}) or {})
+    continuity = str(board_facts.get("continuation", {}).get("next_prompt_hint") or "").strip()
+    if not continuity and session is not None:
+        continuity = str(session.continuation_prompt or "").strip()
+
+    long_term_facts: list[dict[str, str]] = []
+    for ref in list(board_facts.get("evidence_refs", []) or [])[:6]:
+        if not isinstance(ref, dict):
+            continue
+        source_ref = str(ref.get("source_ref") or ref.get("source_path") or "").strip()
+        tool_name = str(ref.get("tool_name") or "source").strip()
+        if source_ref:
+            long_term_facts.append({"label": source_ref, "detail": tool_name})
+
+    recent_events = []
+    for event in reversed(orchestrator.memory_store.list_events()[-8:]):
+        summary = str(event.payload.get("summary") or event.payload.get("review_summary") or event.payload or "").strip()
+        recent_events.append(
+            {
+                "event_id": event.event_id,
+                "kind": event.kind,
+                "summary": summary,
+                "recorded_at": str(event.payload.get("recorded_at") or event.payload.get("timestamp") or ""),
+            }
+        )
+
+    return {
+        **snapshot,
+        "current_continuity": continuity,
+        "long_term_facts": long_term_facts,
+        "blockers": _extract_blocker_summaries(board_facts),
+        "recent_events": recent_events,
+    }
 
 
 @app.get("/api/v1/memory/projection")

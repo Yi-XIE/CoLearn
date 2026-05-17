@@ -1,3 +1,0 @@
-{"_type": "metadata", "key": "websocket:c42ce1b4-d06c-4ef2-9d9d-947363a06812", "created_at": "2026-05-17T01:26:10.966059", "updated_at": "2026-05-17T01:26:12.108457", "metadata": {"webui": true}, "last_consolidated": 0}
-{"role": "user", "content": "Show me a few useful ways you can help in this workspace.", "timestamp": "2026-05-17T01:26:11.030270"}
-{"role": "assistant", "content": "[Assistant reply unavailable due to model error.]", "timestamp": "2026-05-17T01:26:12.108452", "latency_ms": 1142}

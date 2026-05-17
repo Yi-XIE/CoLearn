@@ -1,4 +1,0 @@
-{"event":"user","chat_id":"cee70d35-3364-4fed-9bfc-f0b2013d86ed","text":"sd"}
-{"event":"stream_end","chat_id":"cee70d35-3364-4fed-9bfc-f0b2013d86ed","stream_id":"websocket:cee70d35-3364-4fed-9bfc-f0b2013d86ed:1778951601731669100:0"}
-{"event":"message","chat_id":"cee70d35-3364-4fed-9bfc-f0b2013d86ed","text":"Error: {'message': 'Incorrect API key provided: sk-a7diz***************************************9Rls. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}","latency_ms":40689}
-{"event":"turn_end","chat_id":"cee70d35-3364-4fed-9bfc-f0b2013d86ed","latency_ms":40689,"goal_state":{"active":false}}

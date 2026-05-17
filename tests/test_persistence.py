@@ -85,19 +85,19 @@ def test_reset_state_dry_run_and_default_env_behavior(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     (root / ".colearn" / "state").mkdir(parents=True)
     (root / ".colearn" / "test-state").mkdir(parents=True)
-    (root / "web" / "test-results").mkdir(parents=True)
+    (root / ".colearn" / "test-results").mkdir(parents=True)
     env_path = root / ".env"
     env_path.write_text("OPENAI_API_KEY=test\n", encoding="utf-8")
 
     preview = reset_state(root=root, dry_run=True)
     assert ".colearn/state" in preview
-    assert "web/test-results" in preview
+    assert ".colearn/test-results" in preview
     assert env_path.exists()
 
     removed = reset_state(root=root)
     assert ".colearn/state" in removed
     assert not (root / ".colearn" / "state").exists()
-    assert not (root / "web" / "test-results").exists()
+    assert not (root / ".colearn" / "test-results").exists()
     assert env_path.exists()
 
 

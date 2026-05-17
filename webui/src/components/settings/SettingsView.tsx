@@ -1,31 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import {
   Bot,
-  Brain,
-  ChevronLeft,
   ChevronDown,
+  ChevronLeft,
   Check,
-  Cloud,
-  Cpu,
-  Database,
   Eye,
   EyeOff,
-  Pencil,
-  Gem,
-  Grid3X3,
   Hexagon,
   Loader2,
   LogOut,
-  KeyRound,
-  Layers,
-  Moon,
   Orbit,
+  Pencil,
   RotateCcw,
-  Settings,
   Sparkles,
-  Triangle,
   Waves,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -39,18 +27,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import {
-  fetchSettings,
-  updateProviderSettings,
-  updateSettings,
-} from "@/lib/api";
+import { fetchSettings, updateProviderSettings, updateSettings } from "@/lib/api";
+import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
-import type { SettingsPayload } from "@/lib/types";
 
 const CORE_PROVIDER_NAMES = new Set(["openai", "openrouter", "custom"]);
 
-function isCoreProvider(provider: { name: string; configured: boolean }, resolvedProvider?: string | null): boolean {
+function isCoreProvider(
+  provider: { name: string; configured: boolean },
+  resolvedProvider?: string | null,
+) {
   return (
     provider.configured ||
     CORE_PROVIDER_NAMES.has(provider.name) ||
@@ -88,10 +75,7 @@ export function SettingsView({
   const [providerForms, setProviderForms] = useState<Record<string, { apiKey: string; apiBase: string }>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
-  const [form, setForm] = useState({
-    model: "",
-    provider: "",
-  });
+  const [form, setForm] = useState({ model: "", provider: "" });
 
   const applyPayload = useCallback((payload: SettingsPayload) => {
     setSettings(payload);
@@ -129,7 +113,11 @@ export function SettingsView({
       for (const provider of settings.providers) {
         next[provider.name] = {
           apiKey: next[provider.name]?.apiKey ?? "",
-          apiBase: next[provider.name]?.apiBase ?? provider.api_base ?? provider.default_api_base ?? "",
+          apiBase:
+            next[provider.name]?.apiBase ??
+            provider.api_base ??
+            provider.default_api_base ??
+            "",
         };
       }
       return next;
@@ -163,13 +151,13 @@ export function SettingsView({
   };
 
   const saveProvider = async (providerName: string) => {
-    if (providerSaving) return;
-    const provider = settings?.providers.find((item) => item.name === providerName);
+    if (!settings || providerSaving) return;
+    const provider = settings.providers.find((item) => item.name === providerName);
     if (!provider) return;
     const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "" };
     const apiKey = providerForm.apiKey.trim();
     if (!provider.configured && !apiKey) {
-      setError(t("settings.byok.apiKeyRequired"));
+      setError("新增提供方时需要填写 API Key。");
       return;
     }
     setProviderSaving(providerName);
@@ -197,46 +185,13 @@ export function SettingsView({
     }
   };
 
-  const resetProviderDraft = useCallback((providerName: string) => {
-    const provider = settings?.providers.find((item) => item.name === providerName);
-    if (!provider) return;
-    setProviderForms((prev) => ({
-      ...prev,
-      [providerName]: {
-        apiKey: "",
-        apiBase: provider.api_base ?? provider.default_api_base ?? "",
-      },
-    }));
-    setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-    setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-  }, [settings]);
-
-  const handleToggleProvider = useCallback((providerName: string) => {
-    if (expandedProvider) resetProviderDraft(expandedProvider);
-    setExpandedProvider(expandedProvider === providerName ? null : providerName);
-  }, [expandedProvider, resetProviderDraft]);
-
-  const toggleProviderKeyVisibility = (providerName: string) => {
-    const isVisible = visibleProviderKeys[providerName];
-    setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: !isVisible }));
-  };
-
-  const toggleProviderKeyEditing = (providerName: string) => {
-    setEditingProviderKeys((prev) => {
-      const nextEditing = !prev[providerName];
-      if (!nextEditing) {
-        setProviderForms((forms) => ({
-          ...forms,
-          [providerName]: {
-            apiKey: "",
-            apiBase: forms[providerName]?.apiBase ?? "",
-          },
-        }));
-        setVisibleProviderKeys((visible) => ({ ...visible, [providerName]: false }));
-      }
-      return { ...prev, [providerName]: nextEditing };
-    });
-  };
+  const preferredProviders = useMemo(
+    () =>
+      settings?.providers.filter((provider) =>
+        isCoreProvider(provider, settings.agent.resolved_provider),
+      ) ?? [],
+    [settings],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)]">
@@ -250,6 +205,7 @@ export function SettingsView({
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             {t("settings.backToChat")}
           </button>
+
           <div className="mb-8">
             <h1 className="text-[32px] font-bold leading-tight tracking-[-0.03em] text-black dark:text-white sm:text-[40px]">
               设置
@@ -264,7 +220,9 @@ export function SettingsView({
           ) : error && !settings ? (
             <SettingsGroup>
               <SettingsRow title={t("settings.status.loadError")}>
-                <span className="max-w-[520px] text-sm text-muted-foreground">{error}</span>
+                <span className="max-w-[520px] text-sm text-muted-foreground">
+                  {error}
+                </span>
               </SettingsRow>
             </SettingsGroup>
           ) : settings ? (
@@ -274,42 +232,166 @@ export function SettingsView({
                   {error}
                 </div>
               ) : null}
-              <>
-                <WorkspaceSettings
-                  theme={theme}
-                  onToggleTheme={onToggleTheme}
-                  onLogout={onLogout}
-                  onRestart={onRestart}
-                  isRestarting={isRestarting}
-                />
-                <ModelSettings
-                  form={form}
-                  setForm={setForm}
-                  settings={settings}
-                  dirty={dirty}
-                  saving={saving}
-                  onSave={save}
+
+              <section className="space-y-2">
+                <SettingsSectionTitle>工作台</SettingsSectionTitle>
+                <SettingsGroup>
+                  <SettingsRow title="外观" description="切换浅色与深色工作台主题。">
+                    <button
+                      type="button"
+                      onClick={onToggleTheme}
+                      className="inline-flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
+                    >
+                      <span
+                        className={cn(
+                          "rounded-full px-3 py-1 transition-colors",
+                          theme === "light" && "bg-background text-foreground shadow-sm",
+                        )}
+                      >
+                        Light
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-full px-3 py-1 transition-colors",
+                          theme === "dark" && "bg-background text-foreground shadow-sm",
+                        )}
+                      >
+                        Dark
+                      </span>
+                    </button>
+                  </SettingsRow>
+                  <SettingsRow title="语言" description="选择工作台界面的显示语言。">
+                    <LanguageSwitcher />
+                  </SettingsRow>
+                  <SettingsRow
+                    title="工作模式"
+                    description="当前工作台针对学习会话、资料检索和持续目标做了收口。"
+                  >
+                    <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
+                      CoLearn mode
+                    </span>
+                  </SettingsRow>
+                  {onRestart ? (
+                    <SettingsRow
+                      title="运行时"
+                      description="修改模型或连接配置后，可以在这里重启本地运行时。"
+                    >
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onRestart}
+                        disabled={isRestarting}
+                        className="rounded-full"
+                      >
+                        {isRestarting ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                        ) : (
+                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                        )}
+                        {isRestarting ? "正在重启..." : "重启运行时"}
+                      </Button>
+                    </SettingsRow>
+                  ) : null}
+                  {onLogout ? (
+                    <SettingsRow
+                      title="账户"
+                      description="将当前浏览器与正在使用的 gateway 会话断开。"
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={onLogout}
+                        className="h-9 rounded-full px-3 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
+                      >
+                        <LogOut className="mr-1.5 h-4 w-4" aria-hidden />
+                        {t("app.account.logout")}
+                      </Button>
+                    </SettingsRow>
+                  ) : null}
+                </SettingsGroup>
+              </section>
+
+              <section className="space-y-2">
+                <SettingsSectionTitle>模型</SettingsSectionTitle>
+                <SettingsGroup>
+                  <SettingsRow
+                    title="推理提供方"
+                    description="选择新学习回合默认使用的推理提供方。"
+                  >
+                    <ProviderPicker
+                      providers={preferredProviders}
+                      value={preferredProviders.some((p) => p.name === form.provider) ? form.provider : ""}
+                      emptyLabel="暂无可用提供方"
+                      onChange={(provider) =>
+                        setForm((prev) => ({ ...prev, provider }))
+                      }
+                    />
+                  </SettingsRow>
+                  <SettingsRow
+                    title="模型名称"
+                    description="设置学习工作台默认使用的模型。"
+                  >
+                    <Input
+                      value={form.model}
+                      onChange={(event) =>
+                        setForm((prev) => ({ ...prev, model: event.target.value }))
+                      }
+                      className="h-8 w-[280px] rounded-full text-[13px]"
+                    />
+                  </SettingsRow>
+                  {(dirty || saving || settings.requires_restart) ? (
+                    <SettingsFooter
+                      dirty={dirty}
+                      saving={saving}
+                      saved={settings.requires_restart && !dirty}
+                      onSave={save}
+                    />
+                  ) : null}
+                </SettingsGroup>
+              </section>
+
+              <section className="space-y-3">
+                <SettingsSectionTitle>连接</SettingsSectionTitle>
+                <div className="px-1 text-[12px] leading-5 text-muted-foreground">
+                  当前只保留与本地学习工作流直接相关的模型连接。
+                </div>
+                <ProviderConnectionsPanel
+                  providers={preferredProviders}
                   expandedProvider={expandedProvider}
                   providerForms={providerForms}
                   visibleProviderKeys={visibleProviderKeys}
                   editingProviderKeys={editingProviderKeys}
                   providerSaving={providerSaving}
-                  onToggleProvider={handleToggleProvider}
-                  onToggleProviderKey={toggleProviderKeyVisibility}
-                  onToggleProviderKeyEditing={toggleProviderKeyEditing}
-                  onChangeProviderForm={(provider, value) =>
+                  onToggleProvider={(providerName) =>
+                    setExpandedProvider((current) =>
+                      current === providerName ? null : providerName,
+                    )
+                  }
+                  onToggleProviderKey={(providerName) =>
+                    setVisibleProviderKeys((prev) => ({
+                      ...prev,
+                      [providerName]: !prev[providerName],
+                    }))
+                  }
+                  onToggleProviderKeyEditing={(providerName) =>
+                    setEditingProviderKeys((prev) => ({
+                      ...prev,
+                      [providerName]: !prev[providerName],
+                    }))
+                  }
+                  onChangeProviderForm={(providerName, value) =>
                     setProviderForms((prev) => ({
                       ...prev,
-                      [provider]: {
-                        apiKey: prev[provider]?.apiKey ?? "",
-                        apiBase: prev[provider]?.apiBase ?? "",
+                      [providerName]: {
+                        apiKey: prev[providerName]?.apiKey ?? "",
+                        apiBase: prev[providerName]?.apiBase ?? "",
                         ...value,
                       },
                     }))
                   }
                   onSaveProvider={saveProvider}
                 />
-              </>
+              </section>
             </div>
           ) : null}
         </div>
@@ -317,223 +399,6 @@ export function SettingsView({
     </div>
   );
 }
-
-function WorkspaceSettings({
-  theme,
-  onToggleTheme,
-  onLogout,
-  onRestart,
-  isRestarting,
-}: {
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
-  onLogout?: () => void;
-  onRestart?: () => void;
-  isRestarting?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-8">
-      <section>
-        <SettingsSectionTitle>工作台</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow
-            title="外观"
-            description="切换浅色与深色工作台主题。"
-          >
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              className="inline-flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
-            >
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  theme === "light" && "bg-background text-foreground shadow-sm",
-                )}
-              >
-                浅色
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  theme === "dark" && "bg-background text-foreground shadow-sm",
-                )}
-              >
-                深色
-              </span>
-            </button>
-          </SettingsRow>
-
-          <SettingsRow
-            title="语言"
-            description="选择工作台界面的显示语言。"
-          >
-            <LanguageSwitcher />
-          </SettingsRow>
-          <SettingsRow
-            title="工作模式"
-            description="当前工作台针对学习会话、资料检索和持续目标进行了优化。"
-          >
-            <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
-              CoLearn mode
-            </span>
-          </SettingsRow>
-          {onRestart ? (
-            <SettingsRow
-              title="运行时"
-              description="修改模型或连接配置后，可在这里重启本地运行时。"
-            >
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRestart}
-                disabled={isRestarting}
-                className="rounded-full"
-              >
-                {isRestarting ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : (
-                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                )}
-                {isRestarting ? "正在重启..." : "重启运行时"}
-              </Button>
-            </SettingsRow>
-          ) : null}
-          {onLogout ? (
-            <SettingsRow
-              title="账户"
-              description="将当前浏览器与正在使用的 gateway 会话断开。"
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={onLogout}
-                className="h-9 rounded-full px-3 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
-              >
-                <LogOut className="mr-1.5 h-4 w-4" aria-hidden />
-                {t("app.account.logout")}
-              </Button>
-            </SettingsRow>
-          ) : null}
-        </SettingsGroup>
-      </section>
-    </div>
-  );
-}
-
-function ModelSettings({
-  form,
-  setForm,
-  settings,
-  dirty,
-  saving,
-  onSave,
-  expandedProvider,
-  providerForms,
-  visibleProviderKeys,
-  editingProviderKeys,
-  providerSaving,
-  onToggleProvider,
-  onToggleProviderKey,
-  onToggleProviderKeyEditing,
-  onChangeProviderForm,
-  onSaveProvider,
-}: {
-  form: {
-    model: string;
-    provider: string;
-  };
-  setForm: Dispatch<SetStateAction<{
-    model: string;
-    provider: string;
-  }>>;
-  settings: SettingsPayload;
-  dirty: boolean;
-  saving: boolean;
-  onSave: () => void;
-  expandedProvider: string | null;
-  providerForms: Record<string, { apiKey: string; apiBase: string }>;
-  visibleProviderKeys: Record<string, boolean>;
-  editingProviderKeys: Record<string, boolean>;
-  providerSaving: string | null;
-  onToggleProvider: (provider: string) => void;
-  onToggleProviderKey: (provider: string) => void;
-  onToggleProviderKeyEditing: (provider: string) => void;
-  onChangeProviderForm: (provider: string, value: Partial<{ apiKey: string; apiBase: string }>) => void;
-  onSaveProvider: (provider: string) => void;
-}) {
-  const preferredProviders = settings.providers.filter((provider) =>
-    isCoreProvider(provider, settings.agent.resolved_provider),
-  );
-  const configuredProviders = preferredProviders.filter((provider) => provider.configured);
-  const providerValue = preferredProviders.some((provider) => provider.name === form.provider)
-    ? form.provider
-    : "";
-
-  return (
-    <div className="space-y-8">
-      <section>
-        <SettingsSectionTitle>模型</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow
-            title="推理提供方"
-            description="选择新学习回合默认使用的模型提供方。"
-          >
-            <ProviderPicker
-              providers={preferredProviders}
-              value={providerValue}
-              emptyLabel="No provider available"
-              onChange={(provider) => setForm((prev) => ({ ...prev, provider }))}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            title="模型名称"
-            description="设置学习工作台默认使用的模型。"
-          >
-            <Input
-              value={form.model}
-              onChange={(event) => setForm((prev) => ({ ...prev, model: event.target.value }))}
-              className="h-8 w-[280px] rounded-full text-[13px]"
-            />
-          </SettingsRow>
-
-          {(dirty || saving || settings.requires_restart) ? (
-            <SettingsFooter
-              dirty={dirty}
-              saving={saving}
-              saved={settings.requires_restart && !dirty}
-              onSave={onSave}
-            />
-          ) : null}
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>连接</SettingsSectionTitle>
-        <div className="mb-2 px-1 text-[12px] leading-5 text-muted-foreground">
-          当前只展示与本地学习工作流直接相关的模型连接。
-        </div>
-        <ProviderConnectionsPanel
-          providers={preferredProviders}
-          configuredProviders={configuredProviders}
-          expandedProvider={expandedProvider}
-          providerForms={providerForms}
-          visibleProviderKeys={visibleProviderKeys}
-          editingProviderKeys={editingProviderKeys}
-          providerSaving={providerSaving}
-          onToggleProvider={onToggleProvider}
-          onToggleProviderKey={onToggleProviderKey}
-          onToggleProviderKeyEditing={onToggleProviderKeyEditing}
-          onChangeProviderForm={onChangeProviderForm}
-          onSaveProvider={onSaveProvider}
-        />
-      </section>
-    </div>
-  );
-}
-
 
 function ProviderPicker({
   providers,
@@ -568,7 +433,7 @@ function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[18rem] w-[240px] overflow-y-auto rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]"
+        className="max-h-[18rem] w-[240px] overflow-y-auto rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)]"
       >
         {providers.map((provider) => {
           const selected = provider.name === value;
@@ -594,7 +459,6 @@ function ProviderPicker({
 
 function ProviderConnectionsPanel({
   providers,
-  configuredProviders,
   expandedProvider,
   providerForms,
   visibleProviderKeys,
@@ -607,7 +471,6 @@ function ProviderConnectionsPanel({
   onSaveProvider,
 }: {
   providers: SettingsPayload["providers"];
-  configuredProviders: SettingsPayload["providers"];
   expandedProvider: string | null;
   providerForms: Record<string, { apiKey: string; apiBase: string }>;
   visibleProviderKeys: Record<string, boolean>;
@@ -620,6 +483,9 @@ function ProviderConnectionsPanel({
   onSaveProvider: (provider: string) => void;
 }) {
   const { t } = useTranslation();
+  const configuredProviders = providers.filter((provider) => provider.configured);
+  const secondaryProviders = providers.filter((provider) => !provider.configured);
+
   const renderProviderRow = (provider: SettingsPayload["providers"][number]) => {
     const expanded = expandedProvider === provider.name;
     const form = providerForms[provider.name] ?? {
@@ -629,11 +495,9 @@ function ProviderConnectionsPanel({
     const saving = providerSaving === provider.name;
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
+
     return (
-      <div
-        key={provider.name}
-        className="divide-y divide-border/45"
-      >
+      <div key={provider.name} className="divide-y divide-border/45">
         <button
           type="button"
           onClick={() => onToggleProvider(provider.name)}
@@ -641,10 +505,8 @@ function ProviderConnectionsPanel({
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon provider={provider.name} />
-            <span className="min-w-0">
-              <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
-                {provider.label}
-              </span>
+            <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
+              {provider.label}
             </span>
           </span>
           <span
@@ -655,9 +517,7 @@ function ProviderConnectionsPanel({
                 : "bg-muted text-muted-foreground",
             )}
           >
-            {provider.configured
-              ? t("settings.byok.configured")
-              : t("settings.byok.notConfigured")}
+            {provider.configured ? t("settings.byok.configured") : t("settings.byok.notConfigured")}
           </span>
         </button>
 
@@ -695,11 +555,7 @@ function ProviderConnectionsPanel({
                       }
                       className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
-                      {keyVisible ? (
-                        <EyeOff className="h-3.5 w-3.5" aria-hidden />
-                      ) : (
-                        <Eye className="h-3.5 w-3.5" aria-hidden />
-                      )}
+                      {keyVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </Button>
                   </>
                 ) : (
@@ -715,12 +571,13 @@ function ProviderConnectionsPanel({
                       aria-label={t("settings.actions.edit")}
                       className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
-                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      <Pencil className="h-3.5 w-3.5" />
                     </Button>
                   </>
                 )}
               </div>
             </label>
+
             <label className="block space-y-1.5">
               <span className="text-[12px] font-medium text-muted-foreground">
                 {t("settings.byok.apiBase")}
@@ -734,6 +591,7 @@ function ProviderConnectionsPanel({
                 className="h-9 rounded-full text-[13px]"
               />
             </label>
+
             <div className="flex items-center justify-end">
               <Button
                 size="sm"
@@ -750,12 +608,12 @@ function ProviderConnectionsPanel({
       </div>
     );
   };
-  const secondaryProviders = providers.filter((provider) => !provider.configured);
+
   return (
     <div className="space-y-6">
       <section className="space-y-3">
         <ByokSectionHeader title="已配置提供方" count={configuredProviders.length} />
-        <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
+        <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)]">
           {configuredProviders.length > 0 ? (
             <div className="divide-y divide-border/45">
               {configuredProviders.map(renderProviderRow)}
@@ -769,7 +627,7 @@ function ProviderConnectionsPanel({
       {secondaryProviders.length > 0 ? (
         <section className="space-y-3">
           <ByokSectionHeader title="可用预设" count={secondaryProviders.length} />
-          <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
+          <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)]">
             <div className="divide-y divide-border/45">
               {secondaryProviders.map(renderProviderRow)}
             </div>
@@ -804,33 +662,15 @@ function ByokEmptyState({ children }: { children: ReactNode }) {
 const PROVIDER_ICONS: Record<string, LucideIcon> = {
   custom: Hexagon,
   openrouter: Sparkles,
-  aihubmix: Triangle,
-  anthropic: Brain,
   openai: Bot,
   deepseek: Waves,
-  zhipu: Grid3X3,
-  dashscope: Cloud,
-  moonshot: Moon,
-  minimax: Zap,
-  minimax_anthropic: Brain,
-  groq: Cpu,
-  huggingface: Layers,
-  gemini: Gem,
-  mistral: Orbit,
-  siliconflow: Layers,
-  volcengine: Cloud,
-  volcengine_coding_plan: Cloud,
-  byteplus: Cloud,
-  byteplus_coding_plan: Cloud,
-  qianfan: Database,
-  azure_openai: Cloud,
-  bedrock: Database,
+  siliconflow: Orbit,
 };
 
 function ProviderIcon({ provider }: { provider: string }) {
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
   return (
-    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)] dark:bg-muted/70">
+    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]">
       <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
     </span>
   );
@@ -838,7 +678,7 @@ function ProviderIcon({ provider }: { provider: string }) {
 
 function SettingsSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+    <h2 className="px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
       {children}
     </h2>
   );
@@ -846,7 +686,7 @@ function SettingsSectionTitle({ children }: { children: ReactNode }) {
 
 function SettingsGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
+    <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)]">
       <div className="divide-y divide-border/45">{children}</div>
     </div>
   );
@@ -893,7 +733,13 @@ function SettingsFooter({
       <div className="text-[13px] text-muted-foreground">
         {saved ? t("settings.status.savedRestart") : t("settings.status.unsaved")}
       </div>
-      <Button size="sm" variant="outline" onClick={onSave} disabled={!dirty || saving} className="rounded-full">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onSave}
+        disabled={!dirty || saving}
+        className="rounded-full"
+      >
         {saving ? t("settings.actions.saving") : t("settings.actions.save")}
       </Button>
     </div>

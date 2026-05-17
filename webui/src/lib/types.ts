@@ -141,6 +141,58 @@ export interface ProviderSettingsUpdate {
   apiBase?: string;
 }
 
+export interface KnowledgeFileSummary {
+  name: string;
+  path: string;
+  size: number;
+  modified: number;
+  mime_type?: string | null;
+}
+
+export interface KnowledgeBaseSummary {
+  id: string;
+  name: string;
+  source_count: number;
+  status: string;
+  provider?: string;
+  updated_at?: string | null;
+  files?: KnowledgeFileSummary[];
+}
+
+export interface KnowledgeTaskResult {
+  task_id: string;
+  message: string;
+}
+
+export interface MemorySummaryItem {
+  label: string;
+  detail: string;
+}
+
+export interface MemoryEventSummary {
+  event_id: string;
+  kind: string;
+  summary: string;
+  recorded_at: string;
+}
+
+export interface MemorySummaryPayload {
+  summary: string;
+  profile: string;
+  summary_updated_at: string | null;
+  profile_updated_at: string | null;
+  current_continuity: string;
+  long_term_facts: MemorySummaryItem[];
+  blockers: MemorySummaryItem[];
+  recent_events: MemoryEventSummary[];
+}
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  tags: string[];
+}
+
 export interface WebSearchSettingsUpdate {
   provider: string;
   apiKey?: string;
