@@ -31,6 +31,7 @@ def build_learning_turn_request(
     requested_skills: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> LearningTurnRequest:
+    metadata = metadata or {}
     return LearningTurnRequest(
         session_id=session_id,
         user_message=user_message,
@@ -38,6 +39,7 @@ def build_learning_turn_request(
         project_id=project_id,
         project_title=project_title,
         turn_mode=turn_mode,
+        model_preset=str((turn_policy.model_preset if turn_policy else metadata.get("model_preset")) or "") or None,
         board_facts=board_facts or BoardFacts(),
         turn_policy=turn_policy,
         anchor=anchor or {},
@@ -45,10 +47,9 @@ def build_learning_turn_request(
         memory_references=memory_references or [],
         retrieval_bundle=retrieval_bundle or empty_retrieval_bundle(query=user_message),
         state_projection=state_projection or LearningStateSnapshot(),
-        policy_decision=policy_decision,
         continuation_prompt=continuation_prompt,
         enabled_tools=enabled_tools or [],
         attachments=attachments or [],
         requested_skills=requested_skills or [],
-        metadata=metadata or {},
+        metadata=metadata,
     )

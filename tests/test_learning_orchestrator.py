@@ -52,6 +52,20 @@ class FakeExecutor:
         )
 
 
+class FakeRetrievalService:
+    def sync_source_refs(self, *, project_id: str, source_refs: list[str], libraries=None):
+        _ = (project_id, libraries)
+        return {
+            "project_id": project_id,
+            "enabled": True,
+            "synced": bool(source_refs),
+            "source_count": len(source_refs),
+            "indexed_paths": list(source_refs),
+            "sync_status": "synced" if source_refs else "empty",
+            "warnings": [],
+        }
+
+
 class FailingProductCompression:
     def compress(self, **kwargs):
         raise RuntimeError("compression offline")
@@ -78,6 +92,7 @@ def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
         session_store=session_store,
         executor=FakeExecutor(),
         memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
     )
 
     result = orchestrator.run_turn(
@@ -108,6 +123,126 @@ def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert len(orchestrator.memory_store.list_events_for_session("sess-1")) == 3
     assert saved_session.board_facts["updated_at"]
     assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
+
+
+def test_dream_consolidation_builds_structured_event(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-dream", "Dream")
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-dream", project_id="proj-dream")
+    memory_store = EventMemoryStore(state_store=JsonStateStore(root))
+    for idx in range(20):
+        memory_store.append(
+            MemoryEvent(
+                event_id=f"evt-{idx}",
+                kind="review_written",
+                payload={"session_id": "sess-dream", "project_id": "proj-dream", "summary": f"fact {idx}"},
+            )
+        )
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=memory_store,
+        retrieval_service=FakeRetrievalService(),
+    )
+
+    payload = orchestrator._consolidate_dream_events(
+        project=project,
+        session=session,
+        recent_events=memory_store.list_events()[-20:],
+        fallback_text="fallback text",
+    )
+
+    assert payload["source"] == "dream_consolidation"
+    assert payload["recent_event_count"] == 20
+    assert payload["summary"].startswith("fact 0")
+
+
+def test_session_autocompact_keeps_tail_and_continuation(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+    session = orchestrator.session_store.create_session(session_id="sess-compact", project_id="proj-compact")
+    session.continuation_prompt = "keep going"
+    session.messages = [{"role": "user", "content": f"message {idx}"} for idx in range(30)]
+
+    orchestrator._maybe_compact_session(session)
+
+    assert len(session.messages) == orchestrator.SESSION_AUTOCOMPACT_KEEP_TAIL + 1
+    assert session.messages[0]["content"].startswith("[compacted history]")
+    assert session.messages[-1]["content"] == "message 29"
+
+
+def test_before_turn_adds_runtime_turn_metadata(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-meta", "Metadata")
+    project.anchor = {"topic": "runtime metadata"}
+    project.anchor_status = "ready"
+    project_service.save_project(project)
+
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-meta", project_id="proj-meta")
+    session.board_facts = {
+        "project_id": "proj-meta",
+        "session_id": "sess-meta",
+        "current_turn_mode": "EXPLORE",
+        "board_version": 4,
+        "current_progress": {
+            "active_node_id": "node-meta",
+            "active_node_label": "Node Meta",
+            "completed_node_ids": [],
+            "path_node_ids": [],
+        },
+        "student_snapshot": {
+            "mastery_level": 0.4,
+            "cognitive_load": "NORMAL",
+            "last_user_intent_raw": "",
+        },
+        "gaps_and_blockers": {
+            "critical_blockers": [],
+            "unverified_gaps": [],
+        },
+        "continuation": {
+            "next_prompt_hint": "continue metadata",
+            "last_completed_turn_id": "",
+        },
+        "evidence_refs": [],
+    }
+    session_store.save_session(session)
+
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+
+    orchestrator.run_turn(
+        session_id="sess-meta",
+        project_id="proj-meta",
+        user_message="Continue this node.",
+    )
+
+    request = executor.last_request
+    assert request.metadata["turn_mode_before"] == "EXPLORE"
+    assert request.metadata["board_version_before"] == 4
+    assert request.metadata["active_node_id_before"] == "node-meta"
+    assert request.metadata["active_node_label_before"] == "Node Meta"
+    assert request.metadata["continuation_prompt_before"] == "continue metadata"
+    assert request.metadata["enabled_tools_before"] == ["memory", "lightrag"]
+    assert request.metadata["source_readiness_before"] in {"", "empty", "unavailable", "partial", "ready"}
+    assert request.metadata["allowed_tools_before"] == ["memory", "lightrag"]
+    assert request.metadata["policy_restrictions"] == []
 
 
 def test_orchestrator_persists_learning_state_writeback(tmp_path):
@@ -153,6 +288,7 @@ def test_orchestrator_persists_learning_state_writeback(tmp_path):
         session_store=session_store,
         executor=FakeExecutor(),
         memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
     )
 
     result = orchestrator.run_turn(
@@ -187,6 +323,7 @@ def test_product_compression_failure_keeps_main_result(tmp_path):
         executor=FakeExecutor(),
         memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
         product_compression=FailingProductCompression(),
+        retrieval_service=FakeRetrievalService(),
     )
 
     result = orchestrator.run_turn(
@@ -224,6 +361,7 @@ def test_background_result_only_patches_review_fields(tmp_path):
         session_store=session_store,
         executor=FakeExecutor(),
         memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
     )
     request = LearningTurnRequest(
         session_id="sess-bg",
@@ -285,6 +423,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
         session_store=session_store,
         executor=FakeExecutor(),
         memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
     )
 
     stale_board = BoardFacts(project_id="proj-conflict", session_id="sess-conflict", board_version=1)
@@ -347,7 +486,7 @@ def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
     request = LearningTurnRequest(
         session_id="sess-events",
         project_id="proj-events",
-        user_message="我有点不懂这个节点，但完成了第一步",
+        user_message="I am confused and do not understand this node yet.",
         source_references=[{"source_ref": str(tmp_path / "note.md")}],
     )
     request = request.__class__(
@@ -368,7 +507,7 @@ def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
         project=project,
         session=session,
         request=request,
-        final_text="已经完成 Node 1",
+        final_text="Node 1 is completed.",
         tool_events=[{"tool_name": "lightrag"}],
     )
 
@@ -378,6 +517,11 @@ def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
     assert "BLOCKER_FOUND" in event_types
     assert "EVIDENCE_ATTACHED" in event_types
     assert payload["board_after"].evidence_refs[0]["tool_name"] == "lightrag"
+    assert payload["turn_mode_after"] == "CORRECTION"
+    assert payload["turn_mode_before"] == "EXPLORE"
+    assert payload["writeback_envelope"]["base_board_version"] == 1
+    assert payload["writeback_envelope"]["resolved_board_version"] == payload["board_after"].board_version
+    assert "NODE_COMPLETED" in payload["writeback_envelope"]["event_types"]
 
 
 def test_memory_store_search_events() -> None:
@@ -432,6 +576,7 @@ def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> N
         session_store=session_store,
         executor=executor,
         memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
     )
 
     orchestrator.run_turn(

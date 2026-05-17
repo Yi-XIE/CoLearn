@@ -62,9 +62,6 @@ class BoardFacts:
         return asdict(self)
 
 
-LearningBoard = BoardFacts
-
-
 @dataclass(frozen=True)
 class ReplyContract:
     style: str = ""
@@ -77,6 +74,7 @@ class TurnPolicy:
     """Per-turn projection computed fresh each round."""
 
     turn_mode: TurnMode = "EXPLORE"
+    model_preset: str | None = None
     main_goal: str = ""
     restrictions: list[str] = field(default_factory=list)
     allowed_tools: list[str] = field(default_factory=list)

@@ -133,6 +133,72 @@ def test_websocket_start_turn_without_runtime_stream_does_not_fake_tool_events()
     assert next_seq == 3
 
 
+def test_prepare_runtime_stream_events_preserves_event_shape() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    result = type(
+        "R",
+        (),
+        {
+            "stream_events": [
+                {"type": "thinking", "content": "step one", "metadata": {"phase": "thinking"}},
+                {"type": "tool_call", "metadata": {"tool_name": "memory"}},
+            ],
+            "warnings": ["warn"],
+            "tool_events": [{"tool_name": "memory"}],
+        },
+    )()
+    events, next_seq = app_module._prepare_runtime_stream_events(
+        stream_events=list(result.stream_events),
+        result=result,
+        session_id="s",
+        turn_id="t",
+        seq=5,
+    )
+    assert next_seq == 7
+    assert events[0]["metadata"]["phase"] == "thinking"
+    assert events[0]["metadata"]["warnings"] == ["warn"]
+    assert events[1]["metadata"]["tool_events"] == [{"tool_name": "memory"}]
+
+
+def test_turn_mode_maps_to_model_preset() -> None:
+    from colearn.learning.state import BoardFacts, ProgressFacts, GapsAndBlockers, ContinuationFacts, StudentSnapshot
+    from colearn.learning.state_hooks import policy
+
+    board = BoardFacts(
+        current_turn_mode="VERIFY",
+        current_progress=ProgressFacts(active_node_id="node-1", active_node_label="Node 1"),
+        student_snapshot=StudentSnapshot(),
+        gaps_and_blockers=GapsAndBlockers(),
+        continuation=ContinuationFacts(),
+    )
+    decision = policy(board=board, user_message="check")
+    assert decision.model_preset == "deep"
+
+
+def test_turn_request_bridges_workspace_and_model_preset() -> None:
+    from colearn.learning.state import BoardFacts, ProgressFacts, GapsAndBlockers, ContinuationFacts, StudentSnapshot, TurnPolicy
+    from colearn.runtime_v2.context_bridge import build_learning_turn_request
+
+    request = build_learning_turn_request(
+        session_id="s1",
+        user_message="hello",
+        project_id="p1",
+        project_title="P1",
+        turn_mode="VERIFY",
+        board_facts=BoardFacts(
+            current_turn_mode="VERIFY",
+            current_progress=ProgressFacts(active_node_id="node-1", active_node_label="Node 1"),
+            student_snapshot=StudentSnapshot(),
+            gaps_and_blockers=GapsAndBlockers(),
+            continuation=ContinuationFacts(),
+        ),
+        turn_policy=TurnPolicy(turn_mode="VERIFY", model_preset="deep"),
+        metadata={"workspace": "D:/Colearn-nightly"},
+    )
+    assert request.model_preset == "deep"
+    assert request.metadata["workspace"] == "D:/Colearn-nightly"
+
+
 async def _run_running_session_check() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -551,8 +617,8 @@ async def _run_settings_apply_persistence_checks() -> None:
     env_path = Path.cwd() / ".env"
     assert env_path.exists()
     env_text = env_path.read_text(encoding="utf-8")
-    assert "OPENAI_API_BASE=https://api.deepseek.com" in env_text
-    assert "OPENAI_MODEL=deepseek-v4-flash" in env_text
+    assert "DEEPSEEK_API_BASE=https://api.deepseek.com" in env_text
+    assert "DEEPSEEK_MODEL=deepseek-v4-flash" in env_text
     assert "EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1/embeddings" in env_text
     assert "EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B" in env_text
 

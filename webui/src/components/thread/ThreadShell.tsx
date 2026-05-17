@@ -9,12 +9,12 @@ import { useNanobotStream, type SendImage } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { listSlashCommands } from "@/lib/api";
 import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import { projectThreadMessages } from "@/lib/thread-display";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
-  return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
+  return scrubSubagentUiMessages(projectThreadMessages(messages));
 }
 
 interface ThreadShellProps {

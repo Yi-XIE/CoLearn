@@ -18,6 +18,7 @@ class LearningTurnRequest:
     project_id: str = ""
     project_title: str = ""
     turn_mode: str = "EXPLORE"
+    model_preset: str | None = None
     board_facts: BoardFacts = field(default_factory=BoardFacts)
     turn_policy: TurnPolicy | None = None
     state_projection: LearningStateSnapshot = field(default_factory=LearningStateSnapshot)

@@ -88,6 +88,7 @@ class RuntimeCompressionBridge:
             state_projection=request.state_projection,
             policy_decision=request.policy_decision,
             continuation_prompt=request.continuation_prompt,
+            model_preset=request.model_preset,
             enabled_tools=request.enabled_tools,
             attachments=request.attachments,
             requested_skills=request.requested_skills,

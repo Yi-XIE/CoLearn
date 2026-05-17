@@ -24,9 +24,21 @@ def normalize_learning_turn_result(
         "critical_blocker_count": len(request.board_facts.gaps_and_blockers.critical_blockers or []),
         "unverified_gap_count": len(request.board_facts.gaps_and_blockers.unverified_gaps or []),
     }
+    turn_envelope = {
+        "turn_mode_before": request.metadata.get("turn_mode_before", request.turn_mode),
+        "board_version_before": int(request.metadata.get("board_version_before") or request.board_facts.board_version or 1),
+        "active_node_id_before": str(request.metadata.get("active_node_id_before") or ""),
+        "active_node_label_before": str(request.metadata.get("active_node_label_before") or ""),
+        "continuation_prompt_before": str(request.metadata.get("continuation_prompt_before") or request.continuation_prompt or ""),
+        "allowed_tools_before": list(request.metadata.get("allowed_tools_before") or []),
+        "enabled_tools_before": list(request.metadata.get("enabled_tools_before") or request.enabled_tools),
+        "source_readiness_before": str(request.metadata.get("source_readiness_before") or ""),
+        "policy_restrictions": list(request.metadata.get("policy_restrictions") or []),
+    }
     payload.setdefault("runtime_v2", {})
     if isinstance(payload["runtime_v2"], dict):
         payload["runtime_v2"].setdefault("board_summary", board_summary)
+        payload["runtime_v2"].setdefault("turn_envelope", turn_envelope)
     review_to_persist = dict(payload.get("review_to_persist") or {})
     board_patch = dict(payload.get("board_patch") or {})
     memory_events = list(payload.get("memory_events") or [])
@@ -58,5 +70,11 @@ def normalize_learning_turn_result(
             "requested_skills": request.requested_skills,
             "enabled_tools": request.enabled_tools,
             "runtime_v2_board_summary": board_summary,
+            "runtime_v2_turn_envelope": turn_envelope,
+            "turn_mode_before": turn_envelope["turn_mode_before"],
+            "turn_mode_after": str(payload.get("turn_mode_after") or request.turn_mode),
+            "base_board_version": turn_envelope["board_version_before"],
+            "resolved_board_version": int((payload.get("board_after") or request.board_facts).board_version if hasattr(payload.get("board_after") or request.board_facts, "board_version") else request.board_facts.board_version),
+            "writeback_envelope": dict(payload.get("writeback_envelope") or {}),
         },
     )

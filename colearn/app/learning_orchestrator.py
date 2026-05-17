@@ -107,6 +107,11 @@ class BackgroundTurnFinalizer:
 
 
 class LearningOrchestrator:
+    SESSION_AUTOCOMPACT_MAX_MESSAGES = 24
+    SESSION_AUTOCOMPACT_KEEP_TAIL = 12
+    SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS = 800
+    DREAM_CONSOLIDATION_EVENT_INTERVAL = 20
+
     def __init__(
         self,
         *,
@@ -191,7 +196,11 @@ class LearningOrchestrator:
             continuation_prompt=session.continuation_prompt,
             enabled_tools=turn_policy.enabled_tools or turn_policy.allowed_tools,
             attachments=attachments or [],
-            metadata={"turn_id": str(uuid4()), "source_profile": dict(source_profile)},
+            metadata={
+                "turn_id": str(uuid4()),
+                "source_profile": dict(source_profile),
+                "workspace": str(getattr(self.executor, "workspace", None) or Path.cwd()),
+            },
         )
         prepared_request = before_turn(
             request=request,
@@ -297,6 +306,11 @@ class LearningOrchestrator:
             "stream_events": list(result.stream_events),
             "raw_learning_result": dict(result.raw_learning_result or {}),
             "runtime_v2": dict((result.raw_learning_result or {}).get("runtime_v2") or {}),
+            "writeback_envelope": dict((result.raw_learning_result or {}).get("writeback_envelope") or {}),
+            "turn_mode_before": result.turn_mode_before,
+            "turn_mode_after": result.turn_mode_after,
+            "base_board_version": int(getattr(request.board_facts, "board_version", session.board_version) or 1),
+            "resolved_board_version": int(getattr(result.board_after, "board_version", session.board_version) or 1),
             "product_compression": {
                 "status": "scheduled",
                 "started_at": None,
@@ -327,6 +341,11 @@ class LearningOrchestrator:
             "warnings": warnings,
             "raw_learning_result": dict(result.raw_learning_result or {}),
             "runtime_v2": dict((result.raw_learning_result or {}).get("runtime_v2") or {}),
+            "writeback_envelope": dict((result.raw_learning_result or {}).get("writeback_envelope") or {}),
+            "turn_mode_before": result.turn_mode_before,
+            "turn_mode_after": result.turn_mode_after,
+            "base_board_version": int(getattr(request.board_facts, "board_version", session.board_version) or 1),
+            "resolved_board_version": int(getattr(result.board_after, "board_version", session.board_version) or 1),
         }
         project.anchor_status = "ready" if project.anchor else "missing"
         project.current_main_goal = (
@@ -346,10 +365,72 @@ class LearningOrchestrator:
                     payload=dict(item.get("payload") or {}),
                 )
             )
+        self._maybe_compact_session(session)
+        self._maybe_consolidate_memory(project, session, result)
         if not session.source_refs and project.source_refs:
             session.source_refs = list(project.source_refs)
         self.session_store.save_session(session)
         self.project_service.save_project(project)
+
+    def _maybe_compact_session(self, session: LearningSession) -> None:
+        max_messages = self.SESSION_AUTOCOMPACT_MAX_MESSAGES
+        if len(session.messages) <= max_messages:
+            return
+        keep_tail = session.messages[-self.SESSION_AUTOCOMPACT_KEEP_TAIL :]
+        summary = self._build_compaction_summary(session.messages[:-self.SESSION_AUTOCOMPACT_KEEP_TAIL])
+        session.messages = [
+            {"role": "system", "content": f"[compacted history] {summary}"},
+            *keep_tail,
+        ]
+
+    def _maybe_consolidate_memory(self, project: LearningProject, session: LearningSession, result) -> None:
+        event_count = len(self.memory_store.list_events())
+        if event_count == 0 or event_count % self.DREAM_CONSOLIDATION_EVENT_INTERVAL != 0:
+            return
+        summary = self._consolidate_dream_events(
+            project=project,
+            session=session,
+            recent_events=self.memory_store.list_events()[-self.DREAM_CONSOLIDATION_EVENT_INTERVAL :],
+            fallback_text=result.review_summary or result.final_text,
+        )
+        self.memory_store.append(
+            MemoryEvent(
+                event_id=str(uuid4()),
+                kind="profile_consolidated",
+                payload=summary,
+            )
+        )
+
+    def _build_compaction_summary(self, messages: list[dict[str, Any]]) -> str:
+        summary = " | ".join(
+            str(item.get("content") or "").strip()
+            for item in messages
+            if str(item.get("content") or "").strip()
+        )
+        return summary[: self.SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS]
+
+    def _consolidate_dream_events(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        recent_events: list[MemoryEvent],
+        fallback_text: str,
+    ) -> dict[str, Any]:
+        facts = [
+            str(event.payload.get("summary") or event.payload.get("content") or event.kind).strip()
+            for event in recent_events
+            if str(event.payload.get("summary") or event.payload.get("content") or event.kind).strip()
+        ]
+        combined = " | ".join(facts) or fallback_text[:240]
+        return {
+            "summary": combined[:240],
+            "session_id": session.session_id,
+            "project_id": project.project_id,
+            "source": "dream_consolidation",
+            "recent_event_count": len(recent_events),
+            "recent_event_kinds": [event.kind for event in recent_events],
+        }
 
     def apply_background_result(
         self,

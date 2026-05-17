@@ -141,6 +141,8 @@ def build_state_snapshot(
 def determine_turn_mode(board: BoardFacts, user_message: str) -> TurnMode:
     if board.current_turn_mode == "PAUSED":
         return "PAUSED"
+    if board.current_turn_mode in {"ANCHOR", "CORRECTION", "VERIFY"}:
+        return board.current_turn_mode
     if not board.current_progress.active_node_id:
         return "ANCHOR"
     if board.gaps_and_blockers.critical_blockers:
@@ -148,6 +150,16 @@ def determine_turn_mode(board: BoardFacts, user_message: str) -> TurnMode:
     if board.gaps_and_blockers.unverified_gaps:
         return "VERIFY"
     return "EXPLORE"
+
+
+def resolve_model_preset(turn_mode: TurnMode) -> str | None:
+    return {
+        "EXPLORE": "explore",
+        "ANCHOR": "deep",
+        "CORRECTION": "deep",
+        "VERIFY": "deep",
+        "PAUSED": None,
+    }.get(turn_mode)
 
 
 def policy(
@@ -172,6 +184,7 @@ def policy(
 
     return TurnPolicy(
         turn_mode=turn_mode,
+        model_preset=resolve_model_preset(turn_mode),
         main_goal=(
             "Complete the learning anchor first."
             if turn_mode == "ANCHOR"
@@ -194,30 +207,6 @@ def policy(
     )
 
 
-def build_turn_context(
-    *,
-    board: BoardFacts,
-    turn_policy: TurnPolicy,
-    user_message: str,
-) -> str:
-    lines = [
-        f"Project: {board.project_id}",
-        f"Turn mode: {turn_policy.turn_mode}",
-    ]
-    if turn_policy.main_goal:
-        lines.append(f"Main goal: {turn_policy.main_goal}")
-    if turn_policy.continuation_prompt:
-        lines.append(f"Continuation: {turn_policy.continuation_prompt}")
-    if turn_policy.restrictions:
-        lines.append(f"Restrictions: {', '.join(turn_policy.restrictions)}")
-    if board.gaps_and_blockers.critical_blockers:
-        blocker_descs = [b.desc for b in board.gaps_and_blockers.critical_blockers]
-        lines.append(f"Known blockers: {'; '.join(blocker_descs)}")
-    lines.append("User message:")
-    lines.append(user_message)
-    return "\n\n".join(line for line in lines if line)
-
-
 def extract_learning_events(
     *,
     board: BoardFacts,
@@ -229,16 +218,39 @@ def extract_learning_events(
     events: list[LearningEvent] = [
         LearningEvent(
             type="CONTINUATION_UPDATED",
-            payload=_json_safe({
-                "next_prompt_hint": f"Continue from {board.current_progress.active_node_label}",
-                "last_completed_turn_id": user_message[:80],
-            }),
+            payload=_json_safe(
+                {
+                    "next_prompt_hint": f"Continue from {board.current_progress.active_node_label}",
+                    "last_completed_turn_id": user_message[:80],
+                }
+            ),
         ),
     ]
 
+    tool_names = [
+        str(item.get("tool_name") or item.get("tool") or "")
+        for item in list(tool_events or [])
+        if str(item.get("tool_name") or item.get("tool") or "")
+    ]
+    source_refs = list(source_references or [])
     final_lower = final_text.lower()
-    if board.current_progress.active_node_id and any(
-        marker in final_lower for marker in ["completed", "done", "掌握", "完成", "学会"]
+    user_lower = user_message.lower()
+
+    if any(name == "lightrag" for name in tool_names) and board.current_progress.active_node_id:
+        events.append(
+            LearningEvent(
+                type="NODE_COMPLETED",
+                payload=_json_safe(
+                    {
+                        "node_id": board.current_progress.active_node_id,
+                        "node_label": board.current_progress.active_node_label,
+                        "signal": "tool:lightrag",
+                    }
+                ),
+            )
+        )
+    elif board.current_progress.active_node_id and any(
+        marker in final_lower for marker in ["completed", "done", "finished", "resolved"]
     ):
         events.append(
             LearningEvent(
@@ -247,23 +259,27 @@ def extract_learning_events(
                     {
                         "node_id": board.current_progress.active_node_id,
                         "node_label": board.current_progress.active_node_label,
+                        "signal": "final_text",
                     }
                 ),
             )
         )
-    elif not board.current_progress.completed_node_ids:
+    elif board.current_progress.active_node_id and not board.current_progress.completed_node_ids:
         events.append(
             LearningEvent(
                 type="NODE_STARTED",
-                payload=_json_safe({
-                    "node_id": board.current_progress.active_node_id,
-                    "node_label": board.current_progress.active_node_label,
-                }),
+                payload=_json_safe(
+                    {
+                        "node_id": board.current_progress.active_node_id,
+                        "node_label": board.current_progress.active_node_label,
+                        "signal": "default",
+                    }
+                ),
             )
         )
 
-    blocker_markers = ["confused", "stuck", "unclear", "不懂", "卡住", "困惑"]
-    if any(marker in user_message.lower() for marker in blocker_markers):
+    blocker_markers = ["confused", "stuck", "unclear", "unsure", "uncertain"]
+    if any(marker in user_lower for marker in blocker_markers):
         blocker_id = hashlib.sha1(user_message[:240].encode("utf-8")).hexdigest()[:10]
         events.append(
             LearningEvent(
@@ -273,18 +289,13 @@ def extract_learning_events(
                         "id": f"blk_{blocker_id}",
                         "type": "CONCEPT_MISUNDERSTANDING",
                         "desc": user_message[:240],
+                        "signal": "user_message",
                     }
                 ),
             )
         )
 
-    refs = list(source_references or [])
-    tool_names = [
-        str(item.get("tool_name") or item.get("tool") or "")
-        for item in list(tool_events or [])
-        if str(item.get("tool_name") or item.get("tool") or "")
-    ]
-    for idx, ref in enumerate(refs):
+    for idx, ref in enumerate(source_refs):
         raw_ref = str(ref.get("source_ref") or ref.get("source_path") or ref.get("path") or "").strip()
         if not raw_ref:
             continue
@@ -296,12 +307,35 @@ def extract_learning_events(
                         "source_ref": raw_ref,
                         "tool_name": tool_names[0] if tool_names else "",
                         "chunk_id": str(ref.get("chunk_id") or f"source_{idx}"),
+                        "signal": "source_reference",
                     }
                 ),
             )
         )
 
     return events
+
+def resolve_turn_mode_after(
+    *,
+    board_before: BoardFacts,
+    board_after: BoardFacts,
+    events: list[LearningEvent],
+) -> TurnMode:
+    event_types = {event.type for event in events}
+    blockers = list(board_after.gaps_and_blockers.critical_blockers or [])
+    unverified_gaps = list(board_after.gaps_and_blockers.unverified_gaps or [])
+
+    if "BLOCKER_FOUND" in event_types or blockers:
+        return "CORRECTION"
+    if "NODE_STARTED" in event_types and not board_before.current_progress.active_node_id:
+        return "ANCHOR"
+    if unverified_gaps:
+        return "VERIFY"
+    if "NODE_COMPLETED" in event_types and board_after.current_progress.active_node_id:
+        return "EXPLORE"
+    if not board_after.current_progress.active_node_id:
+        return "ANCHOR"
+    return _normalize_turn_mode(board_before.current_turn_mode)
 
 
 def apply_events(
@@ -357,7 +391,7 @@ def apply_events(
                 if signature not in existing:
                     evidence_refs.append(evidence)
 
-    return BoardFacts(
+    updated = BoardFacts(
         project_id=board.project_id,
         session_id=board.session_id,
         current_turn_mode=board.current_turn_mode,
@@ -377,6 +411,12 @@ def apply_events(
         continuation=continuation,
         evidence_refs=evidence_refs,
     )
+    next_mode = resolve_turn_mode_after(
+        board_before=board,
+        board_after=updated,
+        events=events,
+    )
+    return replace(updated, current_turn_mode=next_mode)
 
 
 def after_turn(
@@ -405,12 +445,23 @@ def before_turn(
     decision: Any,
 ) -> Any:
     if hasattr(request, "metadata") and isinstance(request.metadata, dict):
+        board = getattr(request, "board_facts", None)
+        continuation = getattr(board, "continuation", None)
+        progress = getattr(board, "current_progress", None)
         return replace(
             request,
             metadata={
                 **request.metadata,
                 "turn_mode_before": getattr(request, "turn_mode", "EXPLORE"),
+                "board_version_before": int(getattr(board, "board_version", 1) or 1),
+                "active_node_id_before": str(getattr(progress, "active_node_id", "") or ""),
+                "active_node_label_before": str(getattr(progress, "active_node_label", "") or ""),
+                "continuation_prompt_before": str(getattr(continuation, "next_prompt_hint", "") or ""),
+                "allowed_tools_before": list(getattr(decision, "allowed_tools", []) or []),
+                "enabled_tools_before": list(getattr(request, "enabled_tools", []) or []),
+                "source_readiness_before": str(request.metadata.get("source_profile", {}).get("readiness", "") or ""),
                 "policy_restrictions": list(getattr(decision, "restrictions", []) or []),
+                "model_preset": getattr(decision, "model_preset", None),
             },
         )
     return request
@@ -443,6 +494,10 @@ def after_turn_payload(
     continuation_prompt = updated_board.continuation.next_prompt_hint or str(
         getattr(request, "continuation_prompt", "")
     )
+    turn_mode_before = str(getattr(request, "turn_mode", "EXPLORE"))
+    base_board_version = int(getattr(board, "board_version", 1) or 1)
+    resolved_board_version = int(updated_board.board_version or 1)
+    event_types = [event.type for event in events]
     return {
         "review_summary": review_summary,
         "continuation_prompt": continuation_prompt,
@@ -453,6 +508,7 @@ def after_turn_payload(
             ],
         },
         "turn_mode_after": updated_board.current_turn_mode,
+        "turn_mode_before": turn_mode_before,
         "board_after": updated_board,
         "learning_events": events,
         "board_patch": {
@@ -465,6 +521,13 @@ def after_turn_payload(
             "gaps_and_blockers": asdict(updated_board.gaps_and_blockers),
             "evidence_refs": list(updated_board.evidence_refs),
         },
+        "writeback_envelope": {
+            "turn_mode_before": turn_mode_before,
+            "turn_mode_after": updated_board.current_turn_mode,
+            "base_board_version": base_board_version,
+            "resolved_board_version": resolved_board_version,
+            "event_types": event_types,
+        },
         "memory_events": [
             {
                 "kind": "turn_completed",
@@ -473,7 +536,9 @@ def after_turn_payload(
                     "project_id": getattr(project, "project_id", ""),
                     "final_text": final_text,
                     "turn_mode": updated_board.current_turn_mode,
-                    "events": [event.type for event in events],
+                    "events": event_types,
+                    "base_board_version": base_board_version,
+                    "resolved_board_version": resolved_board_version,
                 },
             },
             {

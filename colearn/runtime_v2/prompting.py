@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from nanobot.agent.context import ContextBuilder
+
 from colearn.learning.turn_contract import LearningTurnRequest
 
 
@@ -55,7 +59,15 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
 
 
 def build_turn_prompt(request: LearningTurnRequest) -> str:
+    workspace = Path(str(request.metadata.get("workspace") or ".")).resolve()
+    base_prompt = ContextBuilder(workspace).build_system_prompt()
+    colearn_doc = workspace / "COLEARN.md"
+    colearn_context = ""
+    if colearn_doc.exists():
+        colearn_context = colearn_doc.read_text(encoding="utf-8").strip()
     lines = [
+        base_prompt,
+        f"## COLEARN.md\n\n{colearn_context}" if colearn_context else "",
         f"Project: {request.project_title or request.project_id or 'Untitled Project'}",
         f"Turn mode: {request.turn_mode}",
     ]

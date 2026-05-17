@@ -148,6 +148,9 @@ def _latest_session() -> Any | None:
     sessions = session_store.list_sessions()
     if not sessions:
         return None
+    for session in reversed(sessions):
+        if str(getattr(session, "continuation_prompt", "") or "").strip():
+            return session
     return sessions[-1]
 
 
@@ -306,6 +309,26 @@ def _prepare_runtime_stream_events(
         prepared.append(event)
         seq = int(event.get("seq") or seq) + 1
     return prepared, seq
+
+
+def _append_ws_stream_events(
+    *,
+    turn_id: str,
+    session_id: str,
+    result: Any,
+    seq: int,
+) -> list[dict[str, Any]]:
+    stream_events = list(result.stream_events or [])
+    prepared_stream_events, seq = _prepare_runtime_stream_events(
+        stream_events=stream_events,
+        result=result,
+        session_id=session_id,
+        turn_id=turn_id,
+        seq=seq,
+    )
+    for item in prepared_stream_events:
+        turn_streams[turn_id].append(item)
+    return prepared_stream_events
 
 
 @app.get("/health")
@@ -731,9 +754,9 @@ def get_memory_summary() -> dict[str, Any]:
     snapshot = memory_doc_service.snapshot()
     session = _latest_session()
     board_facts = dict((session.board_facts if session else {}) or {})
-    continuity = str(board_facts.get("continuation", {}).get("next_prompt_hint") or "").strip()
-    if not continuity and session is not None:
-        continuity = str(session.continuation_prompt or "").strip()
+    continuity = str(session.continuation_prompt or "").strip() if session is not None else ""
+    if not continuity:
+        continuity = str(board_facts.get("continuation", {}).get("next_prompt_hint") or "").strip()
 
     long_term_facts: list[dict[str, str]] = []
     for ref in list(board_facts.get("evidence_refs", []) or [])[:6]:
@@ -1229,16 +1252,15 @@ async def unified_ws(websocket: WebSocket) -> None:
                 turn_streams[turn_id].append(error_event)
                 await websocket.send_json(error_event)
                 continue
-            stream_events = list(result.stream_events or [])
-            prepared_stream_events, seq = _prepare_runtime_stream_events(
-                stream_events=stream_events,
-                result=result,
-                session_id=session_id,
+            prepared_stream_events = _append_ws_stream_events(
                 turn_id=turn_id,
+                session_id=session_id,
+                result=result,
                 seq=seq,
             )
+            if prepared_stream_events:
+                seq = int(prepared_stream_events[-1].get("seq") or seq) + 1
             for item in prepared_stream_events:
-                turn_streams[turn_id].append(item)
                 await websocket.send_json(item)
             content_event = {
                 "type": "content",

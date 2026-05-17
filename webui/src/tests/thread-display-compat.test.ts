@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import { projectThreadMessages } from "@/lib/thread-display";
 import type { UIMessage } from "@/lib/types";
 
-describe("normalizeLegacyLongTaskMessages", () => {
-  it("maps legacy long_task rows to trace lines", () => {
+describe("projectThreadMessages", () => {
+  it("maps long_task rows to trace lines", () => {
     const legacy = {
       id: "x",
       role: "assistant",
@@ -12,7 +12,7 @@ describe("normalizeLegacyLongTaskMessages", () => {
       content: "long_task · done",
       createdAt: 1,
     } as unknown as UIMessage;
-    const out = normalizeLegacyLongTaskMessages([legacy]);
+    const out = projectThreadMessages([legacy]);
     expect(out[0]!.kind).toBe("trace");
     expect(out[0]!.role).toBe("tool");
     expect(out[0]!.traces).toEqual(["long_task · done"]);

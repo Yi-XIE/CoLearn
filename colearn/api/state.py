@@ -13,6 +13,10 @@ from typing import Any
 from colearn.storage import JsonStateStore
 
 
+def _env(name: str) -> str:
+    return os.environ.get(name, "")
+
+
 DEFAULT_SETTINGS_STATE: dict[str, Any] = {
     "ui": {
         "theme": "dark",
@@ -30,7 +34,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                         "name": "DeepSeek LLM",
                         "binding": "openai",
                         "base_url": "https://api.deepseek.com",
-                        "api_key": "sk-b1a23c18ba164ebc94f211ca445e1b27",
+                        "api_key": _env("DEEPSEEK_API_KEY"),
                         "api_version": "",
                         "extra_headers": {},
                         "proxy": "",
@@ -49,7 +53,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                         "name": "SiliconFlow Vision",
                         "binding": "openai",
                         "base_url": "https://api.siliconflow.cn/v1/chat/completions",
-                        "api_key": "sk-jcuasfjrfabbvdkudddbvnkzyqepqtbreswvprjzqxamtqlh",
+                        "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
                         "api_version": "",
                         "extra_headers": {},
                         "proxy": "",
@@ -74,7 +78,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                         "name": "SiliconFlow Embedding",
                         "binding": "openai",
                         "base_url": "https://api.siliconflow.cn/v1/embeddings",
-                        "api_key": "sk-jcuasfjrfabbvdkudddbvnkzyqepqtbreswvprjzqxamtqlh",
+                        "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
                         "api_version": "",
                         "extra_headers": {},
                         "proxy": "",
@@ -112,7 +116,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
     },
     "providers": {
         "llm": [
-            {"value": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1"},
+            {"value": "openai", "label": "DeepSeek", "base_url": "https://api.deepseek.com"},
         ],
         "embedding": [
             {
@@ -220,9 +224,9 @@ class SettingsStateService:
         else:
             block.update(
                 {
-                    "OPENAI_API_KEY": self._string_or_none(active_profile.get("api_key")),
-                    "OPENAI_API_BASE": self._string_or_none(active_profile.get("base_url")),
-                    "OPENAI_MODEL": self._string_or_none(active_model.get("model")),
+                    "DEEPSEEK_API_KEY": self._string_or_none(active_profile.get("api_key")),
+                    "DEEPSEEK_API_BASE": self._string_or_none(active_profile.get("base_url")),
+                    "DEEPSEEK_MODEL": self._string_or_none(active_model.get("model")),
                 }
             )
         return block

@@ -34,12 +34,12 @@ def serialize_session_summary(
         "source_refs": list(session.source_refs),
         "memory_refs": list(session.memory_refs),
         "anchor": project.anchor if project else {},
-        "created_at": getattr(session, "created_at", 0),
-        "updated_at": getattr(session, "updated_at", int(time.time())),
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
         "message_count": len(messages),
         "last_message": str(last_message or ""),
-        "status": getattr(session, "status", "idle"),
-        "active_turn_id": getattr(session, "active_turn_id", None),
+        "status": session.status,
+        "active_turn_id": session.active_turn_id,
         "preferences": {
             "tools": [],
             "knowledge_bases": [],
@@ -64,11 +64,11 @@ def serialize_session_detail(
             "events": [],
             "attachments": [],
             "metadata": {},
-            "created_at": getattr(session, "updated_at", int(time.time())),
+            "created_at": item.get("created_at", session.created_at),
         }
         for index, item in enumerate(session.messages)
     ]
-    summary["active_turns"] = list(getattr(session, "active_turns", []))
+    summary["active_turns"] = list(session.active_turns)
     return summary
 
 
