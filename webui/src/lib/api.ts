@@ -3,6 +3,7 @@ import type {
   KnowledgeBaseSummary,
   KnowledgeFileSummary,
   KnowledgeTaskResult,
+  LearningSupportPayload,
   MemorySummaryPayload,
   ProviderSettingsUpdate,
   SettingsPayload,
@@ -86,6 +87,54 @@ export async function fetchWebuiThread(
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return (await res.json()) as WebuiThreadPersistedPayload;
+}
+
+export async function fetchLearningSupport(
+  token: string,
+  sessionId: string,
+  base: string = "",
+): Promise<LearningSupportPayload | null> {
+  const res = await fetch(`${base}/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "same-origin",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  const body = (await res.json()) as { session?: { last_turn_result?: unknown }; last_turn_result?: unknown };
+  const session = body.session ?? body;
+  const lastTurn = (session.last_turn_result ?? {}) as Record<string, unknown>;
+  const runtime = (lastTurn.runtime_v2 ?? {}) as Record<string, unknown>;
+  const retrieval = ((runtime.retrieval as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const promptSupport =
+    (retrieval.prompt_support_bundle as LearningSupportPayload["prompt_support_bundle"] | undefined)
+    ?? (lastTurn.prompt_support_bundle as LearningSupportPayload["prompt_support_bundle"] | undefined)
+    ?? [];
+  const misses =
+    (retrieval.retrieval_misses as LearningSupportPayload["retrieval_misses"] | undefined)
+    ?? (lastTurn.retrieval_misses as LearningSupportPayload["retrieval_misses"] | undefined)
+    ?? [];
+  const hits =
+    (retrieval.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
+    ?? (lastTurn.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
+    ?? [];
+  if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0) return null;
+  return {
+    prompt_support_bundle: promptSupport,
+    retrieval_hits: hits,
+    retrieval_misses: misses,
+    retrieval_evidence_map:
+      (retrieval.retrieval_evidence_map as LearningSupportPayload["retrieval_evidence_map"] | undefined)
+      ?? (lastTurn.retrieval_evidence_map as LearningSupportPayload["retrieval_evidence_map"] | undefined)
+      ?? {},
+    retrieval_query_context:
+      (retrieval.retrieval_query_context as LearningSupportPayload["retrieval_query_context"] | undefined)
+      ?? (lastTurn.retrieval_query_context as LearningSupportPayload["retrieval_query_context"] | undefined)
+      ?? {},
+    continuation_retrieval_hint:
+      (retrieval.continuation_retrieval_hint as LearningSupportPayload["continuation_retrieval_hint"] | undefined)
+      ?? (lastTurn.continuation_retrieval_hint as LearningSupportPayload["continuation_retrieval_hint"] | undefined)
+      ?? {},
+  };
 }
 
 export async function deleteSession(

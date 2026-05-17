@@ -89,4 +89,25 @@ describe("ThreadMessages", () => {
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.getAllByRole("button", { name: "Copy reply" })).toHaveLength(1);
   });
+
+  it("shows a thinking placeholder in the message area before the assistant starts responding", () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "hi", createdAt: 1 },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming />);
+
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+  });
+
+  it("hides the synthetic thinking placeholder once an assistant streaming row exists", () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "hi", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "", isStreaming: true, createdAt: 2 },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming />);
+
+    expect(screen.getAllByText("Thinking...")).toHaveLength(1);
+  });
 });

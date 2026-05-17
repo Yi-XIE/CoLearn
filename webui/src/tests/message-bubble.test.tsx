@@ -57,6 +57,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} />);
 
     expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
   it("does not show copy when showAssistantCopyAction is false", () => {

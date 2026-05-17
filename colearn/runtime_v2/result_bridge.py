@@ -35,10 +35,24 @@ def normalize_learning_turn_result(
         "source_readiness_before": str(request.metadata.get("source_readiness_before") or ""),
         "policy_restrictions": list(request.metadata.get("policy_restrictions") or []),
     }
+    runtime_retrieval = {
+        "prefetched_references": list(request.metadata.get("prefetched_references") or []),
+        "prompt_support_bundle": list(request.metadata.get("prompt_support_bundle") or []),
+        "retrieval_focus": dict(request.metadata.get("retrieval_focus") or {}),
+        "retrieval_query_context": dict(request.metadata.get("retrieval_query_context") or {}),
+        "retrieval_reason": str(request.metadata.get("retrieval_reason") or ""),
+        "retrieval_hits": list(payload.get("retrieval_hits") or []),
+        "retrieval_misses": list(payload.get("retrieval_misses") or []),
+        "retrieval_evidence_map": dict(payload.get("retrieval_evidence_map") or {}),
+        "knowledge_support_summary": dict(payload.get("knowledge_support_summary") or {}),
+        "blocker_support_refs": dict(payload.get("blocker_support_refs") or {}),
+        "continuation_retrieval_hint": dict(payload.get("continuation_retrieval_hint") or {}),
+    }
     payload.setdefault("runtime_v2", {})
     if isinstance(payload["runtime_v2"], dict):
         payload["runtime_v2"].setdefault("board_summary", board_summary)
         payload["runtime_v2"].setdefault("turn_envelope", turn_envelope)
+        payload["runtime_v2"].setdefault("retrieval", runtime_retrieval)
     review_to_persist = dict(payload.get("review_to_persist") or {})
     board_patch = dict(payload.get("board_patch") or {})
     memory_events = list(payload.get("memory_events") or [])
@@ -71,6 +85,7 @@ def normalize_learning_turn_result(
             "enabled_tools": request.enabled_tools,
             "runtime_v2_board_summary": board_summary,
             "runtime_v2_turn_envelope": turn_envelope,
+            "runtime_v2_retrieval": runtime_retrieval,
             "turn_mode_before": turn_envelope["turn_mode_before"],
             "turn_mode_after": str(payload.get("turn_mode_after") or request.turn_mode),
             "base_board_version": turn_envelope["board_version_before"],

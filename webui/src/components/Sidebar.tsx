@@ -65,12 +65,12 @@ export function Sidebar(props: SidebarProps) {
       aria-label={t("sidebar.navigation")}
       className="flex h-full w-full min-w-0 flex-col border-r border-sidebar-border/60 bg-sidebar text-sidebar-foreground"
     >
-      <div className="flex items-center justify-between px-3 pb-2.5 pt-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-sidebar-accent/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]">
+      <div className="flex items-center justify-between px-2.5 pb-2 pt-2.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-sidebar-accent/80 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]">
             <Compass className="h-4 w-4 text-sidebar-foreground" />
           </div>
-          <div className="truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+          <div className="truncate text-[15px] font-semibold leading-none tracking-tight text-sidebar-foreground">
             CoLearn
           </div>
         </div>
@@ -85,7 +85,7 @@ export function Sidebar(props: SidebarProps) {
         </Button>
       </div>
 
-      <div className="space-y-1 px-2 pb-2">
+      <div className="space-y-1 px-2 pb-1.5">
         <label className="relative block">
           <span className="sr-only">{t("sidebar.searchAria")}</span>
           <Search
@@ -99,7 +99,7 @@ export function Sidebar(props: SidebarProps) {
             aria-label={t("sidebar.searchAria")}
             className={cn(
               "h-8 w-full rounded-full border border-transparent bg-sidebar-accent/45",
-              "pl-8 pr-3 text-[12.5px] text-sidebar-foreground outline-none",
+              "pl-8 pr-3 text-[15px] text-sidebar-foreground outline-none",
               "placeholder:text-muted-foreground/75",
               "transition-colors hover:bg-sidebar-accent/65",
               "focus:border-sidebar-border/80 focus:bg-sidebar-accent/70",
@@ -109,7 +109,7 @@ export function Sidebar(props: SidebarProps) {
         </label>
         <Button
           onClick={props.onNewChat}
-          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium leading-none text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[15px] font-medium leading-none text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
           variant="ghost"
         >
           <SquarePen className="h-3.5 w-3.5" />
@@ -125,7 +125,7 @@ export function Sidebar(props: SidebarProps) {
                 variant="ghost"
                 onClick={onClick}
                 className={cn(
-                  "h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium",
+                  "h-8 w-full justify-start gap-2 rounded-full px-3 text-[15px] font-medium",
                   active
                     ? "bg-sidebar-accent/80 text-sidebar-foreground"
                     : "text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
@@ -152,12 +152,12 @@ export function Sidebar(props: SidebarProps) {
         />
       </div>
 
-      <div className="space-y-1 px-2.5 py-2.5 text-xs">
+      <div className="space-y-1 px-2.5 py-2 text-xs">
         <Button
           type="button"
           variant="ghost"
           onClick={props.onOpenSettings}
-          className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-[12.5px] font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-[15px] font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
         >
           <Settings className="h-3.5 w-3.5" aria-hidden />
           {t("sidebar.settings")}

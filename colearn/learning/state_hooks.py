@@ -39,6 +39,361 @@ def _json_safe(payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
 
 
+SUPPORT_TYPES = {
+    "definition",
+    "prerequisite",
+    "example",
+    "counterexample",
+    "procedure",
+    "reference",
+    "extension",
+    "comparison",
+}
+
+MODE_SUPPORT_PRIORITIES: dict[str, list[str]] = {
+    "ANCHOR": ["definition", "prerequisite", "example", "reference", "extension"],
+    "CORRECTION": ["counterexample", "comparison", "definition", "reference", "example"],
+    "VERIFY": ["procedure", "reference", "definition", "example"],
+    "EXPLORE": ["example", "extension", "comparison", "definition", "reference"],
+    "PAUSED": ["reference", "definition", "example"],
+}
+
+SUPPORT_TYPE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("counterexample", ("反例", "误区", "常见错误", "错误", "counterexample", "mistake")),
+    ("procedure", ("步骤", "证明", "推导", "做法", "流程", "procedure", "step", "proof")),
+    ("example", ("例如", "例子", "案例", "示例", "example", "case")),
+    ("comparison", ("区别", "对比", "比较", "comparison", "versus", "vs")),
+    ("definition", ("定义", "概念", "本质", "definition", "concept")),
+    ("reference", ("来源", "依据", "定理", "文献", "reference", "source", "theorem")),
+    ("extension", ("延伸", "拓展", "进一步", "extension", "advanced")),
+    ("prerequisite", ("前置", "先修", "基础", "prerequisite", "foundation")),
+]
+
+
+def _evidence_sort_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(item.get("source_ref") or item.get("source_path") or ""),
+        str(item.get("chunk_id") or ""),
+        str(item.get("support_type") or ""),
+        str(item.get("target_type") or ""),
+        str(item.get("target_id") or ""),
+    )
+
+
+def _dedupe_evidence_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str, str, str]] = set()
+    result: list[dict[str, Any]] = []
+    for item in sorted(items, key=_evidence_sort_key):
+        signature = (
+            str(item.get("source_ref") or item.get("source_path") or ""),
+            str(item.get("chunk_id") or ""),
+            str(item.get("support_type") or ""),
+            str(item.get("target_type") or ""),
+            str(item.get("target_id") or ""),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        result.append(item)
+    return result
+
+
+def _compact_text(value: Any, *, limit: int = 180) -> str:
+    text = " ".join(str(value or "").replace("\n", " ").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(limit - 1, 1)].rstrip()}…"
+
+
+def _source_label(ref: dict[str, Any]) -> str:
+    raw = str(
+        ref.get("title")
+        or ref.get("source_ref")
+        or ref.get("source_path")
+        or ref.get("path")
+        or "source"
+    ).strip()
+    return raw.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] or raw
+
+
+def infer_support_type(ref: dict[str, Any]) -> str:
+    explicit = str(ref.get("support_type") or "").strip().lower()
+    if explicit in SUPPORT_TYPES:
+        return explicit
+    haystack = " ".join(
+        str(ref.get(key) or "")
+        for key in ("summary", "text", "title", "source_ref", "source_path")
+    ).lower()
+    for support_type, keywords in SUPPORT_TYPE_KEYWORDS:
+        if any(keyword.lower() in haystack for keyword in keywords):
+            return support_type
+    return "reference"
+
+
+def build_retrieval_query_context(
+    *,
+    board: BoardFacts,
+    user_message: str,
+    retrieval_focus: dict[str, Any],
+    continuation_prompt: str = "",
+) -> dict[str, Any]:
+    blockers = [
+        {"id": blocker.id, "desc": blocker.desc, "type": blocker.type}
+        for blocker in list(board.gaps_and_blockers.critical_blockers or [])
+        if str(blocker.desc or "").strip()
+    ]
+    gaps = [str(item).strip() for item in board.gaps_and_blockers.unverified_gaps if str(item).strip()]
+    parts = [
+        str(retrieval_focus.get("default_query") or "").strip(),
+        str(board.current_progress.active_node_label or board.current_progress.active_node_id or "").strip(),
+        str(user_message or "").strip(),
+        "；".join(item["desc"] for item in blockers[:2] if item.get("desc")),
+        "；".join(gaps[:2]),
+        str(continuation_prompt or board.continuation.next_prompt_hint or "").strip(),
+    ]
+    final_query = " | ".join(part for part in parts if part)
+    return {
+        "turn_mode": _normalize_turn_mode(board.current_turn_mode),
+        "active_node_id": str(board.current_progress.active_node_id or "").strip(),
+        "active_node_label": str(board.current_progress.active_node_label or "").strip(),
+        "user_message": str(user_message or "").strip(),
+        "critical_blockers": blockers,
+        "unverified_gaps": gaps,
+        "continuation_prompt": str(continuation_prompt or board.continuation.next_prompt_hint or "").strip(),
+        "evidence_refs": list(board.evidence_refs or []),
+        "default_query": str(retrieval_focus.get("default_query") or "").strip(),
+        "final_query": final_query,
+    }
+
+
+def _support_target_for(
+    *,
+    board: BoardFacts,
+    support_type: str,
+    turn_mode: str,
+    index: int,
+    ref: dict[str, Any],
+) -> dict[str, str]:
+    explicit_target = ref.get("support_target")
+    if isinstance(explicit_target, dict):
+        target_type = str(explicit_target.get("type") or explicit_target.get("target_type") or "").strip()
+        target_id = str(explicit_target.get("id") or explicit_target.get("target_id") or "").strip()
+        target_label = str(explicit_target.get("label") or explicit_target.get("target_label") or "").strip()
+        if target_type and target_id:
+            return {"target_type": target_type, "target_id": target_id, "target_label": target_label}
+    target_type = str(ref.get("target_type") or "").strip()
+    target_id = str(ref.get("target_id") or "").strip()
+    if target_type and target_id:
+        return {
+            "target_type": target_type,
+            "target_id": target_id,
+            "target_label": str(ref.get("target_label") or ""),
+        }
+
+    blockers = list(board.gaps_and_blockers.critical_blockers or [])
+    gaps = [str(item).strip() for item in board.gaps_and_blockers.unverified_gaps if str(item).strip()]
+    if (
+        turn_mode in {"CORRECTION", "VERIFY"}
+        or support_type in {"counterexample", "comparison"}
+    ) and blockers:
+        blocker = blockers[index % len(blockers)]
+        return {"target_type": "blocker", "target_id": blocker.id, "target_label": blocker.desc}
+    if turn_mode == "VERIFY" and gaps:
+        gap_index = index % len(gaps)
+        return {"target_type": "gap", "target_id": f"gap_{gap_index:03d}", "target_label": gaps[gap_index]}
+    node_id = str(board.current_progress.active_node_id or board.project_id or "").strip()
+    return {
+        "target_type": "node",
+        "target_id": node_id,
+        "target_label": str(board.current_progress.active_node_label or node_id),
+    }
+
+
+def _support_priority_score(*, support_type: str, turn_mode: str, raw_score: Any) -> float:
+    priorities = MODE_SUPPORT_PRIORITIES.get(turn_mode, MODE_SUPPORT_PRIORITIES["EXPLORE"])
+    try:
+        source_score = float(raw_score)
+    except (TypeError, ValueError):
+        source_score = 0.0
+    priority_index = priorities.index(support_type) if support_type in priorities else len(priorities)
+    priority_score = max(len(priorities) - priority_index, 0) / max(len(priorities), 1)
+    return round(priority_score + min(max(source_score, 0.0), 1.0) * 0.2, 4)
+
+
+def build_prompt_support_bundle(
+    *,
+    board: BoardFacts,
+    prefetched_references: list[dict[str, Any]],
+    retrieval_focus: dict[str, Any] | None = None,
+    max_items: int = 4,
+) -> list[dict[str, Any]]:
+    turn_mode = _normalize_turn_mode((retrieval_focus or {}).get("turn_mode") or board.current_turn_mode)
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for idx, ref in enumerate(prefetched_references):
+        raw_ref = str(ref.get("source_ref") or ref.get("source_path") or ref.get("path") or "").strip()
+        if not raw_ref:
+            continue
+        chunk_id = str(ref.get("chunk_id") or f"prefetch_{idx}")
+        signature = (raw_ref, chunk_id)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        support_type = infer_support_type(ref)
+        target = _support_target_for(
+            board=board,
+            support_type=support_type,
+            turn_mode=turn_mode,
+            index=idx,
+            ref=ref,
+        )
+        raw_summary = ref.get("summary") or ref.get("text") or ref.get("content") or ref.get("title") or _source_label(ref)
+        summary = _compact_text(raw_summary, limit=180)
+        score = _support_priority_score(
+            support_type=support_type,
+            turn_mode=turn_mode,
+            raw_score=ref.get("score"),
+        )
+        candidates.append(
+            {
+                "source_ref": raw_ref,
+                "source_path": str(ref.get("source_path") or ""),
+                "title": str(ref.get("title") or _source_label(ref)),
+                "chunk_id": chunk_id,
+                "support_type": support_type,
+                "summary": summary,
+                "target_type": target["target_type"],
+                "target_id": target["target_id"],
+                "target_label": target["target_label"],
+                "support_target": {
+                    "type": target["target_type"],
+                    "id": target["target_id"],
+                    "label": target["target_label"],
+                },
+                "support_reason": (
+                    f"{support_type} material supports "
+                    f"{target['target_type']} {target['target_label'] or target['target_id']}."
+                ),
+                "score": score,
+                "confidence": score,
+            }
+        )
+    candidates.sort(
+        key=lambda item: (
+            -float(item.get("score") or 0),
+            str(item.get("source_ref") or ""),
+            str(item.get("chunk_id") or ""),
+        )
+    )
+    return candidates[: max(max_items, 0)]
+
+
+def build_retrieval_focus(
+    *,
+    board: BoardFacts,
+    turn_mode: str | None = None,
+) -> dict[str, Any]:
+    resolved_mode = _normalize_turn_mode(turn_mode or board.current_turn_mode)
+    active_node_id = str(board.current_progress.active_node_id or "").strip()
+    blocker_refs = [
+        {
+            "blocker_id": blocker.id,
+            "blocker_desc": blocker.desc,
+            "blocker_type": blocker.type,
+        }
+        for blocker in list(board.gaps_and_blockers.critical_blockers or [])
+        if str(blocker.desc or "").strip()
+    ]
+    evidence_refs = list(board.evidence_refs or [])
+    focus: dict[str, Any] = {
+        "turn_mode": resolved_mode,
+        "active_node_id": active_node_id,
+        "active_node_label": str(board.current_progress.active_node_label or "").strip(),
+        "critical_blockers": blocker_refs,
+        "unverified_gaps": [str(item).strip() for item in board.gaps_and_blockers.unverified_gaps if str(item).strip()],
+        "evidence_refs": evidence_refs,
+    }
+    focus["default_query"] = {
+        "ANCHOR": "基础定义、前置知识、关键概念",
+        "CORRECTION": "反例、纠错证据、概念对照",
+        "VERIFY": "步骤核验、来源依据、推理链",
+        "EXPLORE": "当前节点扩展资料、相关例子、延伸理解",
+        "PAUSED": "当前学习节点背景资料",
+    }.get(resolved_mode, "当前学习节点背景资料")
+    if active_node_id:
+        focus["scope"] = {
+            "active_node_id": active_node_id,
+            "active_node_label": str(board.current_progress.active_node_label or "").strip(),
+        }
+    return focus
+
+
+def build_retrieval_evidence_map(
+    *,
+    board: BoardFacts,
+    prefetched_references: list[dict[str, Any]],
+    prompt_support_bundle: list[dict[str, Any]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    active_node_id = str(board.current_progress.active_node_id or "").strip()
+    support_rows = prompt_support_bundle
+    if support_rows is None:
+        support_rows = build_prompt_support_bundle(
+            board=board,
+            prefetched_references=prefetched_references,
+            retrieval_focus={"turn_mode": board.current_turn_mode},
+        )
+    evidence_map: dict[str, list[dict[str, Any]]] = {}
+    for idx, ref in enumerate(support_rows):
+        raw_ref = str(ref.get("source_ref") or ref.get("source_path") or ref.get("path") or "").strip()
+        if not raw_ref:
+            continue
+        chunk_id = str(ref.get("chunk_id") or f"prefetch_{idx}")
+        support_type = infer_support_type(ref)
+        target_type = str(ref.get("target_type") or (ref.get("support_target") or {}).get("type") or "node")
+        target_id = str(ref.get("target_id") or (ref.get("support_target") or {}).get("id") or active_node_id)
+        target_label = str(ref.get("target_label") or (ref.get("support_target") or {}).get("label") or target_id)
+        hit = {
+            "source_ref": raw_ref,
+            "source_path": str(ref.get("source_path") or ""),
+            "title": str(ref.get("title") or _source_label(ref)),
+            "chunk_id": chunk_id,
+            "support_type": support_type,
+            "active_node_id": active_node_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "target_label": target_label,
+            "support_target": {"type": target_type, "id": target_id, "label": target_label},
+            "support_targets": [target_id] if target_id else [],
+            "support_reason": str(ref.get("support_reason") or ""),
+            "confidence": float(ref.get("confidence") or ref.get("score") or 0),
+            "summary": str(ref.get("summary") or ""),
+        }
+        for key in [target_id, f"chunk:{chunk_id}"]:
+            if key:
+                evidence_map.setdefault(key, []).append(hit)
+    return {key: _dedupe_evidence_items(value) for key, value in evidence_map.items()}
+
+
+def build_retrieval_reason(
+    *,
+    board: BoardFacts,
+    source_readiness: dict[str, Any] | None = None,
+) -> str:
+    mode = _normalize_turn_mode(board.current_turn_mode)
+    blockers = list(board.gaps_and_blockers.critical_blockers or [])
+    if blockers:
+        return f"{mode} turn needs evidence for {len(blockers)} critical blocker(s)."
+    if mode == "VERIFY":
+        return "VERIFY turn needs source-backed validation."
+    if mode == "CORRECTION":
+        return "CORRECTION turn needs counterexamples and correction evidence."
+    if mode == "ANCHOR":
+        return "ANCHOR turn needs base definitions and prerequisites."
+    if source_readiness and str(source_readiness.get("readiness") or "").lower() != "ready":
+        return f"Source readiness is {source_readiness.get('readiness', 'unknown')}; prefetch to reduce turn risk."
+    return f"{mode} turn needs background support for the active learning node."
+
+
 def extract_board_facts(
     *,
     project: LearningProject,
@@ -490,6 +845,14 @@ def after_turn_payload(
         source_references=list(getattr(request, "source_references", []) or []),
         tool_events=tool_events,
     )
+    retrieval_hits = _dedupe_evidence_items(list(getattr(request, "metadata", {}).get("retrieval_hits") or []))
+    retrieval_misses = list(getattr(request, "metadata", {}).get("retrieval_misses") or [])
+    prompt_support_bundle = list(getattr(request, "metadata", {}).get("prompt_support_bundle") or [])
+    retrieval_query_context = dict(getattr(request, "metadata", {}).get("retrieval_query_context") or {})
+    retrieval_evidence_map = {
+        key: _dedupe_evidence_items(list(value or []))
+        for key, value in dict(getattr(request, "metadata", {}).get("retrieval_evidence_map") or {}).items()
+    }
     review_summary = final_text[:240].strip()
     continuation_prompt = updated_board.continuation.next_prompt_hint or str(
         getattr(request, "continuation_prompt", "")
@@ -520,6 +883,27 @@ def after_turn_payload(
             "student_snapshot": asdict(updated_board.student_snapshot),
             "gaps_and_blockers": asdict(updated_board.gaps_and_blockers),
             "evidence_refs": list(updated_board.evidence_refs),
+        },
+        "retrieval_hits": retrieval_hits,
+        "retrieval_misses": retrieval_misses,
+        "prompt_support_bundle": prompt_support_bundle,
+        "retrieval_query_context": retrieval_query_context,
+        "retrieval_evidence_map": retrieval_evidence_map,
+        "knowledge_support_summary": {
+            "active_node_id": updated_board.current_progress.active_node_id,
+            "critical_blockers": [blocker.id for blocker in updated_board.gaps_and_blockers.critical_blockers],
+            "evidence_ref_count": len(updated_board.evidence_refs or []),
+            "retrieval_hit_count": len(retrieval_hits),
+        },
+        "blocker_support_refs": {
+            blocker.id: _dedupe_evidence_items([ref for ref in retrieval_evidence_map.get(blocker.id, []) if isinstance(ref, dict)])
+            for blocker in updated_board.gaps_and_blockers.critical_blockers
+        },
+        "continuation_retrieval_hint": {
+            "active_node_id": updated_board.current_progress.active_node_id,
+            "evidence_refs": list(updated_board.evidence_refs or []),
+            "retrieval_focus": getattr(request, "metadata", {}).get("retrieval_focus", {}),
+            "retrieval_query_context": retrieval_query_context,
         },
         "writeback_envelope": {
             "turn_mode_before": turn_mode_before,

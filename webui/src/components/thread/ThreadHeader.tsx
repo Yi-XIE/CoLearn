@@ -47,7 +47,7 @@ export function ThreadHeader({
   }
 
   return (
-    <div className="relative z-10 flex items-start justify-between gap-3 px-6 py-5">
+    <div className="relative z-10 flex items-start justify-between gap-3 px-6 pt-3 pb-4">
       <div className="relative flex min-w-0 items-start gap-3">
         <Button
           variant="ghost"
@@ -55,13 +55,13 @@ export function ThreadHeader({
           aria-label={t("thread.header.toggleSidebar")}
           onClick={onToggleSidebar}
           className={cn(
-            "mt-1 h-8 w-8 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+            "mt-0.5 h-8 w-8 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
             hideSidebarToggleOnDesktop && "lg:pointer-events-none lg:opacity-0",
           )}
         >
           <Menu className="h-3.5 w-3.5" />
         </Button>
-        <div className="flex min-w-0 flex-col rounded-md py-0.5">
+        <div className="flex min-w-0 flex-col rounded-md py-0">
           <span
             className={cn(
               "max-w-[min(60vw,32rem)] truncate leading-tight",

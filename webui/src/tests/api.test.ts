@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
+  fetchLearningSupport,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
@@ -42,6 +43,42 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+
+  it("normalizes learning support from CoLearn session detail", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        session: {
+          last_turn_result: {
+            runtime_v2: {
+              retrieval: {
+                prompt_support_bundle: [
+                  {
+                    source_ref: "note.md",
+                    chunk_id: "c1",
+                    support_type: "definition",
+                    summary: "Core idea",
+                  },
+                ],
+                retrieval_misses: [],
+              },
+            },
+          },
+        },
+      }),
+    } as Response);
+
+    const support = await fetchLearningSupport("tok", "session-1");
+
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/sessions/session-1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+    expect(support?.prompt_support_bundle[0]?.summary).toBe("Core idea");
   });
 
   it("serializes settings updates as a narrow query string", async () => {

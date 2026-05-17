@@ -2,8 +2,8 @@
   "agents": {
     "defaults": {
       "workspace": "./.colearn/nanobot-workspace",
-      "provider": "openai",
-      "model": "deepseek-v4-flash",
+      "provider": "github_copilot",
+      "model": "github-copilot/gpt-4.1",
       "fallbackModels": [],
       "maxToolIterations": 80,
       "maxConcurrentSubagents": 1,
@@ -55,11 +55,5 @@
       "enabled": false
     },
     "mcpServers": {}
-  },
-  "providers": {
-    "openai": {
-      "apiKey": "${OPENAI_API_KEY}",
-      "apiBase": "${OPENAI_API_BASE}"
-    }
   }
 }

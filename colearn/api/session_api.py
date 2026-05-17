@@ -69,6 +69,7 @@ def serialize_session_detail(
         for index, item in enumerate(session.messages)
     ]
     summary["active_turns"] = list(session.active_turns)
+    summary["last_turn_result"] = dict(session.last_turn_result or {})
     return summary
 
 

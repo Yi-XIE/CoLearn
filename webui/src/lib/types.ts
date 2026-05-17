@@ -92,6 +92,29 @@ export interface ChatSummary {
   preview: string;
 }
 
+export interface LearningSupportItem {
+  source_ref?: string;
+  source_path?: string;
+  title?: string;
+  chunk_id?: string;
+  support_type?: string;
+  summary?: string;
+  target_type?: string;
+  target_id?: string;
+  target_label?: string;
+  support_reason?: string;
+  confidence?: number;
+}
+
+export interface LearningSupportPayload {
+  prompt_support_bundle: LearningSupportItem[];
+  retrieval_hits: LearningSupportItem[];
+  retrieval_misses: Array<Record<string, unknown>>;
+  retrieval_evidence_map: Record<string, LearningSupportItem[]>;
+  retrieval_query_context: Record<string, unknown>;
+  continuation_retrieval_hint: Record<string, unknown>;
+}
+
 export interface BootstrapResponse {
   token: string;
   ws_path: string;

@@ -1262,6 +1262,7 @@ async def unified_ws(websocket: WebSocket) -> None:
                 seq = int(prepared_stream_events[-1].get("seq") or seq) + 1
             for item in prepared_stream_events:
                 await websocket.send_json(item)
+            learning_support = dict((result.raw_learning_result or {}).get("runtime_v2", {}).get("retrieval", {}) or {})
             content_event = {
                 "type": "content",
                 "source": "assistant",
@@ -1271,6 +1272,7 @@ async def unified_ws(websocket: WebSocket) -> None:
                     "phase": "content",
                     "turn_mode": result.turn_mode_after,
                     "board_patch": result.board_patch,
+                    "learning_support": learning_support,
                     "warnings": list(result.warnings),
                     "tool_events": list(result.tool_events),
                     "call_id": f"{turn_id}-final",

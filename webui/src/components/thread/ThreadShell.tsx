@@ -7,8 +7,8 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { listSlashCommands } from "@/lib/api";
-import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
+import { fetchLearningSupport, listSlashCommands } from "@/lib/api";
+import type { ChatSummary, LearningSupportPayload, SlashCommand, UIMessage } from "@/lib/types";
 import { projectThreadMessages } from "@/lib/thread-display";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
@@ -75,6 +75,7 @@ export function ThreadShell({
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [learningSupport, setLearningSupport] = useState<LearningSupportPayload | null>(null);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
@@ -90,9 +91,23 @@ export function ThreadShell({
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
+  const refreshLearningSupport = useCallback(async () => {
+    if (!chatId) {
+      setLearningSupport(null);
+      return;
+    }
+    try {
+      const support = await fetchLearningSupport(token, chatId);
+      setLearningSupport(support);
+    } catch {
+      setLearningSupport(null);
+    }
+  }, [chatId, token]);
+
   const handleTurnEnd = useCallback(() => {
     onTurnEnd?.();
-  }, [onTurnEnd]);
+    void refreshLearningSupport();
+  }, [onTurnEnd, refreshLearningSupport]);
   const {
     messages,
     isStreaming,
@@ -108,6 +123,10 @@ export function ThreadShell({
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
   }, [chatId, historyKey]);
+
+  useEffect(() => {
+    void refreshLearningSupport();
+  }, [refreshLearningSupport, historyVersion]);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const goalHeaderLabel = useMemo(() => toLearningGoalLabel(goalState), [goalState]);
@@ -149,8 +168,9 @@ export function ThreadShell({
       if (updatedChatId !== chatId) return;
       pendingCanonicalHydrateRef.current.add(chatId);
       refreshHistory();
+      void refreshLearningSupport();
     });
-  }, [chatId, client, refreshHistory]);
+  }, [chatId, client, refreshHistory, refreshLearningSupport]);
 
   useEffect(() => {
     if (!chatId || loading) return;
@@ -261,7 +281,14 @@ export function ThreadShell({
           isStreaming={isStreaming}
           placeholder={
             showHeroComposer
-              ? t("thread.composer.placeholderHero")
+              ? [
+                  "先告诉我你想从哪开始",
+                  "把你的学习目标发给我",
+                  "输入一句话，我来帮你展开",
+                  "说说你现在最想弄懂什么",
+                  "先写下你想学的方向",
+                  "告诉我今天想推进什么",
+                ]
               : t("thread.composer.placeholderThread")
           }
           modelLabel={toModelBadgeLabel(modelName)}
@@ -279,7 +306,14 @@ export function ThreadShell({
           placeholder={
             booting
               ? t("thread.composer.placeholderOpening")
-              : t("thread.composer.placeholderHero")
+              : [
+                  "先告诉我你想从哪开始",
+                  "把你的学习目标发给我",
+                  "输入一句话，我来帮你展开",
+                  "说说你现在最想弄懂什么",
+                  "先写下你想学的方向",
+                  "告诉我今天想推进什么",
+                ]
           }
           modelLabel={toModelBadgeLabel(modelName)}
           variant="hero"
@@ -322,6 +356,7 @@ export function ThreadShell({
         composer={composer}
         scrollToBottomSignal={scrollToBottomSignal}
         conversationKey={historyKey}
+        learningSupport={learningSupport}
       />
     </section>
   );

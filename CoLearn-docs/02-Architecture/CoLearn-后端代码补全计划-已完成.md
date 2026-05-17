@@ -8,15 +8,17 @@
 
 ## 当前后端主线
 
-截至当前代码，后端主线已经稳定在下面这条路径上：
+截至当前代码，后端主线稳定在下面这条路径上：
 
 - FastAPI 提供 HTTP 与 WebSocket 入口
 - `LearningOrchestrator` 负责单轮组装
 - `BoardFacts -> TurnPolicy -> LearningEvent` 作为学习状态协议
+- `SourceReadinessPreflight` 负责回合前资料准备状态
+- `RetrievalService.build_bundle()` 负责回合前知识预取
 - `NanobotTurnExecutor` 负责回合执行
 - `memory` 与 `lightrag` 通过工具方式接入
 - `RuntimeCompressionBridge` 与 `ProductCompressionBridge` 分别承担运行时压缩与结果压缩
-- session / project / memory 通过 JSON state store 持久化
+- session / project / memory / settings / auth 通过 JSON state store 或本地 service 管理
 
 ## 已完成的收口项
 
@@ -61,7 +63,22 @@
 
 当前 preflight 不是死字段，而是已有下游消费者。
 
-### 5. LightRAG async / sync 边界重写
+### 5. Retrieval prefetch 与 evidence writeback
+
+已经完成：
+
+- `build_retrieval_focus()` 从 Board 派生检索目标
+- `build_retrieval_reason()` 解释本轮检索原因
+- `RetrievalService.build_bundle()` 在回合前生成 `prefetch_bundle`
+- `LearningTurnRequest.retrieval_bundle` 承载本轮预取结果
+- `prefetched_references` 进入 request metadata 与 prompt 提示
+- `build_retrieval_evidence_map()` 建立 node / blocker / chunk 级映射
+- `runtime_v2.retrieval` 归档 retrieval 支撑信息
+- `session.last_turn_result` 写入 `retrieval_hits`、`retrieval_misses`、`retrieval_evidence_map`、`knowledge_support_summary`、`blocker_support_refs`、`continuation_retrieval_hint`
+
+这条链路让 LightRAG 从“可调用工具”向“状态驱动的背景知识层”前进了一步。
+
+### 6. LightRAG async / sync 边界重写
 
 已经完成：
 
@@ -69,19 +86,23 @@
 - 旧 `_run_async()` 线程绕行逻辑已移除
 - 同步入口在事件循环中会明确失败
 - executor 的 LightRAG tool 走 async retrieval 路径
+- `lightrag` tool 返回结构化 `evidence_refs` 与 `evidence_map`
 
-### 6. API 层状态拆分
+### 7. API 层状态拆分
 
 已经完成：
 
 - settings、memory docs、skills 这类 API-only 状态迁移到 `colearn.api.state`
 - service 可 reset，便于测试隔离
-- 本轮新增了：
+- 当前本地状态 service 包括：
+  - `SettingsStateService`
+  - `MemoryDocStateService`
+  - `SkillStateService`
   - `AuthStateService`
   - `KnowledgeTaskService`
   - `SettingsTestRunService`
 
-### 7. 联调补齐接口
+### 8. 联调补齐接口
 
 已经完成一版本地联调用补齐：
 
@@ -94,22 +115,20 @@
 - `WS /api/v1/knowledge/{name}/progress/ws`
 - `GET /api/v1/knowledge/{name}/files/{file_path}`
 - `GET /api/v1/settings/tests/{service}/{run_id}/events`
+- `GET /api/v1/memory/summary`
+- `GET /api/v1/memory/projection`
+- `POST /api/v1/sessions/{session_id}/pause`
+- `POST /api/v1/sessions/{session_id}/resume`
 
 这一轮的目标是前后端联调对齐，不是生产级认证或完整任务平台。
 
-### 8. WebSocket 生命周期测试
+### 9. WebSocket 生命周期测试
 
 已经完成：
 
 - 真实 `/api/v1/ws` 已有 ASGI 级测试
 - 覆盖 ping、missing subscribe、cancel 清理、start_turn 成功、异常清理
-
-### 9. 本轮回归状态
-
-当前已确认：
-
-- `pytest tests/test_api_app.py` 通过
-- `npm run test:node` 通过
+- 学习主链测试覆盖了 source profile、retrieval metadata、runtime_v2 tool registration、structured evidence
 
 ## 当前代码事实下的边界
 
@@ -131,8 +150,9 @@
 - 已有 SSE task stream
 - 已有 progress WebSocket
 - 已支持文件保存、列文件、取文件、reindex
+- task 当前多为同步完成型状态
 
-但它仍然属于轻量任务实现，不应宣称已经具备完整后台任务基础设施。
+它仍然属于轻量任务实现，不应宣称已经具备完整后台任务基础设施。
 
 ### 3. API schema 不是“全部补齐”
 
@@ -144,8 +164,8 @@
 - auth login / register
 - session create / update
 - project create / update / sources / anchor
-- memory update / clear
-- WebSocket `start_turn`
+- memory update / refresh / clear
+- WebSocket `start_turn` / `ping` / `subscribe_turn` / `cancel_turn` / `regenerate`
 
 仍有一部分接口和消息层继续处于收口过程中，尤其是部分工具型接口与 WebSocket 消息分发层。
 
@@ -158,22 +178,34 @@
 
 它还不是严格 compare-and-swap，也不是完整的基于当前版本递增写入协议。
 
-### 5. Retrieval 仍是 tool-mode
+### 5. Retrieval 是 prefetch + tool-mode 的混合形态
 
-当前实现继续明确采用 tool-mode retrieval：
+当前实现不是“每轮固定把完整检索文本塞进 prompt”。
+
+真实形态是：
 
 - preflight 负责 source readiness
-- 真正知识文本由 `lightrag` tool 按需拉取
+- prefetch 负责生成 `retrieval_focus` 和少量 `prefetched_references`
+- prompt 只写入 retrieval focus、预取数量和 retrieval reason
+- 真正知识文本仍可由 `lightrag` tool 按需拉取
 
-系统没有恢复为“每轮固定前置 retrieval”。
+### 6. `retrieval_bundle` 已启用，但不是最终支持包
 
-### 6. `retrieval_bundle` 仍保留在 request contract
+`LearningTurnRequest.retrieval_bundle` 仍保留在 request contract 中，并且现在会承载回合前 `prefetch_bundle`。
 
-`LearningTurnRequest` 仍携带 `retrieval_bundle` 字段。
+当前主链还没有实现独立的 `prompt_support_bundle` 选择器，也没有把预取资料做模式化摘要后直接放入 prompt。
 
-当前主链没有把它完全移出 contract，这属于已知但暂未继续扩修的边界。
+### 7. Evidence map 仍是轻量图谱
 
-### 7. Knowledge workspace 仍是轻量服务
+当前 `retrieval_evidence_map` 主要由 `prefetched_references` 推导：
+
+- active node id
+- blocker id
+- `chunk:{chunk_id}`
+
+它还没有把模型实际引用、工具返回 evidence、用户追问和 Board 事件统一成完整证据图谱。
+
+### 8. Knowledge workspace 仍是轻量服务
 
 当前 knowledge workspace 的事实是：
 
@@ -186,23 +218,33 @@
 
 ## 当前回归入口
 
-后端主回归入口仍然是：
+后端主回归入口：
 
 ```bash
 python -m pytest tests
 ```
 
-如果继续增加后端测试用例，应在回归完成后同步刷新本文档中的基线描述。
+前端回归入口：
+
+```bash
+cd webui
+npm run test
+npm run build
+```
+
+如果继续增加测试用例，应在回归完成后同步刷新本文档中的基线描述。
 
 ## 下一步建议
 
 如果继续按低风险顺序推进，建议优先关注：
 
-1. 真实页面联调闭环
-2. 知识库 task 状态更接近真实异步过程
-3. Settings diagnostics 事件流体验收口
-4. 认证页面与 401 跳转闭环
-5. WebSocket 消息分发层继续强类型化
+1. 把 `prefetched_references` 筛成 `prompt_support_bundle`
+2. retrieval tool evidence 与 prefetch evidence map 合并
+3. 知识库 task 状态更接近真实异步过程
+4. Settings diagnostics 事件流体验收口
+5. 认证页面与 401 跳转闭环
+6. WebSocket 消息分发层继续强类型化
+7. API router 拆分
 
 ## 使用方式
 

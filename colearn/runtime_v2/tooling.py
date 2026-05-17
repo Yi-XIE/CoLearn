@@ -32,6 +32,50 @@ def install_colearn_tools(
 
     from nanobot.agent.tools.base import Tool, tool_parameters
 
+    def _normalize_evidence_rows(
+        *,
+        source_rows: list[dict[str, Any]],
+        active_node_id: str,
+    ) -> dict[str, Any]:
+        evidence_refs: list[dict[str, Any]] = []
+        evidence_map: dict[str, list[dict[str, Any]]] = {}
+        for idx, row in enumerate(source_rows):
+            raw_ref = str(row.get("source_ref") or row.get("source_path") or row.get("path") or "").strip()
+            if not raw_ref:
+                continue
+            chunk_id = str(row.get("chunk_id") or f"tool_{idx}")
+            support_type = str(row.get("support_type") or "reference")
+            target_id = str(row.get("target_id") or active_node_id or "").strip()
+            target_type = str(row.get("target_type") or ("node" if target_id else "")).strip()
+            target_label = str(row.get("target_label") or target_id).strip()
+            try:
+                confidence = float(row.get("confidence") or row.get("score") or 0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            evidence = {
+                "source_ref": raw_ref,
+                "source_path": str(row.get("source_path") or ""),
+                "chunk_id": chunk_id,
+                "support_type": support_type,
+                "active_node_id": active_node_id,
+                "target_type": target_type,
+                "target_id": target_id,
+                "target_label": target_label,
+                "support_target": {"type": target_type, "id": target_id, "label": target_label},
+                "support_targets": [target for target in [target_id] if target],
+                "support_reason": str(row.get("support_reason") or ""),
+                "confidence": confidence,
+                "text": str(row.get("text") or "").strip(),
+            }
+            evidence_refs.append(evidence)
+            for key in [active_node_id, f"chunk:{chunk_id}"]:
+                if key:
+                    evidence_map.setdefault(key, []).append(evidence)
+        return {
+            "evidence_refs": evidence_refs,
+            "evidence_map": evidence_map,
+        }
+
     if registry.has("memory"):
         registry.unregister("memory")
     if registry.has("lightrag"):
@@ -73,10 +117,27 @@ def install_colearn_tools(
                             )
                     refs = request.memory_references or []
                     if refs:
-                        return "\n".join(f"- {item}" for item in refs)
-                    return "No memory references are attached for this turn."
+                        evidence = _normalize_evidence_rows(
+                            source_rows=[
+                                {"source_ref": item, "chunk_id": f"memory_{idx}"}
+                                for idx, item in enumerate(refs)
+                            ],
+                            active_node_id=str(request.board_facts.current_progress.active_node_id or ""),
+                        )
+                        return evidence
+                    return {
+                        "status": "empty",
+                        "evidence_refs": [],
+                        "evidence_map": {},
+                        "message": "No memory references are attached for this turn.",
+                    }
                 except Exception as exc:
-                    return f"Memory context unavailable: {exc}"
+                    return {
+                        "status": "error",
+                        "evidence_refs": [],
+                        "evidence_map": {},
+                        "message": f"Memory context unavailable: {exc}",
+                    }
 
         registry.register(ColearnMemoryTool())
 
@@ -112,16 +173,18 @@ def install_colearn_tools(
                                 if str(item.get("source_ref") or item.get("source_path") or "")
                             ],
                         )
-                        status_line = (
-                            f"retrieval_status={bundle.retrieval_status}; "
-                            f"source_refs={len(bundle.source_refs or [])}; "
-                            f"warnings={'; '.join(bundle.warnings or [])}"
+                        evidence = _normalize_evidence_rows(
+                            source_rows=list(bundle.references or []),
+                            active_node_id=str(request.board_facts.current_progress.active_node_id or ""),
                         )
-                        if bundle.text:
-                            return f"{status_line}\n\n{bundle.text}"
-                        if bundle.warnings:
-                            return f"LightRAG context unavailable: {'; '.join(bundle.warnings)}"
-                        return "LightRAG context is not ready for this turn."
+                        return {
+                            "status": bundle.retrieval_status,
+                            "source_refs": len(bundle.references or []),
+                            "warnings": list(bundle.warnings or []),
+                            "fallback_reason": bundle.fallback_reason,
+                            "text": bundle.text,
+                            **evidence,
+                        }
 
                     client = get_lightrag_client(workspace=resolved_workspace)
                     normalized_refs = []
@@ -140,17 +203,28 @@ def install_colearn_tools(
                         source_refs=normalized_refs,
                     )
                     warnings = list(result.warnings or [])
-                    status_line = (
-                        f"retrieval_status={result.retrieval_status}; "
-                        f"source_refs={len(result.references or [])}; "
-                        f"warnings={'; '.join(warnings)}"
+                    evidence = _normalize_evidence_rows(
+                        source_rows=list(result.references or []),
+                        active_node_id=str(request.board_facts.current_progress.active_node_id or ""),
                     )
-                    if result.text:
-                        return f"{status_line}\n\n{result.text}"
-                    if warnings:
-                        return f"LightRAG context unavailable: {'; '.join(warnings)}"
-                    return "LightRAG context is not ready for this turn."
+                    return {
+                        "status": result.retrieval_status,
+                        "source_refs": len(result.references or []),
+                        "warnings": warnings,
+                        "fallback_reason": result.fallback_reason,
+                        "text": result.text,
+                        **evidence,
+                    }
                 except Exception as exc:
-                    return f"LightRAG context unavailable: {exc}"
+                    return {
+                        "status": "error",
+                        "source_refs": 0,
+                        "warnings": [str(exc)],
+                        "fallback_reason": "tool_exception",
+                        "text": "",
+                        "evidence_refs": [],
+                        "evidence_map": {},
+                        "message": f"LightRAG context unavailable: {exc}",
+                    }
 
         registry.register(ColearnLightRAGTool())

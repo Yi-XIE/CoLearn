@@ -393,14 +393,17 @@ function UserImageCell({
 function TypingDots() {
   const { t } = useTranslation();
   return (
-    <span
+    <div
       aria-label={t("message.assistantTyping")}
-      className="inline-flex items-center gap-1 py-1"
+      className="inline-flex items-center gap-2 py-1 text-[14px] font-medium text-muted-foreground/82"
     >
-      <Dot delay="0ms" />
-      <Dot delay="150ms" />
-      <Dot delay="300ms" />
-    </span>
+      <span>Thinking...</span>
+      <span className="inline-flex items-center gap-1">
+        <Dot delay="0ms" />
+        <Dot delay="150ms" />
+        <Dot delay="300ms" />
+      </span>
+    </div>
   );
 }
 

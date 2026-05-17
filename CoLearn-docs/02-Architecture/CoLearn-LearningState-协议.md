@@ -2,13 +2,16 @@
 
 ## 文档目的
 
-这份文档描述当前代码中的 Learning State 三层协议，以及它们在运行时和持久化层之间的映射关系。
+这份文档描述当前代码中的 Learning State 三层协议，以及它们和 retrieval、runtime_v2、持久化层之间的映射关系。
 
 对应实现主要在：
 
 - `colearn/learning/state.py`
 - `colearn/learning/state_hooks.py`
+- `colearn/learning/turn_contract.py`
+- `colearn/learning/response_contract.py`
 - `colearn/app/learning_orchestrator.py`
+- `colearn/runtime_v2/result_bridge.py`
 
 ## 三层结构
 
@@ -20,9 +23,11 @@
 
 其中：
 
-- `BoardFacts` 是跨回合持久事实
-- `TurnPolicy` 是每轮重新计算的策略投影
-- `LearningEvent` 是回合结束后驱动 Board 更新的事件
+- `BoardFacts` 是跨回合持久事实。
+- `TurnPolicy` 是每轮重新计算的策略投影。
+- `LearningEvent` 是回合结束后驱动 Board 更新的事件。
+
+Retrieval 现在不是第四层状态，而是围绕 Board 派生的一组支持信息：`retrieval_focus`、`retrieval_reason`、`prefetched_references`、`retrieval_evidence_map`。
 
 ## BoardFacts
 
@@ -61,6 +66,12 @@
 - `critical_blockers`
 - `unverified_gaps`
 
+`critical_blockers` 使用 `Blocker`，字段是：
+
+- `id`
+- `type`
+- `desc`
+
 `continuation` 当前包含：
 
 - `next_prompt_hint`
@@ -80,7 +91,7 @@
 
 ### 当前持久化形态
 
-`BoardFacts` 在运行时是 dataclass，但当前持久化时仍会转成字典落盘。
+`BoardFacts` 在运行时是 dataclass，但持久化时仍会转成字典落盘。
 
 也就是说，Board 的类型边界还没有完全收紧到单一表示形式。
 
@@ -107,6 +118,7 @@
 当前字段包括：
 
 - `turn_mode`
+- `model_preset`
 - `main_goal`
 - `restrictions`
 - `allowed_tools`
@@ -119,30 +131,98 @@
 
 ### 当前策略规则
 
-当前 `policy()` 采用轻量规则：
+当前 `determine_turn_mode()` 的顺序是：
 
-- `PAUSED` 保持暂停
-- 没有 active node 时进入 `ANCHOR`
-- 有 critical blockers 时进入 `CORRECTION`
-- 有 unverified gaps 时进入 `VERIFY`
-- 其他情况进入 `EXPLORE`
+1. `PAUSED` 保持暂停
+2. 已经处在 `ANCHOR`、`CORRECTION`、`VERIFY` 时保持当前模式
+3. 没有 active node 时进入 `ANCHOR`
+4. 有 critical blockers 时进入 `CORRECTION`
+5. 有 unverified gaps 时进入 `VERIFY`
+6. 其他情况进入 `EXPLORE`
 
 工具开放规则当前是：
 
 - `memory` 默认可用
-- `lightrag` 仅在 `EXPLORE` 时开启
+- `lightrag` 仅在 `EXPLORE` 时作为工具开启
+
+需要区分：回合前 retrieval prefetch 是 orchestrator 主链动作，不受 `enabled_tools` 中是否包含 `lightrag` 影响。
+
+### model_preset
+
+`resolve_model_preset()` 当前规则是：
+
+- `EXPLORE` -> `explore`
+- `ANCHOR` / `CORRECTION` / `VERIFY` -> `deep`
+- `PAUSED` -> 不设置
+
+`before_turn()` 会把该值写入 request metadata，`NanobotTurnExecutor` 在运行前通过 nanobot loop 设置 preset。
 
 ### metadata 的当前用途
 
-当前 `TurnPolicy.metadata` 会写入：
+`TurnPolicy.metadata` 会写入：
 
 - `board_version`
 - `blocker_count`
 
-同时，`before_turn()` 会把部分策略信息复制到 `LearningTurnRequest.metadata`，供 executor prompt 读取：
+`before_turn()` 会把更多运行态信息复制到 `LearningTurnRequest.metadata`：
 
 - `turn_mode_before`
+- `board_version_before`
+- `active_node_id_before`
+- `active_node_label_before`
+- `continuation_prompt_before`
+- `allowed_tools_before`
+- `enabled_tools_before`
+- `source_readiness_before`
 - `policy_restrictions`
+- `model_preset`
+
+## Retrieval 协同字段
+
+当前 retrieval 协同由 `state_hooks.py` 和 orchestrator 共同完成。
+
+### retrieval_focus
+
+`build_retrieval_focus()` 从 Board 派生本轮检索焦点，当前包含：
+
+- `turn_mode`
+- `active_node_id`
+- `active_node_label`
+- `critical_blockers`
+- `unverified_gaps`
+- `evidence_refs`
+- `default_query`
+- `scope`
+
+`default_query` 按模式生成：
+
+- `ANCHOR`：基础定义、前置知识、关键概念
+- `CORRECTION`：反例、纠错证据、概念对照
+- `VERIFY`：步骤核验、来源依据、推理链
+- `EXPLORE`：当前节点扩展资料、相关例子、延伸理解
+- `PAUSED`：当前学习节点背景资料
+
+### retrieval_reason
+
+`build_retrieval_reason()` 解释为什么要检索。它优先看 blocker，其次看 turn mode 和 source readiness。
+
+### prefetch_bundle
+
+orchestrator 会调用 `RetrievalService.build_bundle()` 做回合前预取，并把结果放到：
+
+- `LearningTurnRequest.retrieval_bundle`
+- `LearningTurnRequest.metadata["prefetched_references"]`
+- `project.retrieval_profile["prefetch_bundle"]`
+
+### retrieval_evidence_map
+
+`build_retrieval_evidence_map()` 当前基于 `prefetched_references` 建立映射：
+
+- active node id -> evidence refs
+- blocker id -> evidence refs
+- `chunk:{chunk_id}` -> evidence refs
+
+该映射会去重并按 `source_ref / chunk_id / support_type` 排序。
 
 ## LearningStateSnapshot
 
@@ -175,7 +255,8 @@
 
 - 从 `final_text` 中识别完成态
 - 从 `user_message` 中识别 blocker
-- 从 `source_references` 和 `tool_events` 中附加 evidence
+- 从 `source_references` 中附加 evidence
+- 如果工具事件中出现 `lightrag`，并且当前有 active node，会把它视为 `NODE_COMPLETED` 信号
 
 ### 事件对 Board 的影响
 
@@ -190,6 +271,7 @@
 
 - `board_version` 加一
 - `updated_at` 刷新为 UTC 时间
+- `current_turn_mode` 由 `resolve_turn_mode_after()` 根据事件和更新后的 Board 再计算一次
 
 ## after_turn 产物
 
@@ -199,9 +281,17 @@
 - `continuation_prompt`
 - `review_to_persist`
 - `turn_mode_after`
+- `turn_mode_before`
 - `board_after`
 - `learning_events`
 - `board_patch`
+- `retrieval_hits`
+- `retrieval_misses`
+- `retrieval_evidence_map`
+- `knowledge_support_summary`
+- `blocker_support_refs`
+- `continuation_retrieval_hint`
+- `writeback_envelope`
 - `memory_events`
 
 其中 `board_patch` 是当前 WebSocket 和前端可消费的最小增量块，包含：
@@ -215,6 +305,14 @@
 - `gaps_and_blockers`
 - `evidence_refs`
 
+`writeback_envelope` 当前包含：
+
+- `turn_mode_before`
+- `turn_mode_after`
+- `base_board_version`
+- `resolved_board_version`
+- `event_types`
+
 ## 与 LearningTurnRequest 的关系
 
 当前 `LearningTurnRequest` 仍是 runtime 唯一请求契约。它会携带：
@@ -224,22 +322,63 @@
 - `state_projection`
 - `source_references`
 - `memory_references`
+- `retrieval_bundle`
 - `enabled_tools`
 - `metadata`
 
-需要注意：
+当前 metadata 的关键字段包括：
 
-- `retrieval_bundle` 字段仍存在于 contract 中
-- orchestrator 当前不会在回合开始前把真实 retrieval 文本塞进 request
-- source readiness 会通过 `metadata["source_profile"]` 进入 prompt
+- `turn_id`
+- `source_profile`
+- `retrieval_focus`
+- `retrieval_reason`
+- `prefetched_references`
+- `workspace`
+- `before_turn()` 补入的 turn envelope 字段
+
+## 与 LearningTurnResult 的关系
+
+`LearningTurnResult` 会保留：
+
+- `board_before`
+- `board_after`
+- `learning_events`
+- `board_patch`
+- `memory_events`
+- `tool_events`
+- `stream_events`
+- `retrieval_bundle`
+- `raw_learning_result`
+- `metadata`
+
+`result_bridge` 会把以下 runtime_v2 摘要写入 `raw_learning_result` 和 `metadata`：
+
+- `runtime_v2.board_summary`
+- `runtime_v2.turn_envelope`
+- `runtime_v2.retrieval`
+
+orchestrator 在写回前会补齐 `runtime_v2.retrieval` 中的：
+
+- `prefetched_references`
+- `retrieval_focus`
+- `retrieval_reason`
+- `retrieval_hits`
+- `retrieval_misses`
+- `retrieval_evidence_map`
+- `knowledge_support_summary`
+- `blocker_support_refs`
+- `continuation_retrieval_hint`
 
 ## 当前边界与已知限制
 
 截至当前代码，Learning State 协议有几个明确边界：
 
-- Session 是 Board 的事实主源，project 是镜像
-- 事件抽取仍是轻量启发式，不是完整状态机
-- `BoardFacts` 的运行时类型和持久化类型仍是双重表示
-- `board_version` 具备 stale write 保护，但不是严格 compare-and-swap 协议
+- Session 是 Board 的事实主源，project 是镜像。
+- 事件抽取仍是轻量启发式，不是完整状态机。
+- `BoardFacts` 的运行时类型和持久化类型仍是双重表示。
+- `board_version` 具备 stale write 保护，但不是严格 compare-and-swap 协议。
+- `retrieval_bundle` 已经承载预取结果，但还不是经过模式筛选和摘要压缩的 prompt support bundle。
+- `retrieval_evidence_map` 当前主要由回合前 `prefetched_references` 推导，尚未把模型实际引用和工具返回 evidence 做成完整引用图。
+- `lightrag` 工具默认只在 `EXPLORE` 中启用，但回合前预取会在所有模式尝试运行。
 
-这份文档记录的是当前协议事实。后续如果推进强类型 Board 存储、严格版本写入或 retrieval contract 收紧，应同步更新本文档。
+这份文档记录的是当前协议事实。后续如果推进强类型 Board 存储、严格版本写入、prompt support bundle 或 retrieval evidence 图谱，应同步更新本文档。

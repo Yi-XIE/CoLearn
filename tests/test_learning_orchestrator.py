@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 import json
 from pathlib import Path
 import sys
@@ -14,7 +15,7 @@ from colearn.compression import ProductCompressionResult
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.state import BoardFacts, Blocker, GapsAndBlockers, LearningStateSnapshot, ProgressFacts, StudentSnapshot
-from colearn.learning.state_hooks import after_turn_payload
+from colearn.learning.state_hooks import after_turn_payload, build_prompt_support_bundle
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.memory.store import EventMemoryStore, MemoryEvent
 from colearn.projects.models import LearningProject
@@ -53,6 +54,9 @@ class FakeExecutor:
 
 
 class FakeRetrievalService:
+    def __init__(self) -> None:
+        self.last_bundle_query = ""
+
     def sync_source_refs(self, *, project_id: str, source_refs: list[str], libraries=None):
         _ = (project_id, libraries)
         return {
@@ -64,6 +68,43 @@ class FakeRetrievalService:
             "sync_status": "synced" if source_refs else "empty",
             "warnings": [],
         }
+
+    def build_bundle(self, *, project, session, query: str, libraries=None):
+        _ = (project, session, libraries)
+        self.last_bundle_query = query
+        return SimpleNamespace(
+            query=query,
+            text="prefetched support",
+            references=[
+                {
+                    "source_ref": "source-1",
+                    "source_path": "source-1.md",
+                    "chunk_id": "chunk-1",
+                    "support_type": "definition",
+                }
+            ],
+            chunks=[],
+            warnings=[],
+            retrieval_status="ready",
+            fallback_reason="",
+            metadata={},
+        )
+
+
+class EmptyRetrievalService(FakeRetrievalService):
+    def build_bundle(self, *, project, session, query: str, libraries=None):
+        _ = (project, session, libraries)
+        self.last_bundle_query = query
+        return SimpleNamespace(
+            query=query,
+            text="",
+            references=[],
+            chunks=[],
+            warnings=[],
+            retrieval_status="empty",
+            fallback_reason="no_retrieval_hits",
+            metadata={},
+        )
 
 
 class FailingProductCompression:
@@ -598,6 +639,158 @@ def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> N
     assert "Source readiness:" in prompt
 
 
+def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: Path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-retrieval", "Retrieval")
+    project.anchor = {"topic": "retrieval context"}
+    project.anchor_status = "ready"
+    source_file = tmp_path / "source.md"
+    source_file.write_text("retrieval source", encoding="utf-8")
+    project.source_refs = [str(source_file)]
+    project_service.save_project(project)
+
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-retrieval", project_id="proj-retrieval")
+    session.source_refs = [str(source_file)]
+    session.board_facts = {
+        "project_id": "proj-retrieval",
+        "session_id": "sess-retrieval",
+        "current_turn_mode": "VERIFY",
+        "board_version": 2,
+        "current_progress": {
+            "active_node_id": "node-verify",
+            "active_node_label": "Verify node",
+            "completed_node_ids": [],
+            "path_node_ids": [],
+        },
+        "student_snapshot": {
+            "mastery_level": 0.3,
+            "cognitive_load": "NORMAL",
+            "last_user_intent_raw": "",
+        },
+        "gaps_and_blockers": {
+            "critical_blockers": [{"id": "blk-1", "type": "CONCEPT_MISUNDERSTANDING", "desc": "Need proof"}],
+            "unverified_gaps": ["Need source"],
+        },
+        "continuation": {
+            "next_prompt_hint": "continue with evidence",
+            "last_completed_turn_id": "",
+        },
+        "evidence_refs": [],
+    }
+    session_store.save_session(session)
+
+    retrieval_service = FakeRetrievalService()
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=retrieval_service,
+    )
+
+    result = orchestrator.run_turn(
+        session_id="sess-retrieval",
+        project_id="proj-retrieval",
+        user_message="Verify this step with evidence.",
+    )
+
+    saved_session = session_store.get_session("sess-retrieval")
+    assert saved_session is not None
+    assert "步骤核验、来源依据、推理链" in retrieval_service.last_bundle_query
+    assert "Verify node" in retrieval_service.last_bundle_query
+    assert "Verify this step with evidence." in retrieval_service.last_bundle_query
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_reason"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["prefetched_references"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["prompt_support_bundle"]
+    assert saved_session.last_turn_result["prompt_support_bundle"]
+    support_item = saved_session.last_turn_result["prompt_support_bundle"][0]
+    assert support_item["target_type"] == "blocker"
+    assert support_item["target_id"] == "blk-1"
+    assert saved_session.last_turn_result["retrieval_query_context"]["final_query"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_hits"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_evidence_map"]["blk-1"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_evidence_map"]["chunk:chunk-1"]
+    assert saved_session.last_turn_result["knowledge_support_summary"]["active_node_id"] == "node-verify"
+    assert saved_session.last_turn_result["continuation_retrieval_hint"]["active_node_id"] == "node-verify"
+    assert saved_session.last_turn_result["blocker_support_refs"]["blk-1"]
+    assert result.turn_mode_after == "CORRECTION"
+
+
+def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp_path: Path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-miss", "Retrieval Miss")
+    project.source_refs = ["missing.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-miss", project_id="proj-miss")
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=EmptyRetrievalService(),
+    )
+
+    orchestrator.run_turn(
+        session_id="sess-miss",
+        project_id="proj-miss",
+        user_message="Need a source-backed explanation.",
+    )
+
+    saved_session = session_store.get_session("sess-miss")
+    assert saved_session is not None
+    misses = saved_session.last_turn_result["retrieval_misses"]
+    assert misses
+    assert misses[0]["reason"] == "no_prefetched_references"
+
+
+def test_prompt_support_bundle_selects_different_material_by_turn_mode() -> None:
+    refs = [
+        {"source_ref": "definition.md", "chunk_id": "d1", "text": "定义：力是改变运动状态的原因。"},
+        {"source_ref": "example.md", "chunk_id": "e1", "text": "例如：推小车时速度会改变。"},
+        {"source_ref": "procedure.md", "chunk_id": "p1", "text": "步骤：先列出受力，再验证方向。"},
+        {"source_ref": "counter.md", "chunk_id": "c1", "text": "常见错误：把速度方向当成受力方向。"},
+    ]
+    base_board = BoardFacts(
+        project_id="proj",
+        session_id="sess",
+        current_progress=ProgressFacts(active_node_id="node-force", active_node_label="Force"),
+    )
+    anchor = build_prompt_support_bundle(
+        board=base_board,
+        prefetched_references=refs,
+        retrieval_focus={"turn_mode": "ANCHOR"},
+        max_items=1,
+    )
+    explore = build_prompt_support_bundle(
+        board=base_board,
+        prefetched_references=refs,
+        retrieval_focus={"turn_mode": "EXPLORE"},
+        max_items=1,
+    )
+    verify = build_prompt_support_bundle(
+        board=base_board,
+        prefetched_references=refs,
+        retrieval_focus={"turn_mode": "VERIFY"},
+        max_items=1,
+    )
+    correction = build_prompt_support_bundle(
+        board=base_board,
+        prefetched_references=refs,
+        retrieval_focus={"turn_mode": "CORRECTION"},
+        max_items=1,
+    )
+
+    assert anchor[0]["support_type"] == "definition"
+    assert explore[0]["support_type"] == "example"
+    assert verify[0]["support_type"] == "procedure"
+    assert correction[0]["support_type"] == "counterexample"
+
+
 def test_default_nanobot_executor_receives_constructor_dependencies(tmp_path: Path) -> None:
     root = tmp_path / ".colearn" / "state"
     memory_store = EventMemoryStore(state_store=JsonStateStore(root))
@@ -652,6 +845,20 @@ def test_runtime_v2_prompt_includes_learning_state_lines() -> None:
     assert "Unverified gaps: Cannot explain why the induction hypothesis is sufficient" in prompt
     assert "Continuation hint: Focus on the next proof step." in prompt
     assert "Evidence refs attached: 1" in prompt
+
+    request.metadata["prompt_support_bundle"] = [
+        {
+            "support_type": "procedure",
+            "summary": "Use the induction hypothesis only after the base case is established.",
+            "source_ref": "proof.md",
+            "chunk_id": "c1",
+            "target_type": "gap",
+            "target_label": "Cannot explain why the induction hypothesis is sufficient",
+        }
+    ]
+    prompt = build_turn_prompt(request)
+    assert "Prompt support bundle:" in prompt
+    assert "[procedure] Use the induction hypothesis" in prompt
 
 
 def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
@@ -783,3 +990,66 @@ def test_runtime_v2_tooling_registers_memory_and_lightrag(monkeypatch) -> None:
 
     assert "memory" in bot._loop.tools.items
     assert "lightrag" in bot._loop.tools.items
+
+
+def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> None:
+    from colearn.runtime_v2.tooling import install_colearn_tools
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.items: dict[str, object] = {}
+
+        def has(self, name: str) -> bool:
+            return name in self.items
+
+        def unregister(self, name: str) -> None:
+            self.items.pop(name, None)
+
+        def register(self, tool: object) -> None:
+            self.items[getattr(tool, "name")] = tool
+
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.tools = FakeRegistry()
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self._loop = FakeLoop()
+
+    class FakeTool:
+        async def execute(self, **kwargs):
+            return ""
+
+    def fake_tool_parameters(_schema):
+        def decorator(cls):
+            return cls
+        return decorator
+
+    monkeypatch.setitem(
+        sys.modules,
+        "nanobot.agent.tools.base",
+        SimpleNamespace(Tool=FakeTool, tool_parameters=fake_tool_parameters),
+    )
+
+    bot = FakeBot()
+    request = LearningTurnRequest(
+        session_id="sess-tools-2",
+        project_id="proj-tools-2",
+        user_message="Find the source",
+        enabled_tools=["lightrag"],
+        source_references=[{"source_ref": "note-1", "chunk_id": "c-1", "support_type": "definition"}],
+        board_facts=BoardFacts(
+            project_id="proj-tools-2",
+            session_id="sess-tools-2",
+            current_progress=ProgressFacts(active_node_id="node-a", active_node_label="Node A"),
+        ),
+    )
+
+    install_colearn_tools(bot=bot, request=request, workspace=Path.cwd())
+
+    tool = bot._loop.tools.items["lightrag"]
+
+    result = asyncio.run(tool.execute(question="Find the source"))
+    assert result["status"] in {"ready", "empty", "error"}
+    assert "evidence_refs" in result
+    assert isinstance(result["evidence_map"], dict)
