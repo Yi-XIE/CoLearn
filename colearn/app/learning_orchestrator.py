@@ -163,6 +163,91 @@ class LearningOrchestrator:
         requested_skills: list[str] | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
     ):
+        turn_context = self._prepare_turn_context(
+            session_id=session_id,
+            project_id=project_id,
+        )
+        session = turn_context["session"]
+        project = turn_context["project"]
+        board = turn_context["board"]
+        snapshot = turn_context["snapshot"]
+        source_profile = turn_context["source_profile"]
+        retrieval_context = self._prepare_retrieval_context(
+            project=project,
+            session=session,
+            board=board,
+            source_profile=source_profile,
+            user_message=user_message,
+        )
+        self._sync_project_retrieval_profile(
+            project=project,
+            source_profile=source_profile,
+            board=board,
+            retrieval_context=retrieval_context,
+        )
+        turn_policy = policy(
+            board=board,
+            user_message=user_message,
+        )
+        request = self._build_turn_request(
+            session=session,
+            project=project,
+            board=board,
+            snapshot=snapshot,
+            source_profile=source_profile,
+            retrieval_context=retrieval_context,
+            user_message=user_message,
+            language=language,
+            turn_policy=turn_policy,
+            attachments=attachments or [],
+            requested_skills=requested_skills or [],
+            stream_emit=stream_emit,
+        )
+        compressed, normalized = self._execute_turn(
+            project=project,
+            session=session,
+            request=request,
+            snapshot=snapshot,
+            turn_policy=turn_policy,
+        )
+        normalized, retrieval_hits, retrieval_misses, retrieval_evidence_map = self._enrich_turn_result(
+            request=compressed.request,
+            result=normalized,
+            retrieval_context=retrieval_context,
+        )
+        request_with_metadata = self._attach_retrieval_metadata(
+            compressed.request,
+            retrieval_focus=retrieval_context["retrieval_focus"],
+            retrieval_query_context=retrieval_context["retrieval_query_context"],
+            retrieval_reason=retrieval_context["retrieval_reason"],
+            prefetched_references=retrieval_context["prefetched_references"],
+            parallel_support=retrieval_context["parallel_support"],
+            prompt_support_bundle=retrieval_context["prompt_support_bundle"],
+            retrieval_hits=retrieval_hits,
+            retrieval_misses=retrieval_misses,
+            retrieval_evidence_map=retrieval_evidence_map,
+        )
+        self._write_back(
+            project=project,
+            session=session,
+            request=request_with_metadata,
+            result=normalized,
+        )
+        self.background_finalizer.schedule(
+            project=project,
+            session=session,
+            board=board,
+            request=compressed.request,
+            result=normalized,
+        )
+        return normalized
+
+    def _prepare_turn_context(
+        self,
+        *,
+        session_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
         session = self._get_or_create_session(session_id=session_id, project_id=project_id)
         project = self._get_or_create_project(project_id=project_id, session=session)
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
@@ -180,6 +265,23 @@ class LearningOrchestrator:
             session=session,
             latest_review=project.latest_review,
         )
+        return {
+            "session": session,
+            "project": project,
+            "source_profile": source_profile,
+            "board": board,
+            "snapshot": snapshot,
+        }
+
+    def _prepare_retrieval_context(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        board,
+        source_profile: dict[str, Any],
+        user_message: str,
+    ) -> dict[str, Any]:
         retrieval_focus = build_retrieval_focus(board=board, turn_mode=board.current_turn_mode)
         retrieval_reason = build_retrieval_reason(
             board=board,
@@ -196,13 +298,18 @@ class LearningOrchestrator:
             session=session,
             retrieval_query_context=retrieval_query_context,
         )
-        prefetch_bundle = self.retrieval_service.build_bundle(
+        retrieval_bundle = self.retrieval_service.build_bundle(
             project=project,
             session=session,
-            query=str(retrieval_query_context.get("final_query") or retrieval_focus.get("default_query") or user_message or ""),
+            query=str(
+                retrieval_query_context.get("final_query")
+                or retrieval_focus.get("default_query")
+                or user_message
+                or ""
+            ),
             libraries=None,
         )
-        prefetched_references = self._prefetched_references_from_bundle(prefetch_bundle)
+        prefetched_references = self._prefetched_references_from_bundle(retrieval_bundle)
         parallel_references = self._prefetched_references_from_parallel_support(parallel_support)
         prompt_references = self._merge_prefetched_references(prefetched_references, parallel_references)
         prompt_support_bundle = build_prompt_support_bundle(
@@ -210,29 +317,60 @@ class LearningOrchestrator:
             prefetched_references=prompt_references,
             retrieval_focus=retrieval_focus,
         )
-        retrieval_bundle = prefetch_bundle
+        return {
+            "retrieval_focus": retrieval_focus,
+            "retrieval_reason": retrieval_reason,
+            "retrieval_query_context": retrieval_query_context,
+            "parallel_support": parallel_support,
+            "retrieval_bundle": retrieval_bundle,
+            "prefetched_references": prefetched_references,
+            "prompt_support_bundle": prompt_support_bundle,
+        }
+
+    def _sync_project_retrieval_profile(
+        self,
+        *,
+        project: LearningProject,
+        source_profile: dict[str, Any],
+        board,
+        retrieval_context: dict[str, Any],
+    ) -> None:
+        retrieval_bundle = retrieval_context["retrieval_bundle"]
         project.retrieval_profile = {
             **project.retrieval_profile,
             **source_profile,
             "board": board.to_dict(),
-            "retrieval_focus": retrieval_focus,
-            "retrieval_query_context": retrieval_query_context,
-            "retrieval_reason": retrieval_reason,
-            "prefetched_references": prefetched_references,
-            "parallel_support": parallel_support,
-            "prompt_support_bundle": prompt_support_bundle,
+            "retrieval_focus": retrieval_context["retrieval_focus"],
+            "retrieval_query_context": retrieval_context["retrieval_query_context"],
+            "retrieval_reason": retrieval_context["retrieval_reason"],
+            "prefetched_references": retrieval_context["prefetched_references"],
+            "parallel_support": retrieval_context["parallel_support"],
+            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
             "prefetch_bundle": {
-                "query": prefetch_bundle.query,
-                "retrieval_status": prefetch_bundle.retrieval_status,
-                "fallback_reason": prefetch_bundle.fallback_reason,
-                "warnings": list(prefetch_bundle.warnings or []),
+                "query": retrieval_bundle.query,
+                "retrieval_status": retrieval_bundle.retrieval_status,
+                "fallback_reason": retrieval_bundle.fallback_reason,
+                "warnings": list(retrieval_bundle.warnings or []),
             },
         }
-        turn_policy = policy(
-            board=board,
-            user_message=user_message,
-        )
-        request = build_learning_turn_request(
+
+    def _build_turn_request(
+        self,
+        *,
+        session: LearningSession,
+        project: LearningProject,
+        board,
+        snapshot,
+        source_profile: dict[str, Any],
+        retrieval_context: dict[str, Any],
+        user_message: str,
+        language: str,
+        turn_policy,
+        attachments: list[dict[str, object]],
+        requested_skills: list[str],
+        stream_emit: Callable[[dict[str, Any]], None] | None,
+    ):
+        return build_learning_turn_request(
             session_id=session.session_id,
             user_message=user_message,
             project_id=project.project_id,
@@ -244,25 +382,46 @@ class LearningOrchestrator:
             anchor=project.anchor,
             source_references=[{"source_ref": item} for item in (session.source_refs or project.source_refs)],
             memory_references=session.memory_refs or project.memory_refs,
-            retrieval_bundle=retrieval_bundle,
+            retrieval_bundle=retrieval_context["retrieval_bundle"],
             state_projection=snapshot,
             continuation_prompt=session.continuation_prompt,
             enabled_tools=turn_policy.enabled_tools or turn_policy.allowed_tools,
-            attachments=attachments or [],
-            requested_skills=requested_skills or [],
+            attachments=attachments,
+            requested_skills=requested_skills,
             stream_emit=stream_emit,
-            metadata={
-                "turn_id": str(uuid4()),
-                "source_profile": dict(source_profile),
-                "retrieval_focus": retrieval_focus,
-                "retrieval_query_context": retrieval_query_context,
-                "retrieval_reason": retrieval_reason,
-                "prefetched_references": prefetched_references,
-                "parallel_support": parallel_support,
-                "prompt_support_bundle": prompt_support_bundle,
-                "workspace": str(getattr(self.executor, "workspace", None) or colearn_nanobot_workspace()),
-            },
+            metadata=self._build_turn_request_metadata(
+                source_profile=source_profile,
+                retrieval_context=retrieval_context,
+            ),
         )
+
+    def _build_turn_request_metadata(
+        self,
+        *,
+        source_profile: dict[str, Any],
+        retrieval_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "turn_id": str(uuid4()),
+            "source_profile": dict(source_profile),
+            "retrieval_focus": retrieval_context["retrieval_focus"],
+            "retrieval_query_context": retrieval_context["retrieval_query_context"],
+            "retrieval_reason": retrieval_context["retrieval_reason"],
+            "prefetched_references": retrieval_context["prefetched_references"],
+            "parallel_support": retrieval_context["parallel_support"],
+            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
+            "workspace": str(getattr(self.executor, "workspace", None) or colearn_nanobot_workspace()),
+        }
+
+    def _execute_turn(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        request,
+        snapshot,
+        turn_policy,
+    ) -> tuple[Any, Any]:
         prepared_request = before_turn(
             request=request,
             snapshot=snapshot,
@@ -286,83 +445,85 @@ class LearningOrchestrator:
             final_text=result.final_text,
             learning_result=closure_payload,
         )
+        return compressed, normalized
+
+    def _enrich_turn_result(
+        self,
+        *,
+        request,
+        result,
+        retrieval_context: dict[str, Any],
+    ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
         retrieval_evidence_map = build_retrieval_evidence_map(
-            board=compressed.request.board_facts,
-            prefetched_references=prefetched_references,
-            prompt_support_bundle=prompt_support_bundle,
+            board=request.board_facts,
+            prefetched_references=retrieval_context["prefetched_references"],
+            prompt_support_bundle=retrieval_context["prompt_support_bundle"],
         )
         retrieval_hits, retrieval_misses, retrieval_evidence_map = self._build_retrieval_writeback(
-            request=compressed.request,
-            result=normalized,
-            retrieval_focus=retrieval_focus,
-            prefetched_references=prefetched_references,
+            request=request,
+            retrieval_focus=retrieval_context["retrieval_focus"],
             retrieval_evidence_map=retrieval_evidence_map,
         )
+        runtime_v2 = dict((result.raw_learning_result or {}).get("runtime_v2") or {})
+        runtime_v2["retrieval"] = self._build_runtime_retrieval_payload(
+            board=request.board_facts,
+            retrieval_context=retrieval_context,
+            retrieval_hits=retrieval_hits,
+            retrieval_misses=retrieval_misses,
+            retrieval_evidence_map=retrieval_evidence_map,
+        )
+        runtime_v2["parallel_support"] = retrieval_context["parallel_support"]
         enriched_learning_result = {
-            **dict(normalized.raw_learning_result or {}),
+            **dict(result.raw_learning_result or {}),
             "retrieval_hits": retrieval_hits,
             "retrieval_misses": retrieval_misses,
             "retrieval_evidence_map": retrieval_evidence_map,
-            "prompt_support_bundle": prompt_support_bundle,
-            "retrieval_query_context": retrieval_query_context,
+            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
+            "retrieval_query_context": retrieval_context["retrieval_query_context"],
+            "runtime_v2": runtime_v2,
         }
-        runtime_v2 = dict(enriched_learning_result.get("runtime_v2") or {})
-        runtime_v2["retrieval"] = {
-            "prefetched_references": prefetched_references,
-            "prompt_support_bundle": prompt_support_bundle,
-            "retrieval_focus": retrieval_focus,
-            "retrieval_query_context": retrieval_query_context,
-            "retrieval_reason": retrieval_reason,
+        return (
+            replace(result, raw_learning_result=enriched_learning_result),
+            retrieval_hits,
+            retrieval_misses,
+            retrieval_evidence_map,
+        )
+
+    def _build_runtime_retrieval_payload(
+        self,
+        *,
+        board,
+        retrieval_context: dict[str, Any],
+        retrieval_hits: list[dict[str, Any]],
+        retrieval_misses: list[dict[str, Any]],
+        retrieval_evidence_map: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        return {
+            "prefetched_references": retrieval_context["prefetched_references"],
+            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
+            "retrieval_focus": retrieval_context["retrieval_focus"],
+            "retrieval_query_context": retrieval_context["retrieval_query_context"],
+            "retrieval_reason": retrieval_context["retrieval_reason"],
             "retrieval_hits": retrieval_hits,
             "retrieval_misses": retrieval_misses,
             "retrieval_evidence_map": retrieval_evidence_map,
             "knowledge_support_summary": {
-                "active_node_id": compressed.request.board_facts.current_progress.active_node_id,
-                "critical_blockers": [
-                    blocker.id for blocker in compressed.request.board_facts.gaps_and_blockers.critical_blockers
-                ],
-                "evidence_ref_count": len(compressed.request.board_facts.evidence_refs or []),
+                "active_node_id": board.current_progress.active_node_id,
+                "critical_blockers": [blocker.id for blocker in board.gaps_and_blockers.critical_blockers],
+                "evidence_ref_count": len(board.evidence_refs or []),
                 "retrieval_hit_count": len(retrieval_hits),
             },
             "blocker_support_refs": {
                 blocker.id: list(retrieval_evidence_map.get(blocker.id, []))
-                for blocker in compressed.request.board_facts.gaps_and_blockers.critical_blockers
+                for blocker in board.gaps_and_blockers.critical_blockers
             },
             "continuation_retrieval_hint": {
-                "active_node_id": compressed.request.board_facts.current_progress.active_node_id,
-                "evidence_refs": list(compressed.request.board_facts.evidence_refs or []),
-                "retrieval_focus": retrieval_focus,
-                "retrieval_query_context": retrieval_query_context,
+                "active_node_id": board.current_progress.active_node_id,
+                "evidence_refs": list(board.evidence_refs or []),
+                "retrieval_focus": retrieval_context["retrieval_focus"],
+                "retrieval_query_context": retrieval_context["retrieval_query_context"],
             },
         }
-        runtime_v2["parallel_support"] = parallel_support
-        enriched_learning_result["runtime_v2"] = runtime_v2
-        normalized = replace(normalized, raw_learning_result=enriched_learning_result)
-        self._write_back(
-            project=project,
-            session=session,
-            request=self._attach_retrieval_metadata(
-                compressed.request,
-                retrieval_focus=retrieval_focus,
-                retrieval_query_context=retrieval_query_context,
-                retrieval_reason=retrieval_reason,
-                prefetched_references=prefetched_references,
-                parallel_support=parallel_support,
-                prompt_support_bundle=prompt_support_bundle,
-                retrieval_hits=retrieval_hits,
-                retrieval_misses=retrieval_misses,
-                retrieval_evidence_map=retrieval_evidence_map,
-            ),
-            result=normalized,
-        )
-        self.background_finalizer.schedule(
-            project=project,
-            session=session,
-            board=board,
-            request=compressed.request,
-            result=normalized,
-        )
-        return normalized
 
     def _prefetched_references_from_bundle(self, bundle) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = [dict(item) for item in list(getattr(bundle, "references", []) or [])]
@@ -592,31 +753,27 @@ class LearningOrchestrator:
         retrieval_misses: list[dict[str, Any]],
         retrieval_evidence_map: dict[str, list[dict[str, Any]]],
     ):
-        return request.__class__(
-            **{
-                **request.__dict__,
-                "metadata": {
-                    **dict(request.metadata or {}),
-                    "retrieval_focus": retrieval_focus,
-                    "retrieval_query_context": retrieval_query_context,
-                    "retrieval_reason": retrieval_reason,
-                    "prefetched_references": prefetched_references,
-                    "parallel_support": parallel_support,
-                    "prompt_support_bundle": prompt_support_bundle,
-                    "retrieval_hits": retrieval_hits,
-                    "retrieval_misses": retrieval_misses,
-                    "retrieval_evidence_map": retrieval_evidence_map,
-                },
-            }
+        return replace(
+            request,
+            metadata={
+                **dict(request.metadata or {}),
+                "retrieval_focus": retrieval_focus,
+                "retrieval_query_context": retrieval_query_context,
+                "retrieval_reason": retrieval_reason,
+                "prefetched_references": prefetched_references,
+                "parallel_support": parallel_support,
+                "prompt_support_bundle": prompt_support_bundle,
+                "retrieval_hits": retrieval_hits,
+                "retrieval_misses": retrieval_misses,
+                "retrieval_evidence_map": retrieval_evidence_map,
+            },
         )
 
     def _build_retrieval_writeback(
         self,
         *,
         request,
-        result,
         retrieval_focus: dict[str, Any],
-        prefetched_references: list[dict[str, Any]],
         retrieval_evidence_map: dict[str, list[dict[str, Any]]],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
         evidence_map = {key: list(value or []) for key, value in retrieval_evidence_map.items()}
@@ -651,6 +808,95 @@ class LearningOrchestrator:
         for key in sorted(k for k in evidence_map.keys() if k not in ordered_evidence_map):
             ordered_evidence_map[key] = list(evidence_map[key])
         return hits, misses, ordered_evidence_map
+
+    def _build_last_turn_result(
+        self,
+        *,
+        request,
+        result,
+        warnings: list[str],
+        base_version: int,
+        include_product_compression: bool,
+    ) -> dict[str, Any]:
+        payload = self._build_retrieval_result_fields(
+            request=request,
+            result=result,
+        )
+        last_turn_result = {
+            "final_text": result.final_text,
+            "warnings": warnings,
+            "board_patch": result.board_patch,
+            "tool_events": list(result.tool_events),
+            "stream_events": list(result.stream_events),
+            **payload,
+            "turn_mode_before": result.turn_mode_before,
+            "turn_mode_after": result.turn_mode_after,
+            "base_board_version": int(getattr(request.board_facts, "board_version", base_version) or 1),
+            "resolved_board_version": int(getattr(result.board_after, "board_version", base_version) or 1),
+        }
+        if include_product_compression:
+            last_turn_result["product_compression"] = {
+                "status": "scheduled",
+                "started_at": None,
+                "finished_at": None,
+                "error": "",
+                "base_board_version": int(base_version or 1),
+            }
+        return last_turn_result
+
+    def _build_retrieval_result_fields(
+        self,
+        *,
+        request,
+        result,
+    ) -> dict[str, Any]:
+        runtime_v2 = dict((result.raw_learning_result or {}).get("runtime_v2") or {})
+        retrieval_payload = dict(runtime_v2.get("retrieval") or {})
+        return {
+            "raw_learning_result": dict(result.raw_learning_result or {}),
+            "runtime_v2": runtime_v2,
+            "prompt_support_bundle": list(
+                retrieval_payload.get("prompt_support_bundle")
+                or (result.raw_learning_result or {}).get("prompt_support_bundle")
+                or []
+            ),
+            "retrieval_query_context": dict(
+                retrieval_payload.get("retrieval_query_context")
+                or (result.raw_learning_result or {}).get("retrieval_query_context")
+                or {}
+            ),
+            "knowledge_support_summary": dict(
+                retrieval_payload.get("knowledge_support_summary")
+                or (result.raw_learning_result or {}).get("knowledge_support_summary")
+                or {}
+            ),
+            "blocker_support_refs": dict(
+                retrieval_payload.get("blocker_support_refs")
+                or (result.raw_learning_result or {}).get("blocker_support_refs")
+                or {}
+            ),
+            "continuation_retrieval_hint": dict(
+                retrieval_payload.get("continuation_retrieval_hint")
+                or (result.raw_learning_result or {}).get("continuation_retrieval_hint")
+                or {}
+            ),
+            "retrieval_hits": list(
+                retrieval_payload.get("retrieval_hits")
+                or (result.raw_learning_result or {}).get("retrieval_hits")
+                or []
+            ),
+            "retrieval_misses": list(
+                retrieval_payload.get("retrieval_misses")
+                or (result.raw_learning_result or {}).get("retrieval_misses")
+                or []
+            ),
+            "retrieval_evidence_map": dict(
+                retrieval_payload.get("retrieval_evidence_map")
+                or (result.raw_learning_result or {}).get("retrieval_evidence_map")
+                or {}
+            ),
+            "writeback_envelope": dict((result.raw_learning_result or {}).get("writeback_envelope") or {}),
+        }
 
     def _get_or_create_session(
         self,
@@ -710,79 +956,13 @@ class LearningOrchestrator:
         session.active_turn_id = None
         session.active_turns = []
         session.continuation_prompt = result.continuation_prompt
-        session.last_turn_result = {
-            "final_text": result.final_text,
-            "warnings": warnings,
-            "board_patch": result.board_patch,
-            "tool_events": list(result.tool_events),
-            "stream_events": list(result.stream_events),
-            "raw_learning_result": dict(result.raw_learning_result or {}),
-            "runtime_v2": dict((result.raw_learning_result or {}).get("runtime_v2") or {}),
-            "prompt_support_bundle": list(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "prompt_support_bundle"
-                )
-                or (result.raw_learning_result or {}).get("prompt_support_bundle")
-                or []
-            ),
-            "retrieval_query_context": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "retrieval_query_context"
-                )
-                or (result.raw_learning_result or {}).get("retrieval_query_context")
-                or {}
-            ),
-            "knowledge_support_summary": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "knowledge_support_summary"
-                )
-                or (result.raw_learning_result or {}).get("knowledge_support_summary")
-                or {}
-            ),
-            "blocker_support_refs": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "blocker_support_refs"
-                )
-                or (result.raw_learning_result or {}).get("blocker_support_refs")
-                or {}
-            ),
-            "continuation_retrieval_hint": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "continuation_retrieval_hint"
-                )
-                or (result.raw_learning_result or {}).get("continuation_retrieval_hint")
-                or {}
-            ),
-            "retrieval_hits": list(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get("retrieval_hits")
-                or (result.raw_learning_result or {}).get("retrieval_hits")
-                or []
-            ),
-            "retrieval_misses": list(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get("retrieval_misses")
-                or (result.raw_learning_result or {}).get("retrieval_misses")
-                or []
-            ),
-            "retrieval_evidence_map": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "retrieval_evidence_map"
-                )
-                or (result.raw_learning_result or {}).get("retrieval_evidence_map")
-                or {}
-            ),
-            "writeback_envelope": dict((result.raw_learning_result or {}).get("writeback_envelope") or {}),
-            "turn_mode_before": result.turn_mode_before,
-            "turn_mode_after": result.turn_mode_after,
-            "base_board_version": int(getattr(request.board_facts, "board_version", session.board_version) or 1),
-            "resolved_board_version": int(getattr(result.board_after, "board_version", session.board_version) or 1),
-            "product_compression": {
-                "status": "scheduled",
-                "started_at": None,
-                "finished_at": None,
-                "error": "",
-                "base_board_version": int(base_version or 1),
-            },
-        }
+        session.last_turn_result = self._build_last_turn_result(
+            request=request,
+            result=result,
+            warnings=warnings,
+            base_version=base_version,
+            include_product_compression=True,
+        )
         session.messages.extend(
             [
                 {"role": "user", "content": request.user_message},
@@ -800,69 +980,13 @@ class LearningOrchestrator:
         else:
             project.board_facts = dict(result.board_after.to_dict())
             project.board_version = int(result.board_after.board_version or 1)
-        session.last_turn_result = {
-            **session.last_turn_result,
-            "warnings": warnings,
-            "raw_learning_result": dict(result.raw_learning_result or {}),
-            "runtime_v2": dict((result.raw_learning_result or {}).get("runtime_v2") or {}),
-            "prompt_support_bundle": list(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "prompt_support_bundle"
-                )
-                or (result.raw_learning_result or {}).get("prompt_support_bundle")
-                or []
-            ),
-            "retrieval_query_context": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "retrieval_query_context"
-                )
-                or (result.raw_learning_result or {}).get("retrieval_query_context")
-                or {}
-            ),
-            "knowledge_support_summary": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "knowledge_support_summary"
-                )
-                or (result.raw_learning_result or {}).get("knowledge_support_summary")
-                or {}
-            ),
-            "blocker_support_refs": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "blocker_support_refs"
-                )
-                or (result.raw_learning_result or {}).get("blocker_support_refs")
-                or {}
-            ),
-            "continuation_retrieval_hint": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "continuation_retrieval_hint"
-                )
-                or (result.raw_learning_result or {}).get("continuation_retrieval_hint")
-                or {}
-            ),
-            "retrieval_hits": list(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get("retrieval_hits")
-                or (result.raw_learning_result or {}).get("retrieval_hits")
-                or []
-            ),
-            "retrieval_misses": list(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get("retrieval_misses")
-                or (result.raw_learning_result or {}).get("retrieval_misses")
-                or []
-            ),
-            "retrieval_evidence_map": dict(
-                ((result.raw_learning_result or {}).get("runtime_v2") or {}).get("retrieval", {}).get(
-                    "retrieval_evidence_map"
-                )
-                or (result.raw_learning_result or {}).get("retrieval_evidence_map")
-                or {}
-            ),
-            "writeback_envelope": dict((result.raw_learning_result or {}).get("writeback_envelope") or {}),
-            "turn_mode_before": result.turn_mode_before,
-            "turn_mode_after": result.turn_mode_after,
-            "base_board_version": int(getattr(request.board_facts, "board_version", session.board_version) or 1),
-            "resolved_board_version": int(getattr(result.board_after, "board_version", session.board_version) or 1),
-        }
+        session.last_turn_result = self._build_last_turn_result(
+            request=request,
+            result=result,
+            warnings=warnings,
+            base_version=base_version,
+            include_product_compression=True,
+        )
         project.anchor_status = "ready" if project.anchor else "missing"
         project.current_main_goal = (
             request.turn_policy.main_goal if request.turn_policy else project.current_main_goal
