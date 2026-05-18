@@ -105,7 +105,10 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
 
 def build_turn_prompt(request: LearningTurnRequest) -> str:
     workspace = Path(str(request.metadata.get("workspace") or ".")).resolve()
-    base_prompt = ContextBuilder(workspace).build_system_prompt()
+    base_prompt = ContextBuilder(workspace).build_system_prompt(
+        skill_names=request.requested_skills or None,
+        channel="colearn",
+    )
     colearn_doc = workspace / "COLEARN.md"
     colearn_context = ""
     if colearn_doc.exists():

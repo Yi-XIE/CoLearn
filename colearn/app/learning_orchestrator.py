@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from dataclasses import replace
 from threading import Thread
@@ -159,6 +160,7 @@ class LearningOrchestrator:
         project_id: str = "",
         language: str = "zh",
         attachments: list[dict[str, object]] | None = None,
+        stream_emit: Callable[[dict[str, Any]], None] | None = None,
     ):
         session = self._get_or_create_session(session_id=session_id, project_id=project_id)
         project = self._get_or_create_project(project_id=project_id, session=session)
@@ -188,6 +190,11 @@ class LearningOrchestrator:
             retrieval_focus=retrieval_focus,
             continuation_prompt=session.continuation_prompt,
         )
+        parallel_support = self._build_parallel_support(
+            project=project,
+            session=session,
+            retrieval_query_context=retrieval_query_context,
+        )
         prefetch_bundle = self.retrieval_service.build_bundle(
             project=project,
             session=session,
@@ -195,9 +202,11 @@ class LearningOrchestrator:
             libraries=None,
         )
         prefetched_references = self._prefetched_references_from_bundle(prefetch_bundle)
+        parallel_references = self._prefetched_references_from_parallel_support(parallel_support)
+        prompt_references = self._merge_prefetched_references(prefetched_references, parallel_references)
         prompt_support_bundle = build_prompt_support_bundle(
             board=board,
-            prefetched_references=prefetched_references,
+            prefetched_references=prompt_references,
             retrieval_focus=retrieval_focus,
         )
         retrieval_bundle = prefetch_bundle
@@ -209,6 +218,7 @@ class LearningOrchestrator:
             "retrieval_query_context": retrieval_query_context,
             "retrieval_reason": retrieval_reason,
             "prefetched_references": prefetched_references,
+            "parallel_support": parallel_support,
             "prompt_support_bundle": prompt_support_bundle,
             "prefetch_bundle": {
                 "query": prefetch_bundle.query,
@@ -238,6 +248,7 @@ class LearningOrchestrator:
             continuation_prompt=session.continuation_prompt,
             enabled_tools=turn_policy.enabled_tools or turn_policy.allowed_tools,
             attachments=attachments or [],
+            stream_emit=stream_emit,
             metadata={
                 "turn_id": str(uuid4()),
                 "source_profile": dict(source_profile),
@@ -245,6 +256,7 @@ class LearningOrchestrator:
                 "retrieval_query_context": retrieval_query_context,
                 "retrieval_reason": retrieval_reason,
                 "prefetched_references": prefetched_references,
+                "parallel_support": parallel_support,
                 "prompt_support_bundle": prompt_support_bundle,
                 "workspace": str(getattr(self.executor, "workspace", None) or Path.cwd()),
             },
@@ -321,6 +333,7 @@ class LearningOrchestrator:
                 "retrieval_query_context": retrieval_query_context,
             },
         }
+        runtime_v2["parallel_support"] = parallel_support
         enriched_learning_result["runtime_v2"] = runtime_v2
         normalized = replace(normalized, raw_learning_result=enriched_learning_result)
         self._write_back(
@@ -332,6 +345,7 @@ class LearningOrchestrator:
                 retrieval_query_context=retrieval_query_context,
                 retrieval_reason=retrieval_reason,
                 prefetched_references=prefetched_references,
+                parallel_support=parallel_support,
                 prompt_support_bundle=prompt_support_bundle,
                 retrieval_hits=retrieval_hits,
                 retrieval_misses=retrieval_misses,
@@ -386,6 +400,182 @@ class LearningOrchestrator:
             )
         return rows
 
+    def _merge_prefetched_references(
+        self,
+        primary: list[dict[str, Any]],
+        secondary: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for item in [*primary, *secondary]:
+            source_ref = str(item.get("source_ref") or item.get("source_path") or item.get("path") or "")
+            chunk_id = str(item.get("chunk_id") or "")
+            summary = str(item.get("summary") or item.get("text") or item.get("title") or "")
+            signature = (source_ref, chunk_id, summary[:120])
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(dict(item))
+        return merged
+
+    def _prefetched_references_from_parallel_support(self, parallel_support: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for result in list(parallel_support.get("results") or []):
+            query = str(result.get("query") or "")
+            for item in list(result.get("references") or []):
+                row = dict(item)
+                row.setdefault("support_type", "parallel_retrieval")
+                row.setdefault("query", query)
+                rows.append(row)
+        return rows
+
+    def _build_parallel_support(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        retrieval_query_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_refs = list(session.source_refs or project.source_subset or project.source_refs)
+        queries = self._parallel_support_queries(retrieval_query_context)
+        if not source_refs:
+            return {
+                "status": "skipped",
+                "reason": "no_source_refs",
+                "queries": queries,
+                "results": [],
+            }
+        if not queries:
+            return {
+                "status": "skipped",
+                "reason": "no_parallel_queries",
+                "queries": [],
+                "results": [],
+            }
+        try:
+            results = asyncio.run(
+                self._build_parallel_support_async(
+                    project=project,
+                    session=session,
+                    source_refs=source_refs,
+                    queries=queries,
+                )
+            )
+        except Exception as exc:
+            return {
+                "status": "error",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "queries": queries,
+                "results": [],
+            }
+        statuses = {str(item.get("retrieval_status") or item.get("status") or "") for item in results}
+        if any(status == "ready" for status in statuses):
+            status = "partial" if any(status in {"error", "empty"} for status in statuses) else "ready"
+        else:
+            status = "error" if "error" in statuses else "empty"
+        return {
+            "status": status,
+            "reason": "",
+            "queries": queries,
+            "results": results,
+        }
+
+    def _parallel_support_queries(self, retrieval_query_context: dict[str, Any]) -> list[str]:
+        candidates: list[str] = []
+        final_query = str(retrieval_query_context.get("final_query") or "").strip()
+        if final_query:
+            candidates.append(final_query)
+        for blocker in list(retrieval_query_context.get("critical_blockers") or []):
+            desc = str((blocker or {}).get("desc") or "").strip()
+            if desc:
+                candidates.append(desc)
+        for gap in list(retrieval_query_context.get("unverified_gaps") or []):
+            gap_text = str(gap or "").strip()
+            if gap_text:
+                candidates.append(gap_text)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for query in candidates:
+            key = query.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(query)
+            if len(deduped) >= 3:
+                break
+        return deduped
+
+    async def _build_parallel_support_async(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        source_refs: list[str],
+        queries: list[str],
+    ) -> list[dict[str, Any]]:
+        tasks = [
+            self._retrieve_parallel_support_one(
+                project=project,
+                session=session,
+                source_refs=source_refs,
+                query=query,
+            )
+            for query in queries[:3]
+        ]
+        return list(await asyncio.gather(*tasks))
+
+    async def _retrieve_parallel_support_one(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        source_refs: list[str],
+        query: str,
+    ) -> dict[str, Any]:
+        try:
+            async_method = getattr(self.retrieval_service, "async_build_bundle_for_source_refs", None)
+            if callable(async_method):
+                bundle = await async_method(
+                    project_id=project.project_id,
+                    query=query,
+                    source_refs=source_refs,
+                    libraries=None,
+                )
+            elif hasattr(self.retrieval_service, "build_bundle_for_source_refs"):
+                bundle = await asyncio.to_thread(
+                    self.retrieval_service.build_bundle_for_source_refs,
+                    project_id=project.project_id,
+                    query=query,
+                    source_refs=source_refs,
+                    libraries=None,
+                )
+            else:
+                bundle = await asyncio.to_thread(
+                    self.retrieval_service.build_bundle,
+                    project=project,
+                    session=session,
+                    query=query,
+                    libraries=None,
+                )
+        except Exception as exc:
+            return {
+                "query": query,
+                "retrieval_status": "error",
+                "fallback_reason": f"{type(exc).__name__}: {exc}",
+                "warnings": [str(exc)],
+                "references": [],
+            }
+        return self._parallel_bundle_payload(query=query, bundle=bundle)
+
+    def _parallel_bundle_payload(self, *, query: str, bundle) -> dict[str, Any]:
+        return {
+            "query": query,
+            "retrieval_status": str(getattr(bundle, "retrieval_status", "") or "unknown"),
+            "fallback_reason": str(getattr(bundle, "fallback_reason", "") or ""),
+            "warnings": list(getattr(bundle, "warnings", []) or []),
+            "references": self._prefetched_references_from_bundle(bundle),
+        }
+
     def _attach_retrieval_metadata(
         self,
         request,
@@ -394,6 +584,7 @@ class LearningOrchestrator:
         retrieval_query_context: dict[str, Any],
         retrieval_reason: str,
         prefetched_references: list[dict[str, Any]],
+        parallel_support: dict[str, Any],
         prompt_support_bundle: list[dict[str, Any]],
         retrieval_hits: list[dict[str, Any]],
         retrieval_misses: list[dict[str, Any]],
@@ -408,6 +599,7 @@ class LearningOrchestrator:
                     "retrieval_query_context": retrieval_query_context,
                     "retrieval_reason": retrieval_reason,
                     "prefetched_references": prefetched_references,
+                    "parallel_support": parallel_support,
                     "prompt_support_bundle": prompt_support_bundle,
                     "retrieval_hits": retrieval_hits,
                     "retrieval_misses": retrieval_misses,
@@ -687,6 +879,7 @@ class LearningOrchestrator:
                     payload=dict(item.get("payload") or {}),
                 )
             )
+        self._append_nanobot_history(project=project, session=session, result=result)
         self._maybe_compact_session(session)
         self._maybe_consolidate_memory(project, session, result)
         if not session.source_refs and project.source_refs:
@@ -699,9 +892,18 @@ class LearningOrchestrator:
         if len(session.messages) <= max_messages:
             return
         keep_tail = session.messages[-self.SESSION_AUTOCOMPACT_KEEP_TAIL :]
-        summary = self._build_compaction_summary(session.messages[:-self.SESSION_AUTOCOMPACT_KEEP_TAIL])
+        old_messages = session.messages[:-self.SESSION_AUTOCOMPACT_KEEP_TAIL]
+        summary, source = self._archive_compacted_messages(old_messages)
         session.messages = [
-            {"role": "system", "content": f"[compacted history] {summary}"},
+            {
+                "role": "system",
+                "content": f"[compacted history] {summary}",
+                "metadata": {
+                    "colearn_compacted": True,
+                    "compacted_count": len(old_messages),
+                    "compaction_source": source,
+                },
+            },
             *keep_tail,
         ]
 
@@ -709,19 +911,63 @@ class LearningOrchestrator:
         event_count = len(self.memory_store.list_events())
         if event_count == 0 or event_count % self.DREAM_CONSOLIDATION_EVENT_INTERVAL != 0:
             return
-        summary = self._consolidate_dream_events(
-            project=project,
-            session=session,
-            recent_events=self.memory_store.list_events()[-self.DREAM_CONSOLIDATION_EVENT_INTERVAL :],
-            fallback_text=result.review_summary or result.final_text,
-        )
-        self.memory_store.append(
-            MemoryEvent(
-                event_id=str(uuid4()),
-                kind="profile_consolidated",
-                payload=summary,
+        loop = self._runtime_loop()
+        dream = getattr(loop, "dream", None) if loop is not None else None
+        if dream is None or not hasattr(dream, "run"):
+            summary = self._consolidate_dream_events(
+                project=project,
+                session=session,
+                recent_events=self.memory_store.list_events()[-self.DREAM_CONSOLIDATION_EVENT_INTERVAL :],
+                fallback_text=result.review_summary or result.final_text,
             )
-        )
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind="profile_consolidated",
+                    payload=summary,
+                )
+            )
+            return
+        try:
+            did_work = self._run_async_or_value(dream.run())
+            if not did_work:
+                return
+            store = getattr(dream, "store", None) or getattr(getattr(loop, "context", None), "memory", None)
+            memory_excerpt = self._memory_excerpt(store)
+            dream_cursor = (
+                store.get_last_dream_cursor()
+                if store is not None and hasattr(store, "get_last_dream_cursor")
+                else None
+            )
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind="profile_consolidated",
+                    payload={
+                        "source": "nanobot_dream",
+                        "session_id": session.session_id,
+                        "project_id": project.project_id,
+                        "dream_cursor": dream_cursor,
+                        "memory_excerpt": memory_excerpt,
+                        "recent_event_count": self.DREAM_CONSOLIDATION_EVENT_INTERVAL,
+                    },
+                )
+            )
+        except Exception as exc:
+            warning = f"dream_consolidation_failed:{type(exc).__name__}"
+            self._append_session_warning(session, warning)
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind="profile_consolidation_failed",
+                    payload={
+                        "source": "nanobot_dream",
+                        "session_id": session.session_id,
+                        "project_id": project.project_id,
+                        "error": str(exc),
+                    },
+                )
+            )
 
     def _build_compaction_summary(self, messages: list[dict[str, Any]]) -> str:
         summary = " | ".join(
@@ -730,6 +976,85 @@ class LearningOrchestrator:
             if str(item.get("content") or "").strip()
         )
         return summary[: self.SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS]
+
+    def _archive_compacted_messages(self, messages: list[dict[str, Any]]) -> tuple[str, str]:
+        loop = self._runtime_loop()
+        consolidator = getattr(loop, "consolidator", None) if loop is not None else None
+        if consolidator is not None and hasattr(consolidator, "archive"):
+            try:
+                summary = self._run_async_or_value(consolidator.archive(messages))
+                if summary:
+                    return str(summary)[: self.SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS], "nanobot_consolidator"
+            except Exception:
+                pass
+        return self._build_compaction_summary(messages), "fallback"
+
+    def _runtime_loop(self):
+        get_bot = getattr(self.executor, "_get_bot", None)
+        if not callable(get_bot):
+            return None
+        try:
+            bot = get_bot()
+        except Exception:
+            return None
+        return getattr(bot, "_loop", None)
+
+    def _run_async_or_value(self, value):
+        if asyncio.iscoroutine(value):
+            return asyncio.run(value)
+        return value
+
+    def _append_nanobot_history(self, *, project: LearningProject, session: LearningSession, result) -> None:
+        loop = self._runtime_loop()
+        store = getattr(getattr(loop, "context", None), "memory", None) if loop is not None else None
+        if store is None or not hasattr(store, "append_history"):
+            return
+        try:
+            store.append_history(
+                self._nanobot_history_entry(project=project, session=session, result=result),
+                max_chars=4000,
+            )
+        except Exception:
+            self._append_session_warning(session, "nanobot_history_append_failed")
+
+    def _nanobot_history_entry(self, *, project: LearningProject, session: LearningSession, result) -> str:
+        blockers = [
+            str(getattr(item, "desc", "") or getattr(item, "id", "") or "").strip()
+            for item in list(getattr(result.board_after.gaps_and_blockers, "critical_blockers", []) or [])
+        ]
+        runtime_v2 = dict((result.raw_learning_result or {}).get("runtime_v2") or {})
+        retrieval = dict(runtime_v2.get("retrieval") or {})
+        return "\n".join(
+            [
+                f"session_id: {session.session_id}",
+                f"project_id: {project.project_id}",
+                f"turn_mode: {result.turn_mode_after}",
+                f"user: {self._truncate_for_memory(session.messages[-2].get('content') if len(session.messages) >= 2 else '')}",
+                f"assistant: {self._truncate_for_memory(result.final_text)}",
+                f"blockers: {'; '.join(blockers) if blockers else 'none'}",
+                f"retrieval: hits={len(retrieval.get('retrieval_hits') or [])}; misses={len(retrieval.get('retrieval_misses') or [])}",
+            ]
+        )
+
+    @staticmethod
+    def _truncate_for_memory(value: Any, limit: int = 600) -> str:
+        text = str(value or "").strip().replace("\n", " ")
+        return text[:limit]
+
+    @staticmethod
+    def _memory_excerpt(store: Any, limit: int = 1200) -> str:
+        if store is None or not hasattr(store, "read_memory"):
+            return ""
+        return str(store.read_memory() or "").strip()[:limit]
+
+    @staticmethod
+    def _append_session_warning(session: LearningSession, warning: str) -> None:
+        last_turn_result = dict(session.last_turn_result or {})
+        warnings = list(last_turn_result.get("warnings") or [])
+        if warning not in warnings:
+            warnings.append(warning)
+        last_turn_result["warnings"] = warnings
+        session.last_turn_result = last_turn_result
 
     def _consolidate_dream_events(
         self,

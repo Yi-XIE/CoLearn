@@ -218,7 +218,114 @@ def test_session_autocompact_keeps_tail_and_continuation(tmp_path):
 
     assert len(session.messages) == orchestrator.SESSION_AUTOCOMPACT_KEEP_TAIL + 1
     assert session.messages[0]["content"].startswith("[compacted history]")
+    assert session.messages[0]["metadata"]["colearn_compacted"] is True
+    assert session.messages[0]["metadata"]["compaction_source"] == "fallback"
     assert session.messages[-1]["content"] == "message 29"
+
+
+def test_session_autocompact_uses_nanobot_consolidator_and_keeps_single_summary(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+
+    class FakeConsolidator:
+        async def archive(self, messages):
+            return f"llm summary for {len(messages)} messages"
+
+    class FakeExecutorWithBot(FakeExecutor):
+        def _get_bot(self):
+            return SimpleNamespace(_loop=SimpleNamespace(consolidator=FakeConsolidator()))
+
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutorWithBot(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+    session = orchestrator.session_store.create_session(session_id="sess-compact-llm", project_id="proj-compact")
+    session.messages = [{"role": "user", "content": f"message {idx}"} for idx in range(30)]
+
+    orchestrator._maybe_compact_session(session)
+    session.messages.extend({"role": "user", "content": f"new {idx}"} for idx in range(20))
+    orchestrator._maybe_compact_session(session)
+
+    compacted = [item for item in session.messages if item.get("metadata", {}).get("colearn_compacted")]
+    assert len(compacted) == 1
+    assert compacted[0]["metadata"]["compaction_source"] == "nanobot_consolidator"
+    assert compacted[0]["content"].startswith("[compacted history] llm summary")
+
+
+def test_nanobot_dream_consolidation_success_and_failure(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-dream-native", "Dream Native")
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session = session_store.create_session(session_id="sess-dream-native", project_id="proj-dream-native")
+    memory_store = EventMemoryStore(state_store=JsonStateStore(root))
+    for idx in range(20):
+        memory_store.append(
+            MemoryEvent(
+                event_id=f"evt-native-{idx}",
+                kind="review_written",
+                payload={"session_id": session.session_id, "project_id": project.project_id, "summary": f"fact {idx}"},
+            )
+        )
+
+    class FakeDreamStore:
+        def read_memory(self):
+            return "stable learner profile"
+
+        def get_last_dream_cursor(self):
+            return 20
+
+    class FakeDream:
+        store = FakeDreamStore()
+
+        async def run(self):
+            return True
+
+    class FakeExecutorWithDream(FakeExecutor):
+        def _get_bot(self):
+            return SimpleNamespace(_loop=SimpleNamespace(dream=FakeDream(), context=SimpleNamespace(memory=FakeDream.store)))
+
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutorWithDream(),
+        memory_store=memory_store,
+        retrieval_service=FakeRetrievalService(),
+    )
+    result = LearningTurnResult(final_text="answer")
+
+    orchestrator._maybe_consolidate_memory(project, session, result)
+    event = memory_store.list_events()[-1]
+    assert event.kind == "profile_consolidated"
+    assert event.payload["source"] == "nanobot_dream"
+    assert event.payload["dream_cursor"] == 20
+    assert "stable learner profile" in event.payload["memory_excerpt"]
+
+    failure_store = EventMemoryStore(state_store=JsonStateStore(tmp_path / ".colearn" / "failure-state"))
+    for idx in range(20):
+        failure_store.append(MemoryEvent(event_id=f"evt-fail-{idx}", kind="review_written", payload={}))
+
+    class FailingDream:
+        async def run(self):
+            raise RuntimeError("dream failed")
+
+    class FakeExecutorWithFailingDream(FakeExecutor):
+        def _get_bot(self):
+            return SimpleNamespace(_loop=SimpleNamespace(dream=FailingDream()))
+
+    failure_orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutorWithFailingDream(),
+        memory_store=failure_store,
+        retrieval_service=FakeRetrievalService(),
+    )
+    session.last_turn_result = {}
+    failure_orchestrator._maybe_consolidate_memory(project, session, result)
+    assert failure_store.list_events()[-1].kind == "profile_consolidation_failed"
+    assert "dream_consolidation_failed:RuntimeError" in session.last_turn_result["warnings"]
 
 
 def test_before_turn_adds_runtime_turn_metadata(tmp_path):
@@ -859,6 +966,110 @@ def test_runtime_v2_prompt_includes_learning_state_lines() -> None:
     prompt = build_turn_prompt(request)
     assert "Prompt support bundle:" in prompt
     assert "[procedure] Use the induction hypothesis" in prompt
+
+
+def test_runtime_v2_prompt_passes_requested_skills(monkeypatch, tmp_path) -> None:
+    import colearn.runtime_v2.prompting as prompting
+
+    captured: dict[str, object] = {}
+
+    class FakeContextBuilder:
+        def __init__(self, workspace):
+            captured["workspace"] = workspace
+
+        def build_system_prompt(self, *, skill_names=None, channel=None, session_summary=None):
+            captured["skill_names"] = skill_names
+            captured["channel"] = channel
+            captured["session_summary"] = session_summary
+            return "BASE PROMPT"
+
+    monkeypatch.setattr(prompting, "ContextBuilder", FakeContextBuilder)
+    (tmp_path / "COLEARN.md").write_text("CoLearn local context", encoding="utf-8")
+    request = LearningTurnRequest(
+        session_id="sess-skills",
+        user_message="Use the skill",
+        requested_skills=["proof-helper"],
+        metadata={"workspace": str(tmp_path)},
+    )
+
+    prompt = prompting.build_turn_prompt(request)
+
+    assert captured["skill_names"] == ["proof-helper"]
+    assert captured["channel"] == "colearn"
+    assert "BASE PROMPT" in prompt
+    assert "CoLearn local context" in prompt
+
+
+def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+    project = orchestrator.project_service.create_project("proj-parallel", "Parallel")
+    session = orchestrator.session_store.create_session(session_id="sess-parallel", project_id="proj-parallel")
+    query_context = {
+        "final_query": "main query",
+        "critical_blockers": [{"desc": "blocker one"}, {"desc": "blocker two"}],
+        "unverified_gaps": ["gap one", "gap two"],
+    }
+
+    skipped = orchestrator._build_parallel_support(
+        project=project,
+        session=session,
+        retrieval_query_context=query_context,
+    )
+    assert skipped["status"] == "skipped"
+    assert skipped["reason"] == "no_source_refs"
+    assert len(skipped["queries"]) == 3
+
+    project.source_refs = ["source.md"]
+    ready = orchestrator._build_parallel_support(
+        project=project,
+        session=session,
+        retrieval_query_context=query_context,
+    )
+    assert ready["status"] == "ready"
+    assert ready["queries"] == ["main query", "blocker one", "blocker two"]
+    assert len(ready["results"]) == 3
+
+
+def test_stream_hook_is_agenthook_and_requests_streaming() -> None:
+    from colearn.runtime_v2.executor import NanobotTurnExecutor
+    from nanobot.agent.hook import AgentHook, CompositeHook, SDKCaptureHook
+
+    events: list[dict] = []
+    hook = NanobotTurnExecutor._StreamHook(events.append)
+
+    assert isinstance(hook, AgentHook)
+    assert CompositeHook([SDKCaptureHook(), hook]).wants_streaming() is True
+
+
+def test_model_preset_missing_falls_back_to_default() -> None:
+    from colearn.runtime_v2.executor import NanobotTurnExecutor
+
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.model_presets = {"default": object()}
+            self.applied: list[str] = []
+
+        def set_model_preset(self, name: str) -> None:
+            self.applied.append(name)
+
+    loop = FakeLoop()
+    request = LearningTurnRequest(session_id="sess-preset", user_message="check")
+
+    NanobotTurnExecutor()._apply_model_preset(
+        bot=SimpleNamespace(_loop=loop),
+        preset="deep",
+        request=request,
+    )
+
+    assert loop.applied == ["default"]
+    assert "model_preset_missing:deep" in request.metadata["_runtime_warnings"]
 
 
 def test_runtime_v2_result_bridge_attaches_board_summary() -> None:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import anyio
 import json
 import mimetypes
 from pathlib import Path
+from queue import Empty, Queue
 import time
 from typing import Any
 from uuid import uuid4
@@ -289,7 +291,7 @@ WS_HANDLERS = {
 def _prepare_runtime_stream_events(
     *,
     stream_events: list[dict[str, Any]],
-    result: Any,
+    result: Any | None,
     session_id: str,
     turn_id: str,
     seq: int,
@@ -311,14 +313,38 @@ def _prepare_runtime_stream_events(
     return prepared, seq
 
 
+def _runtime_stream_signature(event: dict[str, Any]) -> str:
+    metadata = {
+        key: value
+        for key, value in dict(event.get("metadata") or {}).items()
+        if key not in {"warnings", "tool_events"}
+    }
+    return json.dumps(
+        {
+            "type": event.get("type"),
+            "content": event.get("content"),
+            "metadata": metadata,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+
 def _append_ws_stream_events(
     *,
     turn_id: str,
     session_id: str,
     result: Any,
     seq: int,
+    skip_signatures: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    stream_events = list(result.stream_events or [])
+    skip_signatures = skip_signatures or set()
+    stream_events = [
+        item
+        for item in list(result.stream_events or [])
+        if _runtime_stream_signature(dict(item)) not in skip_signatures
+    ]
     prepared_stream_events, seq = _prepare_runtime_stream_events(
         stream_events=stream_events,
         result=result,
@@ -329,6 +355,72 @@ def _append_ws_stream_events(
     for item in prepared_stream_events:
         turn_streams[turn_id].append(item)
     return prepared_stream_events
+
+
+async def _run_turn_with_live_stream(
+    *,
+    websocket: WebSocket,
+    session_id: str,
+    project_id: str,
+    content: str,
+    language: str,
+    attachments: list[dict[str, Any]],
+    turn_id: str,
+    seq: int,
+) -> tuple[Any, int, set[str]]:
+    queue: Queue[dict[str, Any]] = Queue()
+    result_box: dict[str, Any] = {}
+    error_box: dict[str, BaseException] = {}
+    emitted_signatures: set[str] = set()
+    worker_done = False
+
+    def stream_emit(event: dict[str, Any]) -> None:
+        queue.put(dict(event))
+
+    async def run_worker() -> None:
+        nonlocal worker_done
+        try:
+            result_box["result"] = await to_thread.run_sync(
+                lambda: orchestrator.run_turn(
+                    session_id=session_id,
+                    project_id=project_id,
+                    user_message=content,
+                    language=language,
+                    attachments=attachments,
+                    stream_emit=stream_emit,
+                )
+            )
+        except BaseException as exc:
+            error_box["error"] = exc
+        finally:
+            worker_done = True
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(run_worker)
+        while not worker_done or not queue.empty():
+            try:
+                raw_event = queue.get_nowait()
+            except Empty:
+                await anyio.sleep(0.01)
+                continue
+            signature = _runtime_stream_signature(raw_event)
+            prepared, seq = _prepare_runtime_stream_events(
+                stream_events=[raw_event],
+                result=None,
+                session_id=session_id,
+                turn_id=turn_id,
+                seq=seq,
+            )
+            if not prepared:
+                continue
+            emitted_signatures.add(signature)
+            event = prepared[0]
+            turn_streams[turn_id].append(event)
+            await websocket.send_json(event)
+
+    if error_box:
+        raise error_box["error"]
+    return result_box["result"], seq, emitted_signatures
 
 
 @app.get("/health")
@@ -1215,14 +1307,15 @@ async def unified_ws(websocket: WebSocket) -> None:
             await websocket.send_json(stage_event)
             seq += 1
             try:
-                result = await to_thread.run_sync(
-                    lambda: orchestrator.run_turn(
-                        session_id=session_id,
-                        project_id=project_id,
-                        user_message=message.content,
-                        language=message.language,
-                        attachments=message.attachments,
-                    )
+                result, seq, emitted_stream_signatures = await _run_turn_with_live_stream(
+                    websocket=websocket,
+                    session_id=session_id,
+                    project_id=project_id,
+                    content=message.content,
+                    language=message.language,
+                    attachments=message.attachments,
+                    turn_id=turn_id,
+                    seq=seq,
                 )
             except Exception as exc:
                 session = session_store.get_session(session_id)
@@ -1257,6 +1350,7 @@ async def unified_ws(websocket: WebSocket) -> None:
                 session_id=session_id,
                 result=result,
                 seq=seq,
+                skip_signatures=emitted_stream_signatures,
             )
             if prepared_stream_events:
                 seq = int(prepared_stream_events[-1].get("seq") or seq) + 1

@@ -92,6 +92,7 @@ class RuntimeCompressionBridge:
             enabled_tools=request.enabled_tools,
             attachments=request.attachments,
             requested_skills=request.requested_skills,
+            stream_emit=request.stream_emit,
             metadata=metadata,
         )
         return RuntimeCompressionResult(

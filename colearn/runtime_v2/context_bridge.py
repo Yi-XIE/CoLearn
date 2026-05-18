@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from colearn.learning.retrieval_bundle import RetrievalBundle, empty_retrieval_bundle
 from colearn.learning.state import BoardFacts, LearningStateSnapshot, PolicyDecision, TurnPolicy
@@ -29,6 +29,7 @@ def build_learning_turn_request(
     enabled_tools: list[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
     requested_skills: list[str] | None = None,
+    stream_emit: Callable[[dict[str, Any]], None] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> LearningTurnRequest:
     metadata = metadata or {}
@@ -51,5 +52,6 @@ def build_learning_turn_request(
         enabled_tools=enabled_tools or [],
         attachments=attachments or [],
         requested_skills=requested_skills or [],
+        stream_emit=stream_emit,
         metadata=metadata,
     )

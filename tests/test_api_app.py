@@ -350,12 +350,26 @@ class FakeWebSocketOrchestrator:
             raise RuntimeError("ws orchestrator failed")
         from colearn.learning.response_contract import LearningTurnResult
 
+        if kwargs.get("stream_emit"):
+            kwargs["stream_emit"](
+                {
+                    "type": "content_delta",
+                    "content": "live chunk",
+                    "metadata": {"phase": "content_delta", "runtime_event_index": 0},
+                }
+            )
         return LearningTurnResult(
             final_text=f"WS answer: {kwargs['user_message']}",
             turn_mode_after="EXPLORE",
             warnings=[],
             tool_events=[],
-            stream_events=[],
+            stream_events=[
+                {
+                    "type": "content_delta",
+                    "content": "live chunk",
+                    "metadata": {"phase": "content_delta", "runtime_event_index": 0},
+                }
+            ],
         )
 
 
@@ -384,6 +398,8 @@ async def _run_real_websocket_start_and_error_checks() -> None:
                 if event["type"] == "done":
                     break
             assert "session" in received
+            assert received.index("content_delta") < received.index("content")
+            assert received.count("content_delta") == 1
             assert "content" in received
             saved = app_module.session_store.get_session("ws-start-session")
             assert saved is not None

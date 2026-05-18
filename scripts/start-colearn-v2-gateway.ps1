@@ -25,9 +25,25 @@ if (!(Test-Path "$repoRoot\.colearn\tmp")) {
     New-Item -ItemType Directory -Path "$repoRoot\.colearn\tmp" -Force | Out-Null
 }
 
-$env:PYTHONPATH = $nanobotRoot
+$env:PYTHONPATH = "$repoRoot;$nanobotRoot"
 $env:TMP = "$repoRoot\.colearn\tmp"
 $env:TEMP = "$repoRoot\.colearn\tmp"
+
+$envPath = Join-Path $repoRoot ".env"
+if (Test-Path $envPath) {
+    Get-Content $envPath | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
+            return
+        }
+        $name, $value = $line.Split("=", 2)
+        $name = $name.Trim()
+        $value = $value.Trim().Trim('"')
+        if ($name) {
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
 
 if (-not $env:COLEARN_NANOBOT_TOKEN_ISSUE_SECRET) {
     throw "Environment variable COLEARN_NANOBOT_TOKEN_ISSUE_SECRET is required."

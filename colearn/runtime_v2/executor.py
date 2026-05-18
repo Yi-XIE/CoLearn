@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.hook import AgentHook
+
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.memory.store import EventMemoryStore
@@ -39,17 +41,27 @@ class NanobotTurnExecutor:
         }
         return payload
 
-    class _StreamHook:
+    class _StreamHook(AgentHook):
         def __init__(self, emit):
+            super().__init__()
             self._emit = emit
+
+        def wants_streaming(self) -> bool:
+            return True
 
         async def on_stream(self, ctx, delta: str):
             if delta:
-                self._emit(NanobotTurnExecutor._coerce_stream_event("thinking", delta))
+                self._emit(NanobotTurnExecutor._coerce_stream_event("content_delta", delta))
 
         async def emit_reasoning(self, reasoning_content: str | None):
             if reasoning_content:
-                self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning", reasoning_content))
+                self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning_delta", reasoning_content))
+
+        async def emit_reasoning_end(self):
+            self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning_end", ""))
+
+        async def on_stream_end(self, ctx, *, resuming: bool):
+            self._emit(NanobotTurnExecutor._coerce_stream_event("stream_end", "", resuming=bool(resuming)))
 
         async def before_execute_tools(self, ctx):
             for tool_call in list(getattr(ctx, "tool_calls", []) or []):
@@ -79,6 +91,7 @@ class NanobotTurnExecutor:
             "tool_events": [{"tool_name": name} for name in tools_used],
             "raw_messages": messages,
             "stream_events": list(request.metadata.get("_stream_events") or []),
+            "warnings": list(request.metadata.get("_runtime_warnings") or []),
         }
         return self.finalize(
             request=request,
@@ -94,6 +107,25 @@ class NanobotTurnExecutor:
         prompt = build_turn_prompt(request)
         bot = self._get_bot()
         stream_events: list[dict[str, Any]] = []
+        event_index = 0
+
+        def emit_stream_event(event: dict[str, Any]) -> None:
+            nonlocal event_index
+            payload = dict(event)
+            payload["metadata"] = {
+                **dict(payload.get("metadata") or {}),
+                "runtime_event_index": event_index,
+            }
+            event_index += 1
+            stream_events.append(payload)
+            if request.stream_emit is not None:
+                try:
+                    request.stream_emit(dict(payload))
+                except Exception as exc:
+                    request.metadata.setdefault("_runtime_warnings", []).append(
+                        f"stream_emit_failed:{type(exc).__name__}"
+                    )
+
         install_colearn_tools(
             bot=bot,
             request=request,
@@ -102,14 +134,33 @@ class NanobotTurnExecutor:
             memory_store=self.memory_store,
         )
         if request.model_preset:
-            bot._loop.set_model_preset(request.model_preset)
+            self._apply_model_preset(bot=bot, preset=request.model_preset, request=request)
         result = await bot.run(
             prompt,
             session_key=f"colearn:{request.session_id}",
-            hooks=[self._StreamHook(stream_events.append)],
+            hooks=[self._StreamHook(emit_stream_event)],
         )
         request.metadata["_stream_events"] = stream_events
         return result.content, result.messages, result.tools_used
+
+    def _apply_model_preset(self, *, bot: Any, preset: str, request: LearningTurnRequest) -> None:
+        loop = getattr(bot, "_loop", None)
+        if loop is None or not hasattr(loop, "set_model_preset"):
+            request.metadata.setdefault("_runtime_warnings", []).append("model_preset_runtime_unavailable")
+            return
+        available = set((getattr(loop, "model_presets", {}) or {}).keys())
+        resolved = preset
+        if available and preset not in available:
+            request.metadata.setdefault("_runtime_warnings", []).append(f"model_preset_missing:{preset}")
+            resolved = "default" if "default" in available else ""
+        if not resolved:
+            return
+        try:
+            loop.set_model_preset(resolved)
+        except Exception as exc:
+            request.metadata.setdefault("_runtime_warnings", []).append(
+                f"model_preset_apply_failed:{resolved}:{type(exc).__name__}"
+            )
 
     def finalize(
         self,

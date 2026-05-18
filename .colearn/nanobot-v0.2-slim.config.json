@@ -1,9 +1,21 @@
 {
+  "modelPresets": {
+    "explore": {
+      "provider": "deepseek",
+      "model": "${DEEPSEEK_MODEL}",
+      "temperature": 0.2
+    },
+    "deep": {
+      "provider": "deepseek",
+      "model": "${DEEPSEEK_MODEL}",
+      "temperature": 0.1
+    }
+  },
   "agents": {
     "defaults": {
       "workspace": "./.colearn/nanobot-workspace",
-      "provider": "github_copilot",
-      "model": "github-copilot/gpt-4.1",
+      "provider": "deepseek",
+      "model": "${DEEPSEEK_MODEL}",
       "fallbackModels": [],
       "maxToolIterations": 80,
       "maxConcurrentSubagents": 1,
@@ -42,6 +54,12 @@
       "enabled": false
     }
   },
+  "providers": {
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "apiBase": "${DEEPSEEK_API_BASE}"
+    }
+  },
   "tools": {
     "restrictToWorkspace": true,
     "web": {
@@ -54,6 +72,18 @@
     "imageGeneration": {
       "enabled": false
     },
-    "mcpServers": {}
+    "mcpServers": {
+      "colearn-ext": {
+        "command": "python",
+        "args": [
+          "-m",
+          "colearn.mcp_server"
+        ],
+        "enabledTools": [
+          "*"
+        ],
+        "toolTimeout": 30
+      }
+    }
   }
 }

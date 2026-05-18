@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from .retrieval_bundle import RetrievalBundle, empty_retrieval_bundle
 from .state import BoardFacts, LearningStateSnapshot, PolicyDecision, TurnPolicy
@@ -31,4 +31,5 @@ class LearningTurnRequest:
     retrieval_bundle: RetrievalBundle = field(default_factory=lambda: empty_retrieval_bundle())
     attachments: list[dict[str, Any]] = field(default_factory=list)
     requested_skills: list[str] = field(default_factory=list)
+    stream_emit: Callable[[dict[str, Any]], None] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
