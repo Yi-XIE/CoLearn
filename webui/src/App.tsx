@@ -1836,14 +1836,14 @@ function MemorySwitch({
       aria-checked={active}
       onClick={onClick}
       className={cn(
-        "relative h-6 w-10 rounded-full transition-colors",
-        active ? "bg-foreground/70" : "bg-muted-foreground/35",
+        "relative inline-flex h-7 w-12 cursor-pointer items-center rounded-full p-1 transition-[background-color,transform,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98]",
+        active ? "bg-[#4a4a4a]" : "bg-[#7a7a7a]",
       )}
     >
       <span
         className={cn(
-          "absolute top-1 h-4 w-4 rounded-full bg-background shadow-sm transition-transform",
-          active ? "translate-x-5" : "translate-x-1",
+          "block h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.28)] transition-transform duration-200 ease-out will-change-transform",
+          active ? "translate-x-5" : "translate-x-0",
         )}
       />
     </button>
