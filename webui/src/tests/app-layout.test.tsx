@@ -271,6 +271,50 @@ describe("App layout", () => {
             }),
           };
         }
+        if (url.includes("/api/v1/knowledge/kb-math/graph")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              nodes: [
+                {
+                  id: "library:kb-math",
+                  label: "线性代数资料库",
+                  kind: "library",
+                  metadata: { library_id: "kb-math" },
+                },
+                {
+                  id: "file:kb-math:api-graph.md",
+                  label: "api-graph.md",
+                  kind: "file",
+                  metadata: { library_id: "kb-math", path: "/tmp/api-graph.md" },
+                },
+                {
+                  id: "concept:matrix",
+                  label: "矩阵概念",
+                  kind: "concept",
+                  metadata: { source: "test" },
+                },
+              ],
+              edges: [
+                {
+                  id: "edge:contains:library:kb-math:file:kb-math:api-graph.md",
+                  source: "library:kb-math",
+                  target: "file:kb-math:api-graph.md",
+                  kind: "contains",
+                  metadata: {},
+                },
+                {
+                  id: "edge:mentions:file:kb-math:api-graph.md:concept:matrix",
+                  source: "file:kb-math:api-graph.md",
+                  target: "concept:matrix",
+                  kind: "mentions",
+                  metadata: {},
+                },
+              ],
+            }),
+          };
+        }
         return { ok: false, status: 404, json: async () => ({}) };
       }),
     );
@@ -282,6 +326,7 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "知识花园" }));
 
     expect(await screen.findAllByText("线性代数资料库")).not.toHaveLength(0);
+    expect(await screen.findByText("矩阵概念")).toBeInTheDocument();
     expect(await screen.findByText("notes.md")).toBeInTheDocument();
   });
 
@@ -327,8 +372,10 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "记忆" }));
-    expect(await screen.findByText("继续验证关键结论。")).toBeInTheDocument();
-    expect(await screen.findByText("缺少证据支持")).toBeInTheDocument();
+    expect(await screen.findByText("学习摘要")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("已沉淀的长期记忆")).toBeInTheDocument();
+    expect(screen.getByText("个人画像")).toBeInTheDocument();
+    expect(screen.getByText("启用记忆")).toBeInTheDocument();
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "技能" }));
     expect(await screen.findByText("review")).toBeInTheDocument();

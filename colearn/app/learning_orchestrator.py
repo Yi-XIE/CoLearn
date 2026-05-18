@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from dataclasses import replace
 from threading import Thread
 from time import time
@@ -24,6 +23,7 @@ from colearn.learning.state_hooks import (
     policy,
 )
 from colearn.memory.store import EventMemoryStore, MemoryEvent
+from colearn.paths import colearn_nanobot_workspace
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
@@ -141,7 +141,7 @@ class LearningOrchestrator:
             knowledge_service=self.knowledge_service,
         )
         self.executor = executor or NanobotTurnExecutor(
-            workspace=Path.cwd(),
+            workspace=colearn_nanobot_workspace(),
             retrieval_service=self.retrieval_service,
             memory_store=self.memory_store,
         )
@@ -160,6 +160,7 @@ class LearningOrchestrator:
         project_id: str = "",
         language: str = "zh",
         attachments: list[dict[str, object]] | None = None,
+        requested_skills: list[str] | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
     ):
         session = self._get_or_create_session(session_id=session_id, project_id=project_id)
@@ -248,6 +249,7 @@ class LearningOrchestrator:
             continuation_prompt=session.continuation_prompt,
             enabled_tools=turn_policy.enabled_tools or turn_policy.allowed_tools,
             attachments=attachments or [],
+            requested_skills=requested_skills or [],
             stream_emit=stream_emit,
             metadata={
                 "turn_id": str(uuid4()),
@@ -258,7 +260,7 @@ class LearningOrchestrator:
                 "prefetched_references": prefetched_references,
                 "parallel_support": parallel_support,
                 "prompt_support_bundle": prompt_support_bundle,
-                "workspace": str(getattr(self.executor, "workspace", None) or Path.cwd()),
+                "workspace": str(getattr(self.executor, "workspace", None) or colearn_nanobot_workspace()),
             },
         )
         prepared_request = before_turn(

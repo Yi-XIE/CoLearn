@@ -7,6 +7,7 @@ from pathlib import Path
 from nanobot.agent.context import ContextBuilder
 
 from colearn.learning.turn_contract import LearningTurnRequest
+from colearn.paths import colearn_repo_root
 
 
 def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
@@ -109,10 +110,11 @@ def build_turn_prompt(request: LearningTurnRequest) -> str:
         skill_names=request.requested_skills or None,
         channel="colearn",
     )
-    colearn_doc = workspace / "COLEARN.md"
     colearn_context = ""
-    if colearn_doc.exists():
-        colearn_context = colearn_doc.read_text(encoding="utf-8").strip()
+    for colearn_doc in (workspace / "COLEARN.md", colearn_repo_root() / "COLEARN.md"):
+        if colearn_doc.exists():
+            colearn_context = colearn_doc.read_text(encoding="utf-8").strip()
+            break
     lines = [
         base_prompt,
         f"## COLEARN.md\n\n{colearn_context}" if colearn_context else "",

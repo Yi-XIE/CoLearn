@@ -187,6 +187,41 @@ export interface KnowledgeTaskResult {
   message: string;
 }
 
+export type KnowledgeGraphNodeKind =
+  | "library"
+  | "file"
+  | "concept"
+  | "lesson"
+  | "exercise"
+  | "evidence";
+
+export type KnowledgeGraphEdgeKind =
+  | "contains"
+  | "mentions"
+  | "covers"
+  | "practices"
+  | "supports";
+
+export interface KnowledgeGraphNode {
+  id: string;
+  label: string;
+  kind: KnowledgeGraphNodeKind;
+  metadata: Record<string, unknown>;
+}
+
+export interface KnowledgeGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: KnowledgeGraphEdgeKind;
+  metadata: Record<string, unknown>;
+}
+
+export interface KnowledgeGraphPayload {
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+}
+
 export interface MemorySummaryItem {
   label: string;
   detail: string;
@@ -199,11 +234,20 @@ export interface MemoryEventSummary {
   recorded_at: string;
 }
 
-export interface MemorySummaryPayload {
+export type MemoryDocumentName = "summary" | "profile";
+
+export interface MemoryDocPayload {
   summary: string;
   profile: string;
   summary_updated_at: string | null;
   profile_updated_at: string | null;
+}
+
+export interface MemoryRefreshPayload extends MemoryDocPayload {
+  changed: boolean;
+}
+
+export interface MemorySummaryPayload extends MemoryDocPayload {
   current_continuity: string;
   long_term_facts: MemorySummaryItem[];
   blockers: MemorySummaryItem[];

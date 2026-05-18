@@ -8,6 +8,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from colearn.paths import colearn_state_root
+
 
 _PATH_LOCKS: dict[str, RLock] = {}
 _PATH_LOCKS_GUARD = RLock()
@@ -15,7 +17,7 @@ _PATH_LOCKS_GUARD = RLock()
 
 class JsonStateStore:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = (root or Path.cwd() / ".colearn" / "state").resolve()
+        self.root = (root or colearn_state_root()).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path_lock(self, path: Path) -> RLock:

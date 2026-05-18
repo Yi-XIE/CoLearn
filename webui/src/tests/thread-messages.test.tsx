@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
@@ -95,12 +95,17 @@ describe("ThreadMessages", () => {
       { id: "u1", role: "user", content: "hi", createdAt: 1 },
     ];
 
-    render(<ThreadMessages messages={messages} isStreaming />);
+    const { container } = render(<ThreadMessages messages={messages} isStreaming />);
 
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    const thread = container.firstElementChild as HTMLElement;
+    expect(within(thread).getByText("hi")).toBeInTheDocument();
+    expect(thread.textContent?.indexOf("hi")).toBeLessThan(
+      thread.textContent?.indexOf("Thinking...") ?? Number.POSITIVE_INFINITY,
+    );
   });
 
-  it("hides the synthetic thinking placeholder once an assistant streaming row exists", () => {
+  it("does not add a synthetic thinking placeholder once an assistant streaming row exists", () => {
     const messages: UIMessage[] = [
       { id: "u1", role: "user", content: "hi", createdAt: 1 },
       { id: "a1", role: "assistant", content: "", isStreaming: true, createdAt: 2 },
@@ -108,6 +113,6 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
-    expect(screen.getAllByText("Thinking...")).toHaveLength(1);
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 });

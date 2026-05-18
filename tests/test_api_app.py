@@ -344,8 +344,10 @@ def test_real_websocket_ping_subscribe_and_cancel() -> None:
 class FakeWebSocketOrchestrator:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
+        self.last_kwargs = {}
 
     def run_turn(self, **kwargs):
+        self.last_kwargs = dict(kwargs)
         if self.fail:
             raise RuntimeError("ws orchestrator failed")
         from colearn.learning.response_contract import LearningTurnResult
@@ -377,7 +379,8 @@ async def _run_real_websocket_start_and_error_checks() -> None:
     app_module = importlib.import_module("colearn.api.app")
     original_orchestrator = app_module.orchestrator
     try:
-        app_module.orchestrator = FakeWebSocketOrchestrator()
+        fake_orchestrator = FakeWebSocketOrchestrator()
+        app_module.orchestrator = fake_orchestrator
         async with anyio.create_task_group() as task_group:
             ws = ASGIWebSocketClient(app, task_group)
             await ws.connect()
@@ -389,6 +392,7 @@ async def _run_real_websocket_start_and_error_checks() -> None:
                     "project_title": "WS Project",
                     "content": "hello",
                     "language": "zh",
+                    "skills": ["proof-helper"],
                 }
             )
             received = []
@@ -404,6 +408,7 @@ async def _run_real_websocket_start_and_error_checks() -> None:
             saved = app_module.session_store.get_session("ws-start-session")
             assert saved is not None
             assert saved.active_turns == []
+            assert fake_orchestrator.last_kwargs["requested_skills"] == ["proof-helper"]
             await ws.disconnect()
             task_group.cancel_scope.cancel()
 
@@ -523,6 +528,31 @@ async def _run_knowledge_task_checks() -> None:
         files = listing.json()["files"]
         assert len(files) == 1
         assert files[0]["name"] == "alpha.txt"
+
+        graph = await client.get("/api/v1/knowledge/kb-alpha/graph")
+        assert graph.status_code == 200
+        graph_payload = graph.json()
+        assert isinstance(graph_payload["nodes"], list)
+        assert isinstance(graph_payload["edges"], list)
+        assert any(
+            node["id"] == "library:kb-alpha" and node["kind"] == "library"
+            for node in graph_payload["nodes"]
+        )
+        assert any(
+            node["id"] == "file:kb-alpha:alpha.txt" and node["kind"] == "file"
+            for node in graph_payload["nodes"]
+        )
+        assert any(
+            node["label"] == "Alpha" and node["kind"] == "concept"
+            for node in graph_payload["nodes"]
+        )
+        assert any(
+            edge["source"] == "library:kb-alpha"
+            and edge["target"] == "file:kb-alpha:alpha.txt"
+            and edge["kind"] == "contains"
+            for edge in graph_payload["edges"]
+        )
+        assert any(edge["kind"] == "mentions" for edge in graph_payload["edges"])
 
         fetched = await client.get("/api/v1/knowledge/kb-alpha/files/alpha.txt")
         assert fetched.status_code == 200

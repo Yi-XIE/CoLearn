@@ -7,6 +7,7 @@ import json
 import mimetypes
 from pathlib import Path
 from queue import Empty, Queue
+import re
 import time
 from typing import Any
 from uuid import uuid4
@@ -49,6 +50,7 @@ from colearn.api.schemas import (
 )
 from colearn.api.session_api import serialize_session_detail, serialize_session_summary, touch_session
 from colearn.app.learning_orchestrator import LearningOrchestrator
+from colearn.paths import colearn_env_file
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
 from colearn.sessions.store import SessionStore
@@ -72,13 +74,40 @@ orchestrator = LearningOrchestrator(
 app = FastAPI(title="CoLearn API", version="0.1.0")
 turn_streams: dict[str, list[dict[str, Any]]] = {}
 turn_index: dict[str, dict[str, Any]] = {}
-settings_service = SettingsStateService(JsonStateStore(state_store.root), Path.cwd() / ".env")
+settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
 memory_doc_service = MemoryDocStateService()
 skill_service = SkillStateService()
 auth_service = AuthStateService(JsonStateStore(state_store.root))
 knowledge_task_service = KnowledgeTaskService(state_root=state_store.root)
 settings_test_service = SettingsTestRunService()
 AUTH_COOKIE_NAME = "colearn_session"
+WORKSPACE_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
+
+KNOWLEDGE_GRAPH_CONCEPT_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("lightrag", "LightRAG"),
+    ("machine learning", "Machine Learning"),
+    ("deep learning", "Deep Learning"),
+    ("linear algebra", "Linear Algebra"),
+    ("regression", "Regression"),
+    ("classification", "Classification"),
+    ("evaluation", "Evaluation"),
+    ("dataset", "Dataset"),
+    ("feature", "Feature"),
+    ("model", "Model"),
+    ("training", "Training"),
+    ("agent", "Agent"),
+    ("state", "State"),
+    ("lesson", "Lesson"),
+    ("exercise", "Exercise"),
+    ("evidence", "Evidence"),
+    ("课程", "课程"),
+    ("概念", "概念"),
+    ("练习", "练习"),
+    ("证据", "证据"),
+    ("线性代数", "线性代数"),
+    ("函数", "函数"),
+    ("模型", "模型"),
+)
 
 
 def _ws_event(
@@ -169,6 +198,68 @@ def _extract_blocker_summaries(board_facts: dict[str, Any] | None) -> list[dict[
         if label:
             results.append({"label": label, "detail": detail})
     return results
+
+
+def _parse_skill_frontmatter(markdown: str) -> dict[str, Any]:
+    if not markdown.startswith("---"):
+        return {}
+    parts = markdown.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    metadata: dict[str, Any] = {}
+    for raw_line in parts[1].splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        metadata[key.strip()] = value.strip().strip("\"'")
+    return metadata
+
+
+def _load_disk_skills() -> dict[str, dict[str, Any]]:
+    if not WORKSPACE_SKILLS_DIR.exists():
+        return {}
+    records: dict[str, dict[str, Any]] = {}
+    for skill_path in sorted(WORKSPACE_SKILLS_DIR.glob("*/SKILL.md")):
+        try:
+            content = skill_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        metadata = _parse_skill_frontmatter(content)
+        name = str(metadata.get("name") or skill_path.parent.name).strip()
+        if not name:
+            continue
+        records[name] = {
+            "description": str(metadata.get("description") or ""),
+            "content": content,
+            "tags": ["personal"],
+        }
+    return records
+
+
+def list_available_skills() -> list[dict[str, Any]]:
+    merged = _load_disk_skills()
+    for record in skill_service.list_skills():
+        merged[str(record["name"])] = {
+            "description": str(record.get("description") or ""),
+            "content": "",
+            "tags": list(record.get("tags") or []),
+        }
+    return [
+        {
+            "name": name,
+            "description": str(record.get("description") or ""),
+            "tags": list(record.get("tags") or []),
+        }
+        for name, record in sorted(merged.items())
+    ]
+
+
+def get_available_skill(name: str) -> dict[str, Any]:
+    record = skill_service.get_skill(name)
+    if record:
+        return dict(record)
+    return _load_disk_skills().get(name, {})
 
 
 def _current_user(request: Request) -> dict[str, Any] | None:
@@ -365,6 +456,7 @@ async def _run_turn_with_live_stream(
     content: str,
     language: str,
     attachments: list[dict[str, Any]],
+    requested_skills: list[str],
     turn_id: str,
     seq: int,
 ) -> tuple[Any, int, set[str]]:
@@ -387,6 +479,7 @@ async def _run_turn_with_live_stream(
                     user_message=content,
                     language=language,
                     attachments=attachments,
+                    requested_skills=requested_skills,
                     stream_emit=stream_emit,
                 )
             )
@@ -493,12 +586,12 @@ def get_llm_options() -> dict[str, Any]:
 
 @app.get("/api/v1/skills/list")
 def list_skills() -> dict[str, Any]:
-    return {"skills": skill_service.list_skills()}
+    return {"skills": list_available_skills()}
 
 
 @app.get("/api/v1/skills/{name}")
 def get_skill(name: str) -> dict[str, Any]:
-    record = skill_service.get_skill(name)
+    record = get_available_skill(name)
     if not record:
         raise HTTPException(status_code=404, detail="Skill not found")
     return {
@@ -694,6 +787,162 @@ def list_supported_file_types() -> dict[str, Any]:
         "max_file_size_bytes": 100 * 1024 * 1024,
         "max_pdf_size_bytes": 50 * 1024 * 1024,
     }
+
+
+def _knowledge_graph_node(
+    *,
+    node_id: str,
+    label: str,
+    kind: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": node_id,
+        "label": label,
+        "kind": kind,
+        "metadata": dict(metadata or {}),
+    }
+
+
+def _knowledge_graph_edge(
+    *,
+    edge_id: str,
+    source: str,
+    target: str,
+    kind: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": edge_id,
+        "source": source,
+        "target": target,
+        "kind": kind,
+        "metadata": dict(metadata or {}),
+    }
+
+
+def _title_case_concept_token(value: str) -> str:
+    if len(value) <= 3:
+        return value.upper()
+    return value[:1].upper() + value[1:]
+
+
+def _concepts_from_file_name(file_name: str) -> list[str]:
+    stem = Path(file_name).stem
+    searchable = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", " ", stem).strip().lower()
+    concepts: list[str] = []
+    for needle, label in KNOWLEDGE_GRAPH_CONCEPT_KEYWORDS:
+        if needle.lower() in searchable:
+            concepts.append(label)
+    for token in re.split(r"[^0-9A-Za-z\u4e00-\u9fff]+", stem):
+        token = token.strip()
+        if not token:
+            continue
+        if re.search(r"[\u4e00-\u9fff]", token) or len(token) > 2 or token.lower() in {"ai", "ml"}:
+            concepts.append(token if re.search(r"[\u4e00-\u9fff]", token) else _title_case_concept_token(token.lower()))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for concept in concepts:
+        key = concept.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(concept)
+        if len(unique) >= 4:
+            break
+    return unique
+
+
+def _knowledge_graph_concept_id(label: str) -> str:
+    key = re.sub(r"\s+", "-", label.strip().casefold())
+    key = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff_-]+", "", key)
+    return f"concept:{key or 'untitled'}"
+
+
+def build_knowledge_graph_payload(name: str) -> dict[str, Any]:
+    project = project_service.get_project(name)
+    files = knowledge_task_service.list_files(name)
+    if project is None and not files:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    library_label = project.title if project else name
+    library_metadata = {
+        "library_id": name,
+        "source_count": len(project.source_refs or []) if project else len(files),
+        "status": str((project.retrieval_profile or {}).get("last_retrieval_status") or "empty")
+        if project
+        else "ready",
+        "provider": str((project.retrieval_profile or {}).get("provider") or "lightrag") if project else "lightrag",
+        "updated_at": str((project.board_facts or {}).get("updated_at") or "") if project else "",
+    }
+    library_node_id = f"library:{name}"
+    nodes = [
+        _knowledge_graph_node(
+            node_id=library_node_id,
+            label=library_label,
+            kind="library",
+            metadata=library_metadata,
+        )
+    ]
+    edges: list[dict[str, Any]] = []
+    concept_ids: set[str] = set()
+
+    for file_item in files:
+        file_name = str(file_item.get("name") or Path(str(file_item.get("path") or "")).name or "untitled")
+        file_path = str(file_item.get("path") or "")
+        file_node_id = f"file:{name}:{file_name}"
+        file_metadata = {
+            "library_id": name,
+            "path": file_path,
+            "size": int(file_item.get("size") or 0),
+            "modified": int(file_item.get("modified") or 0),
+            "mime_type": file_item.get("mime_type"),
+        }
+        nodes.append(
+            _knowledge_graph_node(
+                node_id=file_node_id,
+                label=file_name,
+                kind="file",
+                metadata=file_metadata,
+            )
+        )
+        edges.append(
+            _knowledge_graph_edge(
+                edge_id=f"edge:contains:{library_node_id}:{file_node_id}",
+                source=library_node_id,
+                target=file_node_id,
+                kind="contains",
+                metadata={"library_id": name},
+            )
+        )
+        for concept in _concepts_from_file_name(file_name):
+            concept_node_id = _knowledge_graph_concept_id(concept)
+            if concept_node_id not in concept_ids:
+                concept_ids.add(concept_node_id)
+                nodes.append(
+                    _knowledge_graph_node(
+                        node_id=concept_node_id,
+                        label=concept,
+                        kind="concept",
+                        metadata={"source": "filename"},
+                    )
+                )
+            edges.append(
+                _knowledge_graph_edge(
+                    edge_id=f"edge:mentions:{file_node_id}:{concept_node_id}",
+                    source=file_node_id,
+                    target=concept_node_id,
+                    kind="mentions",
+                    metadata={"library_id": name, "source": "filename"},
+                )
+            )
+
+    return {"nodes": nodes, "edges": edges}
+
+
+@app.get("/api/v1/knowledge/{name}/graph")
+def get_knowledge_graph(name: str) -> dict[str, Any]:
+    return build_knowledge_graph_payload(name)
 
 
 @app.get("/api/v1/knowledge/{name}/files")
@@ -1314,6 +1563,7 @@ async def unified_ws(websocket: WebSocket) -> None:
                     content=message.content,
                     language=message.language,
                     attachments=message.attachments,
+                    requested_skills=message.skills,
                     turn_id=turn_id,
                     seq=seq,
                 )

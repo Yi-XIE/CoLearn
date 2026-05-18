@@ -28,6 +28,13 @@ def test_json_state_store_roundtrip(tmp_path: Path) -> None:
     assert not (tmp_path / ".sample.json.tmp").exists()
 
 
+def test_json_state_store_default_uses_env_state_root(monkeypatch, tmp_path: Path) -> None:
+    state_root = tmp_path / ".colearn" / "state"
+    monkeypatch.setenv("COLEARN_STATE_ROOT", str(state_root))
+    store = JsonStateStore()
+    assert store.root == state_root.resolve()
+
+
 def test_project_session_memory_persist(tmp_path: Path) -> None:
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))

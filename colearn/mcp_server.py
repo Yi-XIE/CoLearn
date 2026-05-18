@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from colearn.memory.store import EventMemoryStore
+from colearn.paths import colearn_repo_root, colearn_state_root
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
@@ -21,7 +21,7 @@ mcp = FastMCP("colearn-ext")
 
 
 def _state_store() -> JsonStateStore:
-    return JsonStateStore(Path.cwd() / ".colearn" / "state")
+    return JsonStateStore(colearn_state_root())
 
 
 def _project_service() -> LearningProjectService:
@@ -37,7 +37,7 @@ def _memory_store() -> EventMemoryStore:
 
 
 def _retrieval_service() -> RetrievalService:
-    return RetrievalService(workspace=Path.cwd())
+    return RetrievalService(workspace=colearn_repo_root())
 
 
 def _session_payload(session: LearningSession) -> dict[str, Any]:

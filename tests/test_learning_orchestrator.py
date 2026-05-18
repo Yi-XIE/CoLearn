@@ -984,12 +984,15 @@ def test_runtime_v2_prompt_passes_requested_skills(monkeypatch, tmp_path) -> Non
             return "BASE PROMPT"
 
     monkeypatch.setattr(prompting, "ContextBuilder", FakeContextBuilder)
-    (tmp_path / "COLEARN.md").write_text("CoLearn local context", encoding="utf-8")
+    workspace = tmp_path / ".colearn" / "nanobot-workspace"
+    workspace.mkdir(parents=True)
+    monkeypatch.setenv("COLEARN_REPO_ROOT", str(tmp_path))
+    (tmp_path / "COLEARN.md").write_text("CoLearn root context", encoding="utf-8")
     request = LearningTurnRequest(
         session_id="sess-skills",
         user_message="Use the skill",
         requested_skills=["proof-helper"],
-        metadata={"workspace": str(tmp_path)},
+        metadata={"workspace": str(workspace)},
     )
 
     prompt = prompting.build_turn_prompt(request)
@@ -997,7 +1000,43 @@ def test_runtime_v2_prompt_passes_requested_skills(monkeypatch, tmp_path) -> Non
     assert captured["skill_names"] == ["proof-helper"]
     assert captured["channel"] == "colearn"
     assert "BASE PROMPT" in prompt
-    assert "CoLearn local context" in prompt
+    assert "CoLearn root context" in prompt
+
+
+def test_orchestrator_passes_requested_skills_to_turn_request(tmp_path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+    orchestrator.project_service.create_project("proj-skills", "Skills Project")
+    orchestrator.session_store.create_session(session_id="sess-skills-turn", project_id="proj-skills")
+
+    orchestrator.run_turn(
+        session_id="sess-skills-turn",
+        project_id="proj-skills",
+        user_message="Use a skill",
+        requested_skills=["proof-helper"],
+    )
+
+    assert executor.last_request.requested_skills == ["proof-helper"]
+
+
+def test_default_executor_workspace_uses_nanobot_workspace(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "nb-workspace"
+    monkeypatch.setenv("COLEARN_NANOBOT_WORKSPACE", str(workspace))
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(tmp_path / "state")),
+        session_store=SessionStore(state_store=JsonStateStore(tmp_path / "state")),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(tmp_path / "state")),
+        retrieval_service=FakeRetrievalService(),
+    )
+
+    assert orchestrator.executor.workspace == workspace.resolve()
 
 
 def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path) -> None:

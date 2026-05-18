@@ -32,7 +32,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                     {
                         "id": "deepseek-llm-profile",
                         "name": "DeepSeek LLM",
-                        "binding": "openai",
+                        "binding": "deepseek",
                         "base_url": "https://api.deepseek.com",
                         "api_key": _env("DEEPSEEK_API_KEY"),
                         "api_version": "",
@@ -51,7 +51,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                     {
                         "id": "siliconflow-vl-profile",
                         "name": "SiliconFlow Vision",
-                        "binding": "openai",
+                        "binding": "siliconflow",
                         "base_url": "https://api.siliconflow.cn/v1/chat/completions",
                         "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
                         "api_version": "",
@@ -76,7 +76,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                     {
                         "id": "siliconflow-embedding-profile",
                         "name": "SiliconFlow Embedding",
-                        "binding": "openai",
+                        "binding": "siliconflow",
                         "base_url": "https://api.siliconflow.cn/v1/embeddings",
                         "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
                         "api_version": "",
@@ -116,12 +116,12 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
     },
     "providers": {
         "llm": [
-            {"value": "openai", "label": "DeepSeek", "base_url": "https://api.deepseek.com"},
+            {"value": "deepseek", "label": "DeepSeek", "base_url": "https://api.deepseek.com"},
         ],
         "embedding": [
             {
-                "value": "openai",
-                "label": "OpenAI",
+                "value": "siliconflow",
+                "label": "SiliconFlow",
                 "base_url": "https://api.siliconflow.cn/v1/embeddings",
                 "default_dim": "",
             },
@@ -152,6 +152,30 @@ class SettingsStateService:
             self._state = deepcopy(raw)
         else:
             self._state = deepcopy(DEFAULT_SETTINGS_STATE)
+        self._migrate_provider_bindings()
+
+    def _migrate_provider_bindings(self) -> None:
+        services = dict((self._state.get("catalog") or {}).get("services") or {})
+        llm = dict(services.get("llm") or {})
+        for profile in list(llm.get("profiles") or []):
+            if (
+                str(profile.get("id") or "") == "deepseek-llm-profile"
+                and str(profile.get("binding") or "") == "openai"
+            ):
+                profile["binding"] = "deepseek"
+        providers = self._state.get("providers") or {}
+        for item in list((providers.get("llm") or [])):
+            if str(item.get("label") or "").lower() == "deepseek" and str(item.get("value") or "") == "openai":
+                item["value"] = "deepseek"
+        for service_name in ("llm", "embedding"):
+            service = dict(services.get(service_name) or {})
+            for profile in list(service.get("profiles") or []):
+                if str(profile.get("id") or "").startswith("siliconflow-") and str(profile.get("binding") or "") == "openai":
+                    profile["binding"] = "siliconflow"
+        for item in list((providers.get("embedding") or [])):
+            if str(item.get("label") or "").lower() in {"openai", "siliconflow"} and str(item.get("value") or "") == "openai":
+                item["value"] = "siliconflow"
+                item["label"] = "SiliconFlow"
 
     def _dump(self) -> None:
         self.state_store.write_json(SETTINGS_STATE_FILE, self._state)

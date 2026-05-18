@@ -4,8 +4,9 @@ import path from "node:path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const target = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
-  const wsTarget = target.replace(/^http/, "ws");
+  const gatewayTarget = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
+  const apiTarget = env.COLEARN_API_URL ?? "http://127.0.0.1:8001";
+  const wsTarget = gatewayTarget.replace(/^http/, "ws");
 
   return {
     plugins: [react()],
@@ -39,9 +40,9 @@ export default defineConfig(({ mode }) => {
         port: 5174,
       },
       proxy: {
-        "/webui": { target, changeOrigin: true },
-        "/api": { target, changeOrigin: true },
-        "/auth": { target, changeOrigin: true },
+        "/webui": { target: gatewayTarget, changeOrigin: true },
+        "/api": { target: apiTarget, changeOrigin: true },
+        "/auth": { target: gatewayTarget, changeOrigin: true },
         // Forward only WebSocket upgrades on ``/`` to the nanobot gateway;
         // plain HTTP GETs on ``/`` must stay with Vite so it can serve the SPA.
         // ``bypass`` returning the original URL skips the proxy for that

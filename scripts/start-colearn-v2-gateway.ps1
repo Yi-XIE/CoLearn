@@ -26,6 +26,9 @@ if (!(Test-Path "$repoRoot\.colearn\tmp")) {
 }
 
 $env:PYTHONPATH = "$repoRoot;$nanobotRoot"
+$env:COLEARN_REPO_ROOT = $repoRoot
+$env:COLEARN_STATE_ROOT = Join-Path $repoRoot ".colearn\state"
+$env:COLEARN_NANOBOT_WORKSPACE = $Workspace
 $env:TMP = "$repoRoot\.colearn\tmp"
 $env:TEMP = "$repoRoot\.colearn\tmp"
 

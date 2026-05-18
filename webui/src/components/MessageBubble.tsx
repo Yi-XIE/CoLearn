@@ -395,27 +395,12 @@ function TypingDots() {
   return (
     <div
       aria-label={t("message.assistantTyping")}
-      className="inline-flex items-center gap-2 py-1 text-[14px] font-medium text-muted-foreground/82"
+      className="py-1 text-[14px] font-medium text-muted-foreground/82"
     >
-      <span>Thinking...</span>
-      <span className="inline-flex items-center gap-1">
-        <Dot delay="0ms" />
-        <Dot delay="150ms" />
-        <Dot delay="300ms" />
-      </span>
+      <StreamingLabelSheen active className="inline-block min-w-0">
+        Thinking...
+      </StreamingLabelSheen>
     </div>
-  );
-}
-
-function Dot({ delay }: { delay: string }) {
-  return (
-    <span
-      style={{ animationDelay: delay }}
-      className={cn(
-        "inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60",
-        "animate-bounce",
-      )}
-    />
   );
 }
 

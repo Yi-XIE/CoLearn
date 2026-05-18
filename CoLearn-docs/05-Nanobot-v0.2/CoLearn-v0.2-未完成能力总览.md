@@ -1,267 +1,87 @@
-# CoLearn v0.2 未完成能力总览
+# CoLearn v0.2 Nanobot 能力状态
 
-这份文档只记录当前还没接入、但仍值得继续做的能力。每一项都按「现状 / nanobot 提供的能力 / 接入方案 / 收益」展开。
+这份文档记录 CoLearn 当前采用 nanobot v0.2 的能力状态。它不再作为历史缺口清单使用；已经落地的能力写为当前事实，仍保留的边界写在最后。
 
-## 1. AgentHook 流式接入
+## 当前已接入能力
 
-### 现状
+### 1. AgentHook 真流式
 
-CoLearn 现在在 `colearn/runtime_v2/executor.py` 里直接调用 `bot.run()`，之前没有把自定义 hook 传进去。前端能看到的 thinking、tool_call、result 事件，主要是 `colearn/api/app.py` 里对 `result.stream_events` 的二次拼装，不是 LLM 运行时真正吐出来的流式事件。
+CoLearn 的 `NanobotTurnExecutor` 已经使用继承自 `nanobot.agent.hook.AgentHook` 的 stream hook。hook 会声明 `wants_streaming() -> True`，并把 runtime 中的 content delta、reasoning delta、reasoning end、stream end、tool call 和 tool event 写入 CoLearn stream event。
 
-### nanobot 提供的能力
+WebSocket turn 执行现在会在后台线程运行 orchestrator，主协程通过线程安全队列实时发送 runtime event。最终结果阶段只补发未实时发送的 fallback event，避免重复。
 
-nanobot 的 `AgentHook` 已经把完整的 turn 生命周期暴露出来了，包括 `before_iteration`、`on_stream`、`before_execute_tools`、`on_stream_end`、`after_iteration`。它还内置了 `AgentProgressHook`，能把 runner 层事件适配成前端可消费的 progress 流。
+### 2. Model Presets 自动切换
 
-### 接入方案
+`TurnPolicy` 会按 turn mode 选择 model preset：
 
-这一项基本只动 1 个文件：`colearn/runtime_v2/executor.py`。当前已经开始实施，下一步就是把这条流接到 `app.py` 的 websocket / SSE 输出里。
+- `EXPLORE` -> `explore`
+- `ANCHOR` / `CORRECTION` / `VERIFY` -> `deep`
+- `PAUSED` -> 不设置
 
-做法是自定义一个 `CoLearnStreamHook(AgentHook)`，把 runner 的 delta、tool call、reasoning 直接写入 CoLearn 的 stream event channel，再把这个 hook 传给 `bot.run(..., hooks=[hook])`。
+slim config 已定义 `explore` 和 `deep`，当前都使用 DeepSeek provider 和 `${DEEPSEEK_MODEL}`，只调整 temperature。executor 在设置 preset 前会检查可用 preset；缺失时写 runtime warning，并降级到 `default` 或跳过，不让 turn 崩掉。
 
-```python
-from nanobot.agent.hook import AgentHook
+### 3. ContextBuilder + SkillsLoader
 
-class CoLearnStreamHook(AgentHook):
-    def __init__(self, emit):
-        self.emit = emit
+runtime prompt 由 nanobot `ContextBuilder(workspace).build_system_prompt(skill_names=..., channel="colearn")` 生成基础系统提示。CoLearn 再追加学习上下文，包括项目、turn mode、policy、retrieval focus、prompt support bundle 和用户消息。
 
-    async def on_stream(self, ctx, delta: str):
-        self.emit({"type": "thinking", "content": delta})
+WebSocket 的 `skills` 字段已经透传到 `LearningTurnRequest.requested_skills`，最终交给 `ContextBuilder` 加载对应 skills。`COLEARN.md` 会先从 nanobot workspace 读取，缺失时 fallback 到 repo root。
 
-    async def before_execute_tools(self, ctx):
-        for tool_call in ctx.tool_calls:
-            self.emit({
-                "type": "tool_call",
-                "tool_name": tool_call.name,
-                "args": tool_call.arguments,
-            })
-```
+### 4. Lightweight parallel_support
 
-然后 `executor.py` 里把 `hooks=[CoLearnStreamHook(...)]` 传下去，`app.py` 里现有的 `_prepare_runtime_stream_events()` 可以逐步退成兜底逻辑。
+本轮仍不接真正的 `SubagentManager`。当前采用轻量并行检索闭环：从 `retrieval_query_context.final_query`、critical blocker、unverified gap 中取最多 3 个去重 query，并行调用 `RetrievalService.async_build_bundle_for_source_refs()`。
 
-### 收益
+结果写入 `runtime_v2.parallel_support`，并参与 `prompt_support_bundle` 合并。代码边界保留为 `parallel_support`，后续可替换为真正的 `SubagentManager`。
 
-- 前端看到的是真实运行时流，不是事后合成结果。
-- tool call、reasoning、stream_end 的时序会更准。
-- `app.py` 里的后处理逻辑可以明显变薄。
+### 5. Dream 后台合并
 
-## 2. Model Presets 自动切换
+每轮 writeback 后，CoLearn 会把 turn 摘要追加到 nanobot memory history。达到触发间隔后，优先调用 nanobot Dream 的 `run()` 做长期记忆合并；成功后读取 `MEMORY.md` 摘要并写入 CoLearn `EventMemoryStore` 的 `profile_consolidated` 事件。
 
-### 现状
+Dream 失败不会阻断主 turn，会写 warning 和 `profile_consolidation_failed`。如果 runtime 中没有可用 Dream，则保留旧的 deterministic consolidation 作为兜底。
 
-CoLearn 现在的模型选择基本是静态的，来自 `slim config` 和运行配置。虽然 `turn_mode` 已经在 `colearn/learning/state_hooks.py` 里算出来了，但它还没有真正驱动 runtime 自动切 preset。当前已经开始把 `turn_mode -> model_preset` 的链路打通。
+### 6. Session AutoCompact
 
-### nanobot 提供的能力
+长会话超过阈值后，会优先调用 nanobot consolidator 的 `archive(old_messages)` 生成摘要；失败时使用 deterministic summary。压缩后的 system message 带结构化 metadata：
 
-nanobot 的 `AgentLoop` 原生支持 `set_model_preset(name)`，切的是当前运行中的 provider snapshot，不需要重启，也不会影响正在跑的 turn。相关 preset 定义来自 `nanobot/config/schema.py` 的 `model_presets`，并由 `nanobot/agent/model_presets.py` 负责解析和归一化。
+- `colearn_compacted=true`
+- `compacted_count`
+- `compaction_source`
 
-### 接入方案
+重复 compact 时只保留一个 compacted system summary，并保留最近 12 条消息。
 
-这项也尽量只动 2 个文件：
+### 7. MCP 只读工具
 
-- `colearn/learning/state_hooks.py`
-- `colearn/runtime_v2/executor.py`
+slim config 已声明 `colearn-ext` MCP server，命令为 `python -m colearn.mcp_server`。该 server 暴露只读工具：
 
-在 `state_hooks.py` 里，把 `turn_mode` 映射成 `model_preset`，然后穿进 `LearningTurnRequest`：
+- `list_projects`
+- `get_project`
+- `list_sessions`
+- `search_memory`
+- `retrieve_project_context`
 
-```python
-def resolve_model_preset(turn_mode: str) -> str | None:
-    return {
-        "EXPLORE": "explore",
-        "ANCHOR": "deep",
-        "CORRECTION": "deep",
-        "VERIFY": "deep",
-    }.get(turn_mode)
-```
+MCP server 使用统一 path helpers 读取 repo `.colearn/state` 和 repo workspace，避免启动 cwd 改变状态源。工具保持只读，不通过 MCP 修改 CoLearn 状态。
 
-然后把这个值放进 `TurnPolicy` 或 `LearningTurnRequest`。
+## 运行路径约定
 
-在 `executor.py` 里，拿到 request 后先设 preset，再跑 turn：
+CoLearn 通过 `colearn.paths` 统一解析路径：
 
-```python
-if request.model_preset:
-    bot._loop.set_model_preset(request.model_preset)
-result = await bot.run(prompt, session_key=..., hooks=[...])
-```
+- repo root：优先 `COLEARN_REPO_ROOT`，否则从 Python 包路径推导
+- JSON state root：优先 `COLEARN_STATE_ROOT`，否则 `.colearn/state`
+- nanobot workspace：优先 `COLEARN_NANOBOT_WORKSPACE`，否则 `.colearn/nanobot-workspace`
+- env file：repo root 下的 `.env`
 
-配套上，`slim config` 里补一个 `modelPresets` 段即可，CoLearn 不需要改整个模型体系。
+`scripts/start-colearn-v2-gateway.ps1` 会显式设置这些环境变量，让 gateway 和 MCP 子进程使用同一套状态源。
 
-当前这条链路已经开始实施，接下来主要是把 `modelPresets` 配置和 runtime 的默认 preset 名称对齐。
+## 仍保留的边界
 
-### 收益
+- 真正的 nanobot `SubagentManager` 未接入；当前只有 `parallel_support` 轻量闭环。
+- LearningState 事件抽取仍是启发式规则，不是独立状态机或 review agent。
+- `BoardFacts` 在运行时和持久化层仍是双重表示。
+- `board_version` 有 stale write 保护，但不是严格 compare-and-swap。
+- `retrieval_evidence_map` 已经目标化，但尚未把模型最终回答中的逐条引用反写成完整引用图。
+- 认证、knowledge task、settings diagnostics 仍是本地联调用轻量实现，不是生产级平台能力。
 
-- `turn_mode` 可以直接驱动模型强弱切换。
-- 探索用快模型，锚定 / 纠错 / 校验用强模型，成本更可控。
-- 不用改配置文件重启，交互会顺很多。
+## 当前维护规则
 
-## 3. ContextBuilder + SkillsLoader 复用
-
-### 现状
-
-CoLearn 现在在 `colearn/runtime_v2/prompting.py` 里自己拼 prompt，身份、工具说明、skills、记忆、上下文结构都要手工维护。
-
-### nanobot 提供的能力
-
-nanobot 的 `ContextBuilder.build_system_prompt()` 会自动组合 identity、SOUL.md、USER.md、TOOLS.md、skills 和 memory；`SkillsLoader` 还能自动扫描 workspace 和内置 skills 目录，把 `SKILL.md` 注入到系统 prompt。
-
-### 接入方案
-
-主要改 `colearn/runtime_v2/prompting.py`。
-
-先用 nanobot 的 `ContextBuilder` 生成基础 system prompt，再叠加 CoLearn 的学习上下文：
-
-```python
-from nanobot.agent.context import ContextBuilder
-
-def build_turn_prompt(request, workspace):
-    base = ContextBuilder(workspace).build_system_prompt()
-    learning_lines = [
-        f"Project: {request.project_title}",
-        f"Turn mode: {request.turn_mode}",
-        ...
-    ]
-    return base + "\n\n## Learning Context\n" + "\n".join(learning_lines)
-```
-
-如果后续要让 CoLearn 也吃自己的说明文件，可以在 workspace 里补一份 `COLEARN.md`，不需要再手搓整套 prompt 模板。
-
-### 收益
-
-- prompt 结构更统一。
-- identity、skills、memory 不用 CoLearn 自己重复维护。
-- 后续接 skill 或改说明文件，成本更低。
-
-## 4. SubagentManager 并行化
-
-### 现状
-
-CoLearn 现在还是串行执行：先跑主 LLM，再按需调用 `memory`、`lightrag` 等工具。并行检索、并行验证、独立 review agent 都还没正式接上。
-
-### nanobot 提供的能力
-
-nanobot 的 `SubagentManager` 可以派生独立子 agent，每个子 agent 都能有自己的 provider、model、tool registry 和 `max_iterations`。它适合做并行检索、并行验证、后台追问这类任务。
-
-### 接入方案
-
-这项更像中期优化，建议先把它落在 `colearn/app/learning_orchestrator.py` 或工具层封装里，而不是直接塞进主 prompt 流程。
-
-一个比较稳的切法是先把 `lightrag` 扩成并行检索工具，再考虑真正引入子 agent：
-
-```python
-async def execute(self, questions: list[str]):
-    async with asyncio.TaskGroup() as tg:
-        tasks = [tg.create_task(retrieve_one(q)) for q in questions[:3]]
-    return [t.result() for t in tasks]
-```
-
-如果要更彻底，再把 review validator 或 web search 拆成子 agent，让主 agent 只负责汇总结果。
-
-### 收益
-
-- 检索和验证可以并行，延迟更低。
-- 后续能自然支持多角度 review。
-- 主 agent 负担更小，推理路径也更清楚。
-
-## 5. Dream 后台合并
-
-### 现状
-
-CoLearn 的 `EventMemoryStore` 现在是 append-only，只会往里加 turn 事件，不会自动把多轮记忆压缩、归纳成长期 profile。
-
-### nanobot 提供的能力
-
-nanobot 的 `Dream` 能定期读取 MEMORY.md，把零散记忆合并成更稳定的结构化总结。它更适合做长期记忆、阶段性画像和历史压缩。
-
-### 接入方案
-
-这项可以先不直接抄 nanobot 的 cron，而是在 `colearn/app/learning_orchestrator.py` 里加一个轻量触发：
-
-```python
-if len(self.memory_store.list_events()) % 20 == 0:
-    summary = self._dream_consolidate()
-    self.memory_store.write_profile(summary)
-```
-
-如果后面要更标准化，再考虑把 `EventMemoryStore` 对接到类似 `Dream` 的合并器。
-
-### 收益
-
-- 长期记忆不会无限膨胀。
-- 学习者画像更稳定。
-- 后续检索会更像“提炼后的经验”，而不是原始流水账。
-
-## 6. Session AutoCompact
-
-### 现状
-
-当前 `LearningSession.messages` 会持续增长，没有自动压缩机制。现在主要靠 `continuation_prompt` 和 writeback 维持上下文，但长会话还是会越来越长。
-
-### nanobot 提供的能力
-
-nanobot 的 `AutoCompact` 会在会话超过阈值后自动压缩历史消息，把旧上下文替换成摘要，避免 context window 被撑爆。
-
-### 接入方案
-
-这项适合放在 `colearn/app/learning_orchestrator.py`。
-
-可以先做一个很轻的版本，只压缩旧消息的一半：
-
-```python
-if len(session.messages) > MAX_HISTORY_MESSAGES:
-    old = session.messages[: len(session.messages) // 2]
-    summary = self._compact_messages(old)
-    session.messages = [{"role": "system", "content": summary}] + session.messages[len(session.messages)//2:]
-```
-
-后面如果要更完整，再考虑接 nanobot 的 consolidator 逻辑。
-
-### 收益
-
-- 长会话更稳，不容易顶到 context 上限。
-- token 成本更可控。
-- 用户不会因为历史太长而明显变慢。
-
-## 7. MCP 工具接入
-
-### 现状
-
-CoLearn 现在的工具是硬编码的，主要是 `memory` 和 `lightrag`。新增工具就要改代码注册，扩展性还不够好。
-
-### nanobot 提供的能力
-
-nanobot 的工具系统原生支持 MCP server 动态接入，能把外部工具按协议注册进 registry，后续 agent 就能直接调用。
-
-### 接入方案
-
-建议先在 `slim config` 里声明 MCP server，再在 `colearn/runtime_v2/tooling.py` 里保留 registry 接口。
-
-```json
-{
-  "tools": {
-    "mcpServers": {
-      "colearn-ext": {
-        "command": "python",
-        "args": ["-m", "colearn.mcp_server"]
-      }
-    }
-  }
-}
-```
-
-然后再补一个 `colearn/mcp_server.py`，把项目查询、知识检索、外部扩展能力暴露出去。
-
-### 收益
-
-- 工具扩展不再依赖硬编码注册。
-- 第三方能力可以按协议接入。
-- 后续补知识源、图表、辅助验证工具会更顺。
-
-## 接入优先级
-
-1. `AgentHook`
-1. `Model Presets`
-1. `ContextBuilder + SkillsLoader`
-1. `Session AutoCompact`
-1. `Dream`
-1. `SubagentManager`
-1. `MCP`
+- 这份文档只记录当前事实和仍存在的工程边界。
+- 已落地能力不要再写成待接入。
+- 如果后续接入真正 `SubagentManager`、强类型 Board 存储、严格版本写入或完整引用图，需要同步更新本文档和顶层组装路径文档。

@@ -2,8 +2,12 @@ import type {
   ChatSummary,
   KnowledgeBaseSummary,
   KnowledgeFileSummary,
+  KnowledgeGraphPayload,
   KnowledgeTaskResult,
   LearningSupportPayload,
+  MemoryDocPayload,
+  MemoryDocumentName,
+  MemoryRefreshPayload,
   MemorySummaryPayload,
   ProviderSettingsUpdate,
   SettingsPayload,
@@ -243,6 +247,17 @@ export async function listKnowledgeFiles(
   return body.files;
 }
 
+export async function fetchKnowledgeGraph(
+  token: string,
+  id: string,
+  base: string = "",
+): Promise<KnowledgeGraphPayload> {
+  return request<KnowledgeGraphPayload>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(id)}/graph`,
+    token,
+  );
+}
+
 export async function createKnowledgeBase(
   token: string,
   params: { name: string; files: File[]; ragProvider?: string },
@@ -291,6 +306,42 @@ export async function fetchMemorySummary(
   base: string = "",
 ): Promise<MemorySummaryPayload> {
   return request<MemorySummaryPayload>(`${base}/api/v1/memory/summary`, token);
+}
+
+export async function updateMemoryDocument(
+  token: string,
+  file: MemoryDocumentName,
+  content: string,
+  base: string = "",
+): Promise<MemoryDocPayload> {
+  return request<MemoryDocPayload>(`${base}/api/v1/memory`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file, content }),
+  });
+}
+
+export async function refreshMemoryDocument(
+  token: string,
+  base: string = "",
+): Promise<MemoryRefreshPayload> {
+  return request<MemoryRefreshPayload>(`${base}/api/v1/memory/refresh`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+}
+
+export async function clearMemoryDocument(
+  token: string,
+  file: MemoryDocumentName,
+  base: string = "",
+): Promise<MemoryDocPayload> {
+  return request<MemoryDocPayload>(`${base}/api/v1/memory/clear`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file }),
+  });
 }
 
 export async function listSkills(

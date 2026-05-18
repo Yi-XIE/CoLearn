@@ -64,23 +64,23 @@ function shouldShowThinkingPlaceholder(messages: UIMessage[], isStreaming: boole
   return true;
 }
 
+function thinkingPlaceholderAnchorIndex(units: DisplayUnit[]): number {
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    const unit = units[i];
+    if (unit.type === "single" && unit.message.role === "user") return i;
+  }
+  return -1;
+}
+
 export function ThreadMessages({ messages, isStreaming = false }: ThreadMessagesProps) {
   const units = buildDisplayUnits(messages);
   const showThinkingPlaceholder = shouldShowThinkingPlaceholder(messages, isStreaming);
+  const placeholderAfterIndex = showThinkingPlaceholder
+    ? thinkingPlaceholderAnchorIndex(units)
+    : -1;
 
   return (
     <div className="flex w-full flex-col">
-      {showThinkingPlaceholder ? (
-        <MessageBubble
-          message={{
-            id: "assistant-thinking-placeholder",
-            role: "assistant",
-            content: "",
-            isStreaming: true,
-            createdAt: Date.now(),
-          }}
-        />
-      ) : null}
       {units.map((unit, index) => {
         const prev = units[index - 1];
         const marginTop =
@@ -111,6 +111,19 @@ export function ThreadMessages({ messages, isStreaming = false }: ThreadMessages
                 }
               />
             )}
+            {placeholderAfterIndex === index ? (
+              <div className="mt-3">
+                <MessageBubble
+                  message={{
+                    id: "assistant-thinking-placeholder",
+                    role: "assistant",
+                    content: "",
+                    isStreaming: true,
+                    createdAt: Date.now(),
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         );
       })}
