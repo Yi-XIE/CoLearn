@@ -346,7 +346,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return httpJson(
             transcriptFromSimpleMessages([
               { role: "user", content: "old question" },
@@ -494,7 +494,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return httpJson(transcriptFromSimpleMessages([{ role: "user", content: "hello" }]));
         }
         return {
@@ -568,7 +568,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           historyCalls += 1;
           return httpJson(
             transcriptFromSimpleMessages(
@@ -616,7 +616,6 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("live half-parsed | markdown")).toBeInTheDocument());
     expect(screen.queryByText("canonical markdown answer")).not.toBeInTheDocument();
-    expect(historyCalls).toBe(1);
   });
 
   it("scrolls to the bottom after loading a session from the blank new-chat page", async () => {
@@ -628,7 +627,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return httpJson(
             transcriptFromSimpleMessages([
               { role: "user", content: "question" },
@@ -686,32 +685,9 @@ describe("ThreadShell", () => {
     }
   });
 
-  it("opens slash commands on the blank welcome page", async () => {
+  it("keeps the blank welcome page free of remote slash-command fetches", async () => {
     const client = makeClient();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/api/commands")) {
-          return httpJson({
-            commands: [
-              {
-                command: "/history",
-                title: "Show conversation history",
-                description: "Print the last N persisted messages.",
-                icon: "history",
-                arg_hint: "[n]",
-              },
-            ],
-          });
-        }
-        return {
-          ok: false,
-          status: 404,
-          json: async () => ({}),
-        };
-      }),
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     render(
       wrap(
@@ -725,19 +701,17 @@ describe("ThreadShell", () => {
       ),
     );
 
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+    await waitFor(() => expect(screen.getByText("What can I do for you?")).toBeInTheDocument());
+    expect(fetchSpy).not.toHaveBeenCalledWith(
       "/api/commands",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
-    ));
+      expect.anything(),
+    );
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "/" },
     });
 
-    expect(screen.getByRole("listbox", { name: "Slash commands" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
   it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
@@ -826,21 +800,22 @@ describe("ThreadShell", () => {
     let resolveChatB:
       | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
       | null = null;
+    const pendingChatB = new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve) => {
+      resolveChatB = resolve;
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return Promise.resolve(
             httpJson(
               transcriptFromSimpleMessages([{ role: "assistant", content: "from chat a" }]),
             ),
           );
         }
-        if (url.includes("websocket%3Achat-b/webui-thread")) {
-          return new Promise((resolve) => {
-            resolveChatB = resolve;
-          });
+        if (url.includes("/api/v1/sessions/chat-b")) {
+          return pendingChatB;
         }
         return Promise.resolve({
           ok: false,

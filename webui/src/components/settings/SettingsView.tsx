@@ -32,7 +32,7 @@ import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-const CORE_PROVIDER_NAMES = new Set(["openai", "openrouter", "custom"]);
+const CORE_PROVIDER_NAMES = new Set(["openai", "openrouter", "custom", "deepseek", "siliconflow"]);
 
 function isCoreProvider(
   provider: { name: string; configured: boolean },

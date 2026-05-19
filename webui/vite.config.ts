@@ -27,11 +27,11 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "127.0.0.1",
-      port: 5173,
+      port: 5191,
       strictPort: true,
       hmr: {
         host: "127.0.0.1",
-        port: 5174,
+        port: 5192,
       },
       proxy: {
         // Single gateway: all traffic goes to CoLearn FastAPI which proxies
