@@ -10,6 +10,10 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+from colearn.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 DEFAULT_TOP_K = 5
 DEFAULT_BASE_URL = "http://127.0.0.1:9621"
@@ -350,7 +354,11 @@ class HttpLightRAGBackend:
             raise RuntimeError(f"LightRAG unavailable: {exc.reason}") from exc
         if not body.strip():
             return {}
-        parsed = json.loads(body)
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError as exc:
+            logger.error("LightRAG returned invalid JSON: %s", exc)
+            return {}
         return parsed if isinstance(parsed, dict) else {}
 
 

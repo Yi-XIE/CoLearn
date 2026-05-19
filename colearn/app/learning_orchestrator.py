@@ -9,6 +9,8 @@ from time import time
 from typing import Any, Callable
 from uuid import uuid4
 
+from colearn.logging_config import get_logger
+
 from colearn.compression import ProductCompressionBridge, ProductCompressionResult, RuntimeCompressionBridge
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.state_hooks import (
@@ -33,6 +35,15 @@ from colearn.runtime_v2 import build_learning_closure
 from colearn.sessions.store import LearningSession, SessionStore
 from .source_preflight import SourceReadinessPreflight
 
+logger = get_logger(__name__)
+
+
+def _reject_sync_inside_event_loop(caller: str) -> None:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(f"{caller} cannot run inside an active event loop.")
 
 class BackgroundTurnFinalizer:
     def __init__(
@@ -43,6 +54,7 @@ class BackgroundTurnFinalizer:
     ) -> None:
         self.product_compression = product_compression
         self.on_result = on_result
+        self._threads: list[Thread] = []
 
     def schedule(
         self,
@@ -72,7 +84,13 @@ class BackgroundTurnFinalizer:
             },
             daemon=True,
         )
+        self._threads.append(worker)
         worker.start()
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        for t in self._threads:
+            t.join(timeout=timeout)
+        self._threads = [t for t in self._threads if t.is_alive()]
 
     def _run(
         self,
@@ -616,6 +634,7 @@ class LearningOrchestrator:
                 "results": [],
             }
         try:
+            _reject_sync_inside_event_loop("_build_parallel_support")
             results = asyncio.run(
                 self._build_parallel_support_async(
                     project=project,
@@ -1111,8 +1130,8 @@ class LearningOrchestrator:
                 summary = self._run_async_or_value(consolidator.archive(messages))
                 if summary:
                     return str(summary)[: self.SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS], "nanobot_consolidator"
-            except Exception:
-                pass
+            except (RuntimeError, TypeError, ValueError) as exc:
+                logger.warning("consolidator.archive failed: %s", exc)
         return self._build_compaction_summary(messages), "fallback"
 
     def _runtime_loop(self):
@@ -1121,7 +1140,8 @@ class LearningOrchestrator:
             return None
         try:
             bot = get_bot()
-        except Exception:
+        except (RuntimeError, AttributeError, TypeError) as exc:
+            logger.debug("_runtime_loop: get_bot failed: %s", exc)
             return None
         return getattr(bot, "_loop", None)
 

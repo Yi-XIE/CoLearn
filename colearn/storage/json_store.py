@@ -8,7 +8,10 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from colearn.logging_config import get_logger
 from colearn.paths import colearn_state_root
+
+logger = get_logger(__name__)
 
 
 _PATH_LOCKS: dict[str, RLock] = {}
@@ -35,7 +38,8 @@ class JsonStateStore:
             return default
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("read_json failed for %s: %s", path, exc)
             return default
 
     def write_json(self, name: str, value: Any) -> None:

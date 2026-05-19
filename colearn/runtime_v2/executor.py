@@ -11,6 +11,7 @@ from nanobot.agent.hook import AgentHook
 
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.turn_contract import LearningTurnRequest
+from colearn.logging_config import get_logger
 from colearn.memory.store import EventMemoryStore
 from colearn.retrieval.service import RetrievalService
 
@@ -18,6 +19,16 @@ from .profile import COLEARN_NANOBOT_SLIM_CONFIG
 from .prompting import build_turn_prompt
 from .result_bridge import normalize_learning_turn_result
 from .tooling import install_colearn_tools
+
+logger = get_logger(__name__)
+
+
+def _reject_sync_inside_event_loop(caller: str) -> None:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(f"{caller} cannot run inside an active event loop.")
 
 
 @dataclass
@@ -86,6 +97,7 @@ class NanobotTurnExecutor:
                     )
 
     def run_turn(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+        _reject_sync_inside_event_loop("NanobotTurnExecutor.run_turn")
         final_text, messages, tools_used = asyncio.run(self._run_turn_async(request=request))
         learning_result = {
             "tool_events": [{"tool_name": name} for name in tools_used],

@@ -322,7 +322,7 @@ async def _run_real_websocket_lifecycle_checks() -> None:
     session.active_turn_id = "ws-cancel-turn"
     session.active_turns = [{"turn_id": "ws-cancel-turn"}]
     app_module.session_store.save_session(session)
-    app_module.turn_index["ws-cancel-turn"] = {"session_id": "ws-cancel-session", "project_id": "ws-project"}
+    app_module.turn_cache.start_turn("ws-cancel-turn", session_id="ws-cancel-session", project_id="ws-project")
 
     async with anyio.create_task_group() as task_group:
         ws = ASGIWebSocketClient(app, task_group)
