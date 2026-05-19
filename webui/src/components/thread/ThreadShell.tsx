@@ -7,8 +7,8 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { fetchLearningSupport, listSlashCommands } from "@/lib/api";
-import type { ChatSummary, LearningSupportPayload, SlashCommand, UIMessage } from "@/lib/types";
+import { fetchLearningSupport } from "@/lib/api";
+import type { ChatSummary, LearningSupportPayload, UIMessage } from "@/lib/types";
 import { projectThreadMessages } from "@/lib/thread-display";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
@@ -74,7 +74,6 @@ export function ThreadShell({
   } = useSessionHistory(historyKey);
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
-  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [learningSupport, setLearningSupport] = useState<LearningSupportPayload | null>(null);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -229,20 +228,7 @@ export function ThreadShell({
     setBooting(false);
   }, [chatId, send]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const commands = await listSlashCommands(token);
-        if (!cancelled) setSlashCommands(commands);
-      } catch {
-        if (!cancelled) setSlashCommands([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  const slashCommands = useMemo(() => [], []);
 
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendImage[]) => {

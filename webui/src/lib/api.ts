@@ -57,23 +57,24 @@ export async function listSessions(
   base: string = "",
 ): Promise<ChatSummary[]> {
   type Row = {
-    key: string;
-    created_at: string | null;
-    updated_at: string | null;
+    id?: string;
+    session_id?: string;
+    created_at?: string | null;
+    updated_at?: string | null;
     title?: string;
-    preview?: string;
+    last_message?: string;
   };
   const body = await request<{ sessions: Row[] }>(
-    `${base}/api/sessions`,
+    `${base}/api/v1/sessions`,
     token,
   );
   return body.sessions.map((s) => ({
-    key: s.key,
-    ...splitKey(s.key),
-    createdAt: s.created_at,
-    updatedAt: s.updated_at,
+    key: s.session_id ?? s.id ?? "",
+    ...splitKey(s.session_id ?? s.id ?? ""),
+    createdAt: s.created_at ?? null,
+    updatedAt: s.updated_at ?? null,
     title: s.title ?? "",
-    preview: s.preview ?? "",
+    preview: s.last_message ?? "",
   }));
 }
 
@@ -83,7 +84,7 @@ export async function fetchWebuiThread(
   key: string,
   base: string = "",
 ): Promise<WebuiThreadPersistedPayload | null> {
-  const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread`;
+  const url = `${base}/api/v1/sessions/${encodeURIComponent(splitKey(key).chatId || key)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
@@ -147,7 +148,7 @@ export async function deleteSession(
   base: string = "",
 ): Promise<boolean> {
   const body = await request<{ deleted: boolean }>(
-    `${base}/api/sessions/${encodeURIComponent(key)}/delete`,
+    `${base}/api/v1/sessions/${encodeURIComponent(splitKey(key).chatId || key)}`,
     token,
   );
   return body.deleted;
@@ -157,30 +158,16 @@ export async function fetchSettings(
   token: string,
   base: string = "",
 ): Promise<SettingsPayload> {
-  return request<SettingsPayload>(`${base}/api/settings`, token);
+  return request<SettingsPayload>(`${base}/api/v1/settings`, token);
 }
 
 export async function listSlashCommands(
   token: string,
   base: string = "",
 ): Promise<SlashCommand[]> {
-  type Row = {
-    command: string;
-    title: string;
-    description: string;
-    icon: string;
-    arg_hint?: string;
-  };
-  const body = await request<{ commands: Row[] }>(`${base}/api/commands`, token);
-  return body.commands
-    .filter((command) => !["/stop", "/restart"].includes(command.command))
-    .map((command) => ({
-      command: command.command,
-      title: command.title,
-      description: command.description,
-      icon: command.icon,
-      argHint: command.arg_hint ?? "",
-    }));
+  void token;
+  void base;
+  return [];
 }
 
 export async function updateSettings(
@@ -191,7 +178,7 @@ export async function updateSettings(
   const query = new URLSearchParams();
   if (update.model !== undefined) query.set("model", update.model);
   if (update.provider !== undefined) query.set("provider", update.provider);
-  return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
+  return request<SettingsPayload>(`${base}/api/v1/settings/update?${query}`, token);
 }
 
 export async function updateProviderSettings(
@@ -204,7 +191,7 @@ export async function updateProviderSettings(
   if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
   if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
   return request<SettingsPayload>(
-    `${base}/api/settings/provider/update?${query}`,
+    `${base}/api/v1/settings/provider/update?${query}`,
     token,
   );
 }
@@ -219,7 +206,7 @@ export async function updateWebSearchSettings(
   if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
   if (update.baseUrl !== undefined) query.set("base_url", update.baseUrl);
   return request<SettingsPayload>(
-    `${base}/api/settings/web-search/update?${query}`,
+    `${base}/api/v1/settings/web-search/update?${query}`,
     token,
   );
 }

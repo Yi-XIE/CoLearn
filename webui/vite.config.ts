@@ -4,9 +4,7 @@ import path from "node:path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const gatewayTarget = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
   const apiTarget = env.COLEARN_API_URL ?? "http://127.0.0.1:8001";
-  const wsTarget = gatewayTarget.replace(/^http/, "ws");
 
   return {
     plugins: [react()],
@@ -29,32 +27,14 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "127.0.0.1",
-      port: 5173,
+      port: 5191,
       strictPort: true,
-      // Move Vite's HMR socket to a dedicated port so it doesn't collide with
-      // the ``/`` proxy below (Vite HMR and the nanobot ws upgrade both sit on
-      // the root path, which triggers spurious write-after-end errors as each
-      // side tries to close the other's socket).
       hmr: {
         host: "127.0.0.1",
-        port: 5174,
+        port: 5192,
       },
       proxy: {
-        "/webui": { target: gatewayTarget, changeOrigin: true },
         "/api": { target: apiTarget, changeOrigin: true },
-        "/auth": { target: gatewayTarget, changeOrigin: true },
-        // Forward only WebSocket upgrades on ``/`` to the nanobot gateway;
-        // plain HTTP GETs on ``/`` must stay with Vite so it can serve the SPA.
-        // ``bypass`` returning the original URL skips the proxy for that
-        // request; returning undefined lets the proxy (and ws upgrade handler)
-        // take it.
-        "/": {
-          target: wsTarget,
-          ws: true,
-          changeOrigin: true,
-          bypass: (req) =>
-            req.headers.upgrade === "websocket" ? undefined : req.url,
-        },
       },
     },
     test: {

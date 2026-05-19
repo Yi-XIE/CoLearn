@@ -26,7 +26,7 @@ describe("webui API helpers", () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread",
+      "/api/v1/sessions/chat-1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -38,7 +38,7 @@ describe("webui API helpers", () => {
     await deleteSession("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/delete",
+      "/api/v1/sessions/chat-1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -88,7 +88,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model=openrouter%2Ftest&provider=openrouter",
+      "/api/v1/settings/update?model=openrouter%2Ftest&provider=openrouter",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -103,7 +103,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+      "/api/v1/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -117,7 +117,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com",
+      "/api/v1/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -130,7 +130,7 @@ describe("webui API helpers", () => {
       json: async () => ({
         sessions: [
           {
-            key: "websocket:chat-1",
+            session_id: "websocket:chat-1",
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
             title: "优化 WebUI 标题",
@@ -148,48 +148,8 @@ describe("webui API helpers", () => {
     ]);
   });
 
-  it("maps slash command metadata from the commands endpoint", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        commands: [
-          {
-            command: "/stop",
-            title: "Stop current task",
-            description: "Cancel the active task.",
-            icon: "square",
-          },
-          {
-            command: "/restart",
-            title: "Restart nanobot",
-            description: "Restart the bot process.",
-            icon: "rotate-cw",
-          },
-          {
-            command: "/history",
-            title: "Show conversation history",
-            description: "Print the last N messages.",
-            icon: "history",
-            arg_hint: "[n]",
-          },
-        ],
-      }),
-    } as Response);
-
-    await expect(listSlashCommands("tok")).resolves.toEqual([
-      {
-        command: "/history",
-        title: "Show conversation history",
-        description: "Print the last N messages.",
-        icon: "history",
-        argHint: "[n]",
-      },
-    ]);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/commands",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
-    );
+  it("keeps slash commands empty when the backend does not expose them", async () => {
+    await expect(listSlashCommands("tok")).resolves.toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -78,6 +78,29 @@ interface PendingNewChat {
   timer: ReturnType<typeof setTimeout>;
 }
 
+export interface NanobotClientLike {
+  readonly status: ConnectionStatus;
+  readonly defaultChatId: string | null;
+  updateUrl(url: string): void;
+  onStatus(handler: StatusHandler): Unsubscribe;
+  onRuntimeModelUpdate(handler: RuntimeModelHandler): Unsubscribe;
+  onSessionUpdate(handler: SessionUpdateHandler): Unsubscribe;
+  onError(handler: ErrorHandler): Unsubscribe;
+  getRunStartedAt(chatId: string): number | null;
+  getGoalState(chatId: string): GoalStateWsPayload | undefined;
+  onChat(chatId: string, handler: EventHandler): Unsubscribe;
+  connect(): void;
+  close(): void;
+  newChat(timeoutMs?: number): Promise<string>;
+  attach(chatId: string): void;
+  sendMessage(
+    chatId: string,
+    content: string,
+    media?: OutboundMedia[],
+    options?: { imageGeneration?: OutboundImageGeneration },
+  ): void;
+}
+
 export interface NanobotClientOptions {
   url: string;
   reconnect?: boolean;
@@ -96,7 +119,7 @@ export interface NanobotClientOptions {
  * ``chat_id``, and this class fans those events out to handlers registered
  * per chat. Reconnects are transparent and re-attach every known chat_id.
  */
-export class NanobotClient {
+export class NanobotClient implements NanobotClientLike {
   private socket: WebSocket | null = null;
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
@@ -478,5 +501,89 @@ export class NanobotClient {
       // Send failure will materialize as a close; queue the frame for retry.
       this.sendQueue.push(frame);
     }
+  }
+}
+
+export class OfflineNanobotClient implements NanobotClientLike {
+  private status_: ConnectionStatus = "closed";
+  private statusHandlers = new Set<StatusHandler>();
+  private runtimeModelHandlers = new Set<RuntimeModelHandler>();
+  private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
+  private errorHandlers = new Set<ErrorHandler>();
+
+  get status(): ConnectionStatus {
+    return this.status_;
+  }
+
+  get defaultChatId(): string | null {
+    return null;
+  }
+
+  updateUrl(_url: string): void {}
+
+  onStatus(handler: StatusHandler): Unsubscribe {
+    this.statusHandlers.add(handler);
+    handler(this.status_);
+    return () => {
+      this.statusHandlers.delete(handler);
+    };
+  }
+
+  onRuntimeModelUpdate(handler: RuntimeModelHandler): Unsubscribe {
+    this.runtimeModelHandlers.add(handler);
+    return () => {
+      this.runtimeModelHandlers.delete(handler);
+    };
+  }
+
+  onSessionUpdate(handler: SessionUpdateHandler): Unsubscribe {
+    this.sessionUpdateHandlers.add(handler);
+    return () => {
+      this.sessionUpdateHandlers.delete(handler);
+    };
+  }
+
+  onError(handler: ErrorHandler): Unsubscribe {
+    this.errorHandlers.add(handler);
+    return () => {
+      this.errorHandlers.delete(handler);
+    };
+  }
+
+  getRunStartedAt(_chatId: string): number | null {
+    return null;
+  }
+
+  getGoalState(_chatId: string): GoalStateWsPayload | undefined {
+    return undefined;
+  }
+
+  onChat(_chatId: string, _handler: EventHandler): Unsubscribe {
+    return () => {};
+  }
+
+  connect(): void {}
+
+  close(): void {
+    this.setStatus("closed");
+  }
+
+  async newChat(): Promise<string> {
+    throw new Error("Chat is unavailable without gateway");
+  }
+
+  attach(_chatId: string): void {}
+
+  sendMessage(
+    _chatId: string,
+    _content: string,
+    _media?: OutboundMedia[],
+    _options?: { imageGeneration?: OutboundImageGeneration },
+  ): void {}
+
+  private setStatus(status: ConnectionStatus): void {
+    if (this.status_ === status) return;
+    this.status_ = status;
+    for (const handler of this.statusHandlers) handler(status);
   }
 }

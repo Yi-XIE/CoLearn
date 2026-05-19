@@ -8,29 +8,16 @@ import { Sidebar } from "@/components/Sidebar";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useSessions } from "@/hooks/useSessions";
 import { useTheme } from "@/hooks/useTheme";
-import {
-  clearSavedSecret,
-  deriveWsUrl,
-  fetchBootstrap,
-  loadSavedSecret,
-  saveSecret,
-} from "@/lib/bootstrap";
-import { NanobotClient } from "@/lib/nanobot-client";
+import { OfflineNanobotClient } from "@/lib/nanobot-client";
 import type { ChatSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 
 type BootState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "auth"; failed?: boolean }
   | {
-      status: "ready";
-      client: NanobotClient;
+      client: OfflineNanobotClient;
       token: string;
       modelName: string | null;
     };
@@ -42,53 +29,6 @@ const BRAND_NAME = "CoLearn";
 const SETTINGS_TITLE = "设置";
 
 type ShellView = "chat" | "knowledge" | "memory" | "skills" | "settings";
-
-function AuthForm({
-  failed,
-  onSecret,
-}: {
-  failed: boolean;
-  onSecret: (secret: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [value, setValue] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const secret = value.trim();
-    if (!secret) return;
-    setSubmitting(true);
-    onSecret(secret);
-  };
-
-  return (
-    <div className="flex h-full w-full items-center justify-center px-6">
-      <form onSubmit={handleSubmit} className="flex w-full max-w-sm flex-col gap-4">
-        <div className="flex flex-col items-center gap-1 text-center">
-          <p className="text-lg font-semibold">{t("app.auth.title")}</p>
-          <p className="text-sm text-muted-foreground">{t("app.auth.hint")}</p>
-        </div>
-        {failed ? (
-          <p className="text-center text-sm text-destructive">
-            {t("app.auth.invalid")}
-          </p>
-        ) : null}
-        <Input
-          type="password"
-          placeholder={t("app.auth.placeholder")}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          disabled={submitting}
-          autoFocus
-        />
-        <Button type="submit" className="w-full" disabled={!value.trim() || submitting}>
-          {t("app.auth.submit")}
-        </Button>
-      </form>
-    </div>
-  );
-}
 
 function readSidebarOpen(): boolean {
   if (typeof window === "undefined") return true;
@@ -102,44 +42,22 @@ function readSidebarOpen(): boolean {
 }
 
 export default function App() {
-  const { t } = useTranslation();
-  const [state, setState] = useState<BootState>({ status: "loading" });
+  const [state, setState] = useState<BootState>(() => ({
+    client: new OfflineNanobotClient(),
+    token: "",
+    modelName: null,
+  }));
 
-  const bootstrapWithSecret = useCallback((secret: string) => {
+  useEffect(() => {
     let cancelled = false;
     (async () => {
-      setState({ status: "loading" });
       try {
-        const boot = await fetchBootstrap("", secret);
+        const boot = await fetch("/api/v1/system/status", { credentials: "same-origin" });
+        const status = boot.ok ? await boot.json() : null;
         if (cancelled) return;
-        if (secret) saveSecret(secret);
-        const url = deriveWsUrl(boot.ws_path, boot.token);
-        const client = new NanobotClient({
-          url,
-          onReauth: async () => {
-            try {
-              const refreshed = await fetchBootstrap("", secret);
-              return deriveWsUrl(refreshed.ws_path, refreshed.token);
-            } catch {
-              return null;
-            }
-          },
-        });
-        client.connect();
-        setState({
-          status: "ready",
-          client,
-          token: boot.token,
-          modelName: boot.model_name ?? null,
-        });
-      } catch (e) {
+        setState((current) => ({ ...current, modelName: status?.llm?.model ?? null }));
+      } catch {
         if (cancelled) return;
-        const msg = (e as Error).message;
-        if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
-          setState({ status: "auth", failed: true });
-        } else {
-          setState({ status: "error", message: msg });
-        }
       }
     })();
     return () => {
@@ -147,58 +65,13 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const saved = loadSavedSecret();
-    return bootstrapWithSecret(saved);
-  }, [bootstrapWithSecret]);
-
-  if (state.status === "loading") {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/60" />
-            </span>
-            {t("app.loading.connecting")}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (state.status === "auth") {
-    return <AuthForm failed={!!state.failed} onSecret={(s) => bootstrapWithSecret(s)} />;
-  }
-
-  if (state.status === "error") {
-    return (
-      <div className="flex h-full w-full items-center justify-center px-4 text-center">
-        <div className="flex max-w-md flex-col items-center gap-3">
-          <p className="text-lg font-semibold">{t("app.error.title")}</p>
-          <p className="text-sm text-muted-foreground">{state.message}</p>
-          <p className="text-xs text-muted-foreground">{t("app.error.gatewayHint")}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const handleModelNameChange = (modelName: string | null) => {
-    setState((current) =>
-      current.status === "ready" ? { ...current, modelName } : current,
-    );
-  };
-
-  const handleLogout = () => {
-    if (state.status === "ready") state.client.close();
-    clearSavedSecret();
-    setState({ status: "auth" });
-  };
+  const handleModelNameChange = useCallback((modelName: string | null) => {
+    setState((current) => ({ ...current, modelName }));
+  }, []);
 
   return (
     <ClientProvider client={state.client} token={state.token} modelName={state.modelName}>
-      <Shell onModelNameChange={handleModelNameChange} onLogout={handleLogout} />
+      <Shell onModelNameChange={handleModelNameChange} onLogout={undefined} />
     </ClientProvider>
   );
 }
@@ -208,10 +81,11 @@ function Shell({
   onLogout,
 }: {
   onModelNameChange: (modelName: string | null) => void;
-  onLogout: () => void;
+  onLogout?: () => void;
 }) {
   const { t } = useTranslation();
   const { client, token } = useClient();
+  void onLogout;
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
   const [activeKey, setActiveKey] = useState<string | null>(null);
