@@ -287,15 +287,12 @@ def test_api_state_services_reset_without_cross_test_leakage() -> None:
     app_module = importlib.import_module("colearn.api.app")
     app_module.settings_service.update_ui(theme="light", language="en")
     app_module.memory_doc_service.update("summary", "leak")
-    app_module.skill_service.save_skill("leak", {"description": "", "content": "", "tags": []})
 
     app_module.settings_service.reset()
     app_module.memory_doc_service.reset()
-    app_module.skill_service.reset()
 
     assert app_module.settings_service.settings()["ui"]["theme"] == "dark"
     assert app_module.memory_doc_service.snapshot()["summary"] == ""
-    assert app_module.skill_service.list_skills() == []
 
 
 async def _run_real_websocket_lifecycle_checks() -> None:

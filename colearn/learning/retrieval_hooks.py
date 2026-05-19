@@ -26,6 +26,32 @@ MODE_SUPPORT_PRIORITIES: dict[str, list[str]] = {
     "PAUSED": ["reference", "definition", "example"],
 }
 
+# Per-mode query-build strategy: which signals to favor when composing the
+# LightRAG query, and what intent label to attach so downstream re-rankers
+# know what kind of evidence the turn is asking for.
+MODE_QUERY_STRATEGY: dict[str, dict[str, Any]] = {
+    "ANCHOR": {
+        "favor": ["unverified_gaps", "active_node_label", "default_query"],
+        "intent": "ground_prerequisites",
+    },
+    "CORRECTION": {
+        "favor": ["critical_blockers", "user_message", "active_node_label"],
+        "intent": "dispel_misconception",
+    },
+    "VERIFY": {
+        "favor": ["active_node_label", "user_message", "unverified_gaps"],
+        "intent": "validate_understanding",
+    },
+    "EXPLORE": {
+        "favor": ["user_message", "active_node_label", "default_query"],
+        "intent": "expand_concept",
+    },
+    "PAUSED": {
+        "favor": ["continuation_prompt", "active_node_label"],
+        "intent": "resume_thread",
+    },
+}
+
 SUPPORT_TYPE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("counterexample", ("\u53cd\u4f8b", "\u8bef\u533a", "\u5e38\u89c1\u9519\u8bef", "\u9519\u8bef", "counterexample", "mistake")),
     ("procedure", ("\u6b65\u9aa4", "\u8bc1\u660e", "\u63a8\u5bfc", "\u505a\u6cd5", "\u6d41\u7a0b", "procedure", "step", "proof")),
@@ -77,23 +103,47 @@ def build_retrieval_query_context(
     retrieval_focus: dict[str, Any],
     continuation_prompt: str = "",
 ) -> dict[str, Any]:
+    """Build a query context whose final_query reflects the turn_mode's intent.
+
+    Each turn_mode favors different signals (see MODE_QUERY_STRATEGY): CORRECTION
+    leads with blockers, ANCHOR with gaps + active_node, etc. priority_terms is
+    the deduplicated list of weighted phrases used by downstream re-rankers.
+    """
     blockers = [
         {"id": blocker.id, "desc": blocker.desc, "type": blocker.type}
         for blocker in list(board.gaps_and_blockers.critical_blockers or [])
         if str(blocker.desc or "").strip()
     ]
     gaps = [str(item).strip() for item in board.gaps_and_blockers.unverified_gaps if str(item).strip()]
-    parts = [
-        str(retrieval_focus.get("default_query") or "").strip(),
-        str(board.current_progress.active_node_label or board.current_progress.active_node_id or "").strip(),
-        str(user_message or "").strip(),
-        "\uff1b".join(item["desc"] for item in blockers[:2] if item.get("desc")),
-        "\uff1b".join(gaps[:2]),
-        str(continuation_prompt or board.continuation.next_prompt_hint or "").strip(),
-    ]
-    final_query = " | ".join(part for part in parts if part)
+    turn_mode = normalize_turn_mode(board.current_turn_mode)
+    strategy = MODE_QUERY_STRATEGY.get(turn_mode, MODE_QUERY_STRATEGY["EXPLORE"])
+
+    signal_pool: dict[str, str] = {
+        "default_query": str(retrieval_focus.get("default_query") or "").strip(),
+        "active_node_label": str(
+            board.current_progress.active_node_label or board.current_progress.active_node_id or ""
+        ).strip(),
+        "user_message": str(user_message or "").strip(),
+        "critical_blockers": "\uff1b".join(item["desc"] for item in blockers[:2] if item.get("desc")),
+        "unverified_gaps": "\uff1b".join(gaps[:2]),
+        "continuation_prompt": str(continuation_prompt or board.continuation.next_prompt_hint or "").strip(),
+    }
+
+    favored = strategy["favor"]
+    rest = [key for key in signal_pool.keys() if key not in favored]
+    ordered_keys = [*favored, *rest]
+
+    priority_terms: list[str] = []
+    for key in ordered_keys:
+        value = signal_pool.get(key, "")
+        if value and value not in priority_terms:
+            priority_terms.append(value)
+
+    final_query = " | ".join(priority_terms)
     return {
-        "turn_mode": normalize_turn_mode(board.current_turn_mode),
+        "turn_mode": turn_mode,
+        "query_intent": strategy["intent"],
+        "priority_terms": priority_terms,
         "active_node_id": str(board.current_progress.active_node_id or "").strip(),
         "active_node_label": str(board.current_progress.active_node_label or "").strip(),
         "user_message": str(user_message or "").strip(),
@@ -160,6 +210,25 @@ def _support_priority_score(*, support_type: str, turn_mode: str, raw_score: Any
     return round(priority_score + min(max(source_score, 0.0), 1.0) * 0.2, 4)
 
 
+def _gap_match_bonus(ref: dict[str, Any], board: BoardFacts) -> tuple[float, str]:
+    """Return (bonus, reason). Blocker hit > gap hit > nothing."""
+    haystack = " ".join(
+        str(ref.get(key) or "")
+        for key in ("summary", "text", "title", "source_ref", "source_path")
+    ).lower()
+    if not haystack.strip():
+        return (0.0, "")
+    for blocker in list(board.gaps_and_blockers.critical_blockers or []):
+        desc = str(blocker.desc or "").strip().lower()
+        if desc and desc in haystack:
+            return (1.0, "blocker_match")
+    for gap in board.gaps_and_blockers.unverified_gaps or []:
+        gap_text = str(gap or "").strip().lower()
+        if gap_text and gap_text in haystack:
+            return (0.5, "gap_match")
+    return (0.0, "")
+
+
 def build_prompt_support_bundle(
     *,
     board: BoardFacts,
@@ -167,7 +236,15 @@ def build_prompt_support_bundle(
     retrieval_focus: dict[str, Any] | None = None,
     max_items: int = 4,
 ) -> list[dict[str, Any]]:
+    """Pick top-N retrieval chunks ranked by mode priority, gap/blocker match, raw score.
+
+    HIGH cognitive_load tightens max_items to 2 — fewer but more relevant chunks
+    when the student is overloaded. Each chunk carries priority_reason for debugging
+    and downstream self-improvement signals.
+    """
     turn_mode = normalize_turn_mode((retrieval_focus or {}).get("turn_mode") or board.current_turn_mode)
+    cognitive_load = str(getattr(board.student_snapshot, "cognitive_load", "") or "").upper()
+    effective_max = 2 if cognitive_load == "HIGH" else max_items
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for idx, ref in enumerate(prefetched_references):
@@ -189,11 +266,19 @@ def build_prompt_support_bundle(
         )
         raw_summary = ref.get("summary") or ref.get("text") or ref.get("content") or ref.get("title") or _source_label(ref)
         summary = _compact_text(raw_summary, limit=180)
-        score = _support_priority_score(
+        base_score = _support_priority_score(
             support_type=support_type,
             turn_mode=turn_mode,
             raw_score=ref.get("score"),
         )
+        bonus, bonus_reason = _gap_match_bonus(ref, board)
+        score = round(base_score + bonus, 4)
+        if bonus_reason:
+            priority_reason = bonus_reason
+        elif support_type in MODE_SUPPORT_PRIORITIES.get(turn_mode, []):
+            priority_reason = "mode_priority"
+        else:
+            priority_reason = "raw_score"
         candidates.append(
             {
                 "source_ref": raw_ref,
@@ -216,6 +301,7 @@ def build_prompt_support_bundle(
                 ),
                 "score": score,
                 "confidence": score,
+                "priority_reason": priority_reason,
             }
         )
     candidates.sort(
@@ -225,7 +311,7 @@ def build_prompt_support_bundle(
             str(item.get("chunk_id") or ""),
         )
     )
-    return candidates[: max(max_items, 0)]
+    return candidates[: max(effective_max, 0)]
 
 
 def build_retrieval_focus(

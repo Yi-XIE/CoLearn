@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from colearn.learning.response_contract import LearningTurnResult
+from colearn.learning.signal_extractor import extract_learning_signals
 from colearn.learning.turn_contract import LearningTurnRequest
 
 
@@ -59,13 +60,40 @@ def normalize_learning_turn_result(
     tool_events = list(payload.get("tool_events") or [])
     stream_events = list(payload.get("stream_events") or [])
     warnings = list(payload.get("warnings") or [])
+
+    # LLM-emitted learning_events take precedence; harness extracts heuristic
+    # signals from final_text as a fallback so the state machine never goes
+    # blind even if the LLM doesn't emit structured events. Dedupe by (kind,
+    # concept) — extracted ones are dropped if LLM already covered them.
+    payload_events = list(payload.get("learning_events") or [])
+
+    def _event_signature(event: Any) -> tuple[str, str]:
+        # LearningEvent dataclass uses .type/.payload; harness-extracted dicts
+        # use .kind/.payload — accept both.
+        if hasattr(event, "type"):
+            kind = str(getattr(event, "type", "") or "")
+            payload_ = getattr(event, "payload", {}) or {}
+        else:
+            kind = str(event.get("kind") or event.get("type") or "")
+            payload_ = event.get("payload") or {}
+        concept = str((payload_ or {}).get("concept") or "").lower()
+        return (kind, concept)
+
+    seen_signatures = {_event_signature(e) for e in payload_events}
+    merged_events = list(payload_events)
+    for event in extract_learning_signals(final_text):
+        signature = _event_signature(event)
+        if signature in seen_signatures or not signature[1]:
+            continue
+        merged_events.append(event)
+        seen_signatures.add(signature)
     return LearningTurnResult(
         final_text=final_text,
         next_explanation=str(payload.get("next_explanation") or ""),
         next_practice=list(payload.get("next_practice") or []),
         board_before=request.board_facts,
         board_after=payload.get("board_after") or request.board_facts,
-        learning_events=list(payload.get("learning_events") or []),
+        learning_events=merged_events,
         review_summary=str(payload.get("review_summary") or ""),
         turn_mode_before=str(request.metadata.get("turn_mode_before") or request.turn_mode),
         turn_mode_after=str(payload.get("turn_mode_after") or request.turn_mode),

@@ -17,7 +17,6 @@ from colearn.api.dependencies import (
     session_store,
     settings_service,
     settings_test_service,
-    skill_service,
     state_store,
     turn_cache,
     AUTH_COOKIE_NAME,

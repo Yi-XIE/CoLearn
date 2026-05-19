@@ -106,6 +106,9 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
 
 def build_turn_prompt(request: LearningTurnRequest) -> str:
     workspace = Path(str(request.metadata.get("workspace") or ".")).resolve()
+    # skill_names is passed but currently unused by nanobot's ContextBuilder —
+    # always-skills auto-activate via frontmatter `always: true`, and non-always
+    # skills appear as summaries for the agent to read_file on demand.
     base_prompt = ContextBuilder(workspace).build_system_prompt(
         skill_names=request.requested_skills or None,
         channel="colearn",

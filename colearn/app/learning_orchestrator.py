@@ -38,12 +38,7 @@ from .source_preflight import SourceReadinessPreflight
 logger = get_logger(__name__)
 
 
-def _reject_sync_inside_event_loop(caller: str) -> None:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    raise RuntimeError(f"{caller} cannot run inside an active event loop.")
+from colearn.utils.async_guards import reject_sync_inside_event_loop as _reject_sync_inside_event_loop
 
 class BackgroundTurnFinalizer:
     def __init__(

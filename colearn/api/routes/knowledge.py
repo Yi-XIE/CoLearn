@@ -15,6 +15,7 @@ from colearn.api.dependencies import knowledge_task_service, project_service, se
 
 router = APIRouter()
 
+# TODO(harness-cleanup): replace with LightRAG node-derived concepts when graph data wired up
 KNOWLEDGE_GRAPH_CONCEPT_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("lightrag", "LightRAG"),
     ("machine learning", "Machine Learning"),

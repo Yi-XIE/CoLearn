@@ -10,7 +10,8 @@ import anyio
 import pytest
 
 from colearn.learning.turn_contract import LearningTurnRequest
-from colearn.runtime_v2.executor import NanobotTurnExecutor, _reject_sync_inside_event_loop
+from colearn.runtime_v2.executor import NanobotTurnExecutor
+from colearn.utils.async_guards import reject_sync_inside_event_loop as _reject_sync_inside_event_loop
 
 
 def _make_request(**kwargs) -> LearningTurnRequest:

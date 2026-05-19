@@ -110,25 +110,6 @@ class PingPayload(BaseModel):
     type: Literal["ping"] = "ping"
 
 
-class SkillPayload(BaseModel):
-    name: str
-    description: str = ""
-    content: str = ""
-    tags: list[str] = Field(default_factory=list)
-
-
-class SkillUpdatePayload(BaseModel):
-    description: str | None = None
-    content: str | None = None
-    rename_to: str | None = None
-    tags: list[str] = Field(default_factory=list)
-
-
-class SkillTagPayload(BaseModel):
-    name: str
-    rename_to: str | None = None
-
-
 class SettingsUiPayload(BaseModel):
     theme: str | None = None
     language: str | None = None

@@ -582,12 +582,9 @@ class LightRAGClient:
         )
 
     def _reject_sync_inside_event_loop(self, async_method: str) -> None:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        raise RuntimeError(
-            f"LightRAG synchronous API cannot run inside an active event loop; use {async_method} instead."
+        from colearn.utils.async_guards import reject_sync_inside_event_loop
+        reject_sync_inside_event_loop(
+            f"LightRAG synchronous API; use {async_method} instead"
         )
 
     def _load_registry(self) -> dict[str, Any]:

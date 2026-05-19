@@ -1,6 +1,7 @@
 ---
 name: pedagogy-methods
 description: 教学法选择与落地技能。Use when CoLearn needs to design lessons, learning activities, projects, assessments, tutoring flows, AI learning companions, teacher aids, or curriculum plans using evidence-informed pedagogy; trigger for 教学法、教案、课程设计、学习活动、项目式学习、探究式学习、显性教学、差异化、UDL、形成性评价、元认知、协作学习、翻转课堂、检索练习、间隔复习、脚手架.
+always: true
 ---
 
 # Pedagogy Methods

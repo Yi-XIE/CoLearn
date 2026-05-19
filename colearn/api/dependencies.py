@@ -10,7 +10,6 @@ from colearn.api.state import (
     MemoryDocStateService,
     SettingsStateService,
     SettingsTestRunService,
-    SkillStateService,
 )
 from colearn.api.turn_cache import RecentTurnReplayCache
 from colearn.app.learning_orchestrator import LearningOrchestrator
@@ -36,7 +35,6 @@ orchestrator = LearningOrchestrator(
 turn_cache = RecentTurnReplayCache(max_turns=128)
 settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
 memory_doc_service = MemoryDocStateService()
-skill_service = SkillStateService()
 auth_service = AuthStateService(JsonStateStore(state_store.root))
 knowledge_task_service = KnowledgeTaskService(state_root=state_store.root)
 settings_test_service = SettingsTestRunService()
