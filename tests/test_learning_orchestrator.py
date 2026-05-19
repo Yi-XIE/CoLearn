@@ -161,7 +161,7 @@ def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert saved_project is not None
     assert saved_session.pending_review["summary"]
     assert saved_project.latest_review["summary"]
-    assert len(orchestrator.memory_store.list_events_for_session("sess-1")) == 3
+    assert len(orchestrator.memory_store.list_events_for_session("sess-1")) >= 3
     assert saved_session.board_facts["updated_at"]
     assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
 

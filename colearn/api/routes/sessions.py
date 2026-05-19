@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
-from colearn.api.dependencies import session_store, project_service
+from colearn.api.dependencies import orchestrator, project_service, session_store
 from colearn.api.schemas import SessionCreatePayload, SessionUpdatePayload
 from colearn.api.session_api import serialize_session_detail, serialize_session_summary, touch_session
 
@@ -111,3 +111,25 @@ def resume_session(session_id: str) -> dict[str, Any]:
     touch_session(session)
     session_store.save_session(session)
     return {"session": serialize_session_detail(session, project_service=project_service)}
+
+@router.get("/api/v1/sessions/{session_id}/board_history")
+def session_board_history(session_id: str) -> dict[str, Any]:
+    """Return the audit trail of board snapshot derivations for this session.
+
+    Lets the frontend show 'how the system's understanding of the student
+    evolved over time' — derived BoardFacts changes (S1 diff entries).
+    """
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    events = orchestrator.memory_store.list_events_for_session(session_id)
+    history = [
+        {
+            "event_id": e.event_id,
+            "kind": e.kind,
+            "payload": e.payload,
+        }
+        for e in events
+        if e.kind in ("board_snapshot_derived", "board_snapshot_failed", "board_patch_applied")
+    ]
+    return {"session_id": session_id, "history": history}

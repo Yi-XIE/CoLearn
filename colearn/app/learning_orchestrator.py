@@ -137,6 +137,7 @@ class LearningOrchestrator:
     SESSION_AUTOCOMPACT_KEEP_TAIL = 12
     SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS = 800
     DREAM_CONSOLIDATION_EVENT_INTERVAL = 20
+    BOARD_DERIVATION_EVENT_INTERVAL = 5  # Q3: trigger board snapshot every N events
 
     def __init__(
         self,
@@ -149,6 +150,7 @@ class LearningOrchestrator:
         executor: NanobotTurnExecutor | None = None,
         runtime_compression: RuntimeCompressionBridge | None = None,
         product_compression: ProductCompressionBridge | None = None,
+        board_deriver: Any = None,  # Q4: optional BoardSnapshotDeriver
     ) -> None:
         self.project_service = project_service or LearningProjectService()
         self.session_store = session_store or SessionStore()
@@ -170,6 +172,7 @@ class LearningOrchestrator:
             product_compression=self.product_compression,
             on_result=self.apply_background_result,
         )
+        self.board_deriver = board_deriver
 
     def shutdown(self, timeout: float = 5.0) -> None:
         self.background_finalizer.shutdown(timeout=timeout)
@@ -1046,9 +1049,37 @@ class LearningOrchestrator:
                     payload=dict(item.get("payload") or {}),
                 )
             )
+        # P2: Persist learning_events (incl. signal_extractor output) to event store
+        for item in result.learning_events:
+            if hasattr(item, "event_id"):
+                self.memory_store.append(item)
+            elif isinstance(item, dict) and item.get("kind"):
+                self.memory_store.append(
+                    MemoryEvent(
+                        event_id=str(item.get("event_id") or uuid4()),
+                        kind=str(item["kind"]),
+                        payload=dict(item.get("payload") or {}),
+                    )
+                )
+        # P1: Record board_patch application as event for consolidation input
+        board_patch = result.board_patch
+        if board_patch and not session_conflict:
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind="board_patch_applied",
+                    payload={
+                        "session_id": session.session_id,
+                        "project_id": project.project_id,
+                        "patch_keys": list(board_patch.keys()),
+                        "board_version": int(result.board_after.board_version or 1),
+                    },
+                )
+            )
         self._append_nanobot_history(project=project, session=session, result=result)
         self._maybe_compact_session(session)
         self._maybe_consolidate_memory(project, session, result)
+        self._maybe_derive_board_snapshot(project=project, session=session, result=result)
         if not session.source_refs and project.source_refs:
             session.source_refs = list(project.source_refs)
         self.session_store.save_session(session)
@@ -1135,6 +1166,83 @@ class LearningOrchestrator:
                     },
                 )
             )
+
+    def _maybe_derive_board_snapshot(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        result,
+    ) -> None:
+        """Q3: Periodically re-derive BoardFacts from event stream via LLM.
+
+        Runs synchronously after writeback. If board_deriver is None (default),
+        no-op — preserves backward compat. On success, overwrites session.board_facts
+        and emits board_snapshot_derived event for audit.
+        """
+        if self.board_deriver is None:
+            return
+        session_events = self.memory_store.list_events_for_session(session.session_id)
+        if len(session_events) == 0 or len(session_events) % self.BOARD_DERIVATION_EVENT_INTERVAL != 0:
+            return
+        from colearn.learning.state_hooks import build_learning_board
+
+        current_board = build_learning_board(session=session, project=project)
+        project_summary = (
+            f"{project.title}: anchor={project.anchor or {}}; "
+            f"sources={len(project.source_refs or [])}"
+        )
+        try:
+            new_board, diff = self.board_deriver.derive_snapshot(
+                events=session_events,
+                current_board=current_board,
+                project_summary=project_summary,
+            )
+        except Exception as exc:
+            logger.warning("board_deriver.derive_snapshot raised: %s", exc)
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind="board_snapshot_failed",
+                    payload={
+                        "session_id": session.session_id,
+                        "project_id": project.project_id,
+                        "error": str(exc),
+                    },
+                )
+            )
+            return
+
+        if diff.get("status") != "ok":
+            self.memory_store.append(
+                MemoryEvent(
+                    event_id=str(uuid4()),
+                    kind="board_snapshot_failed",
+                    payload={
+                        "session_id": session.session_id,
+                        "project_id": project.project_id,
+                        "diff_status": diff.get("status"),
+                    },
+                )
+            )
+            return
+
+        session.board_facts = new_board.to_dict()
+        session.board_version = int(new_board.board_version or 1)
+        self.session_store.save_session(session)
+        self.memory_store.append(
+            MemoryEvent(
+                event_id=str(uuid4()),
+                kind="board_snapshot_derived",
+                payload={
+                    "session_id": session.session_id,
+                    "project_id": project.project_id,
+                    "board_version": int(new_board.board_version or 1),
+                    "event_count": diff.get("event_count", 0),
+                    "changes": diff.get("changes", {}),
+                },
+            )
+        )
 
     def _build_compaction_summary(self, messages: list[dict[str, Any]]) -> str:
         summary = " | ".join(
