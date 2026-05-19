@@ -97,6 +97,12 @@ class NanobotTurnExecutor:
                     )
 
     def run_turn(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+        """Sync entry that wraps the async nanobot run in `asyncio.run`.
+
+        Refuses to execute inside an active event loop (`_reject_sync_inside_event_loop`)
+        because `asyncio.run` cannot be nested. Async callers must invoke
+        `_run_turn_async` directly or use `to_thread.run_sync`.
+        """
         _reject_sync_inside_event_loop("NanobotTurnExecutor.run_turn")
         final_text, messages, tools_used = asyncio.run(self._run_turn_async(request=request))
         learning_result = {

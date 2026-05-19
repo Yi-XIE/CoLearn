@@ -482,7 +482,7 @@ async def unified_ws(websocket: WebSocket) -> None:
                     project_id=project_id,
                     content=message.content,
                     language=message.language,
-                    attachments=message.attachments,
+                    attachments=[a.model_dump() for a in message.attachments],
                     requested_skills=message.skills,
                     turn_id=turn_id,
                     seq=seq,

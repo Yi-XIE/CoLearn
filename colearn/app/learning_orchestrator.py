@@ -65,6 +65,12 @@ class BackgroundTurnFinalizer:
         request,
         result,
     ) -> None:
+        """Spawn a daemon Thread for product compression that may outlive the turn.
+
+        Daemon so the process can exit if needed; `shutdown(timeout)` should be
+        called by the FastAPI lifespan to give in-flight compressions a chance
+        to finish before SIGTERM.
+        """
         status_payload = {
             "status": "scheduled",
             "started_at": int(time()),
@@ -170,6 +176,9 @@ class LearningOrchestrator:
             on_result=self.apply_background_result,
         )
 
+    def shutdown(self, timeout: float = 5.0) -> None:
+        self.background_finalizer.shutdown(timeout=timeout)
+
     def run_turn(
         self,
         *,
@@ -181,6 +190,12 @@ class LearningOrchestrator:
         requested_skills: list[str] | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
     ):
+        """Synchronous turn entry — runs the five-stage pipeline.
+
+        Sync by design: callers (FastAPI WS handler) wrap it in `to_thread.run_sync`
+        so the nested `asyncio.run` inside the executor doesn't collide with the
+        request's event loop. Pipeline: preflight → support → execute → finalize → writeback.
+        """
         turn_context = self._prepare_turn_context(
             session_id=session_id,
             project_id=project_id,
@@ -617,6 +632,12 @@ class LearningOrchestrator:
         session: LearningSession,
         retrieval_query_context: dict[str, Any],
     ) -> dict[str, Any]:
+        """Run multiple retrieval queries in parallel via asyncio.run.
+
+        Must be called from a sync context (guarded by `_reject_sync_inside_event_loop`).
+        Failure semantics are *partial*: one failing query yields status='partial', not
+        a hard error, so the turn can still proceed with whatever evidence was gathered.
+        """
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         queries = self._parallel_support_queries(retrieval_query_context)
         if not source_refs:
@@ -956,6 +977,12 @@ class LearningOrchestrator:
         request,
         result,
     ) -> None:
+        """Persist turn output with board-version conflict protection.
+
+        Rejects writes whose `board_before.board_version` is older than the current
+        session board — protects concurrent turns / background finalizers from
+        clobbering newer state. The dropped result still emits a warning in `warnings`.
+        """
         # Session Board is the runtime source of truth; project.board_facts is a
         # denormalized mirror for project lists and cross-session recovery.
         current_session = self.session_store.get_session(session.session_id)

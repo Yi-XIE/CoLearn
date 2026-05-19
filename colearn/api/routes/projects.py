@@ -96,7 +96,7 @@ def save_project_sources(project_id: str, payload: ProjectSourcesPayload) -> dic
     return {
         "project": _serialize_project(project),
         "source_refs": list(project.source_refs),
-        "source_references": list(payload.source_references),
+        "source_references": [item.model_dump() for item in payload.source_references],
     }
 
 

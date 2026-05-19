@@ -18,6 +18,13 @@ from .adapters import LightRAGClientProtocol, LightRAGConfigurationError, get_li
 
 
 class RetrievalService:
+    """Narrows project sources into a RetrievalBundle, with a fallback chain.
+
+    Order: (1) LightRAG retrieval if ready → (2) raw file preview fallback if
+    sources resolve on disk → (3) empty bundle with status='empty' or 'error'.
+    The fallback is intentional: it keeps turns flowing when LightRAG is down.
+    """
+
     def __init__(
         self,
         library_root: str | Path | None = None,

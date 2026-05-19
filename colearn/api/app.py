@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -39,8 +40,23 @@ from colearn.api.routes.websocket import (
 )
 from colearn.logging_config import get_logger
 
-app = FastAPI(title="CoLearn API", version="0.1.0")
 logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    try:
+        _deps.orchestrator.shutdown(timeout=5.0)
+    except Exception as exc:
+        logger.warning("orchestrator.shutdown failed: %s", exc)
+    try:
+        _deps.turn_cache.clear()
+    except Exception as exc:
+        logger.warning("turn_cache.clear failed: %s", exc)
+
+
+app = FastAPI(title="CoLearn API", version="0.1.0", lifespan=lifespan)
 
 app.include_router(health_router)
 app.include_router(auth_router)

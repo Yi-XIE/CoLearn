@@ -7,6 +7,13 @@ from typing import Any
 
 
 class RecentTurnReplayCache:
+    """LRU buffer for completed WebSocket turn events, separate from session storage.
+
+    Lives in-process so clients reconnecting mid-turn can replay events via
+    `subscribe_turn`. Independent of `session_store` because turns finish faster
+    than sessions persist; bounded to `max_turns` to prevent unbounded growth.
+    """
+
     def __init__(self, max_turns: int = 128) -> None:
         self._max_turns = max_turns
         self._store: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
