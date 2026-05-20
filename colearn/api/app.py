@@ -17,7 +17,6 @@ from colearn.api.dependencies import (
     settings_service,
     settings_test_service,
     state_store,
-    WORKSPACE_SKILLS_DIR,
 )
 from colearn.api.routes.health import router as health_router
 from colearn.api.routes.knowledge import router as knowledge_router

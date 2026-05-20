@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from colearn.api.state import (
-    AuthStateService,
     KnowledgeTaskService,
     MemoryDocStateService,
     SettingsStateService,
@@ -33,9 +32,7 @@ orchestrator = LearningOrchestrator(
 
 settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
 memory_doc_service = MemoryDocStateService()
-auth_service = AuthStateService(JsonStateStore(state_store.root))
 knowledge_task_service = KnowledgeTaskService(state_root=state_store.root)
 settings_test_service = SettingsTestRunService()
 
-AUTH_COOKIE_NAME = "colearn_session"
 WORKSPACE_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
