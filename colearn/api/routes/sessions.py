@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from colearn.api.dependencies import orchestrator, project_service, session_store
 from colearn.api.schemas import SessionCreatePayload, SessionUpdatePayload
 from colearn.api.session_api import serialize_session_detail, serialize_session_summary, touch_session
+from colearn.learning.events import MemoryEventKind
 
 router = APIRouter()
 
@@ -130,6 +131,6 @@ def session_board_history(session_id: str) -> dict[str, Any]:
             "payload": e.payload,
         }
         for e in events
-        if e.kind in ("board_snapshot_derived", "board_snapshot_failed", "board_patch_applied")
+        if e.kind in (MemoryEventKind.BOARD_SNAPSHOT_DERIVED, MemoryEventKind.BOARD_SNAPSHOT_FAILED, MemoryEventKind.BOARD_PATCH_APPLIED)
     ]
     return {"session_id": session_id, "history": history}

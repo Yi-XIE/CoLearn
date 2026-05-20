@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from colearn.learning.events import MemoryEventKind
 from typing import Any
 
 from colearn.learning.board_hooks import (
@@ -184,7 +185,7 @@ def after_turn_payload(
         },
         "memory_events": [
             {
-                "kind": "turn_completed",
+                "kind": MemoryEventKind.TURN_COMPLETED,
                 "payload": {
                     "session_id": getattr(session, "session_id", ""),
                     "project_id": getattr(project, "project_id", ""),
@@ -196,7 +197,7 @@ def after_turn_payload(
                 },
             },
             {
-                "kind": "review_written",
+                "kind": MemoryEventKind.REVIEW_WRITTEN,
                 "payload": {
                     "session_id": getattr(session, "session_id", ""),
                     "project_id": getattr(project, "project_id", ""),
@@ -204,7 +205,7 @@ def after_turn_payload(
                 },
             },
             {
-                "kind": "continuation_updated",
+                "kind": MemoryEventKind.CONTINUATION_UPDATED,
                 "payload": {
                     "session_id": getattr(session, "session_id", ""),
                     "project_id": getattr(project, "project_id", ""),

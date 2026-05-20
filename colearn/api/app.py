@@ -57,6 +57,9 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="CoLearn API", version="0.1.0", lifespan=lifespan)
 
+from colearn.api.middleware import RequestIdMiddleware
+app.add_middleware(RequestIdMiddleware)
+
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(settings_router)

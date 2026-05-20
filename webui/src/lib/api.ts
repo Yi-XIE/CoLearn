@@ -153,6 +153,27 @@ export async function deleteSession(
   return body.deleted;
 }
 
+export interface BoardHistoryEvent {
+  event_id: string;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+export async function fetchBoardHistory(
+  token: string,
+  sessionId: string,
+  base: string = "",
+): Promise<BoardHistoryEvent[]> {
+  const res = await fetch(`${base}/api/v1/sessions/${encodeURIComponent(sessionId)}/board_history`, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "same-origin",
+  });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  const body = (await res.json()) as { history?: BoardHistoryEvent[] };
+  return body.history ?? [];
+}
+
 export async function fetchSettings(
   token: string,
   base: string = "",

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any
 
+from colearn.config.defaults import Defaults
+
 
 class RecentTurnReplayCache:
     """LRU buffer for completed WebSocket turn events, separate from session storage.
@@ -14,7 +16,7 @@ class RecentTurnReplayCache:
     than sessions persist; bounded to `max_turns` to prevent unbounded growth.
     """
 
-    def __init__(self, max_turns: int = 128) -> None:
+    def __init__(self, max_turns: int = Defaults.TURN_CACHE_MAX_TURNS) -> None:
         self._max_turns = max_turns
         self._store: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
         self._index: OrderedDict[str, dict[str, Any]] = OrderedDict()

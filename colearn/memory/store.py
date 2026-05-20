@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
+from colearn.learning.events import MemoryEventKind
 from colearn.storage import JsonStateStore
 from colearn.storage.records import memory_event_from_record, memory_event_to_record
 
@@ -84,7 +85,7 @@ class EventMemoryStore:
             haystack = f"{event.kind} {json.dumps(event.payload, ensure_ascii=False)}".lower()
             score = sum(1 for term in terms if term in haystack)
             if score > 0:
-                kind_bonus = 1 if event.kind == "review_written" else 0
+                kind_bonus = 1 if event.kind == MemoryEventKind.REVIEW_WRITTEN else 0
                 scored.append((score, kind_bonus, event))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
 

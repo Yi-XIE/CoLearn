@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: colearn
+Version: 0.1.0
+Summary: CoLearn learning workspace runtime (webui + runtime_v2 + slim config).
+Requires-Python: >=3.11
+Requires-Dist: anyio>=4
+Requires-Dist: fastapi>=0.110
+Requires-Dist: httpx>=0.27
+Requires-Dist: pydantic>=2
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: mcp>=1.0
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
+Requires-Dist: pytest-cov>=5; extra == "test"

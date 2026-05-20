@@ -23,6 +23,10 @@ from .tooling import install_colearn_tools
 logger = get_logger(__name__)
 
 
+class TurnTimeoutError(TimeoutError):
+    """Raised when a turn exceeds the configured timeout."""
+
+
 from colearn.utils.async_guards import reject_sync_inside_event_loop as _reject_sync_inside_event_loop
 
 
@@ -148,11 +152,21 @@ class NanobotTurnExecutor:
         )
         if request.model_preset:
             self._apply_model_preset(bot=bot, preset=request.model_preset, request=request)
-        result = await bot.run(
+        timeout = request.metadata.get("turn_timeout_seconds")
+        bot_coroutine = bot.run(
             prompt,
             session_key=f"colearn:{request.session_id}",
             hooks=[self._StreamHook(emit_stream_event)],
         )
+        try:
+            if timeout is not None and float(timeout) > 0:
+                result = await asyncio.wait_for(bot_coroutine, timeout=float(timeout))
+            else:
+                result = await bot_coroutine
+        except asyncio.TimeoutError as exc:
+            raise TurnTimeoutError(
+                f"turn {request.turn_id or '?'} exceeded timeout of {timeout}s"
+            ) from exc
         request.metadata["_stream_events"] = stream_events
         return result.content, result.messages, result.tools_used
 

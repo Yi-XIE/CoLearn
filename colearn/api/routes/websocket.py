@@ -25,6 +25,10 @@ from colearn.api.session_api import touch_session, serialize_session_detail
 router = APIRouter()
 
 
+class TurnCancelled(Exception):
+    """Raised when a turn is cancelled by client mid-stream."""
+
+
 def _ws_event(
     *,
     type: str,
@@ -118,6 +122,13 @@ async def handle_cancel_turn(websocket: WebSocket, payload: CancelTurnPayload | 
     turn_id = str(resolved.turn_id or "").strip()
     record = deps.turn_cache.get_index(turn_id) or {}
     session_id = str(record.get("session_id") or "")
+    # Flip the cancel flag for this turn — the streaming loop in
+    # _run_turn_with_live_stream checks it and stops forwarding events,
+    # giving the user immediate feedback even if the orchestrator thread
+    # can't be killed mid-run (nanobot doesn't expose mid-run cancellation).
+    cancel_flag = deps.active_turns.get(turn_id)
+    if cancel_flag is not None:
+        cancel_flag["cancelled"] = True
     if session_id:
         session = deps.session_store.get_session(session_id)
         if session is not None:
@@ -251,6 +262,8 @@ async def _run_turn_with_live_stream(
     error_box: dict[str, BaseException] = {}
     emitted_signatures: set[str] = set()
     worker_done = False
+    cancel_flag: dict[str, Any] = {"cancelled": False}
+    deps.active_turns[turn_id] = cancel_flag
 
     def stream_emit(event: dict[str, Any]) -> None:
         queue.put(dict(event))
@@ -274,29 +287,40 @@ async def _run_turn_with_live_stream(
         finally:
             worker_done = True
 
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(run_worker)
-        while not worker_done or not queue.empty():
-            try:
-                raw_event = queue.get_nowait()
-            except Empty:
-                await anyio.sleep(0.01)
-                continue
-            signature = _runtime_stream_signature(raw_event)
-            prepared, seq = _prepare_runtime_stream_events(
-                stream_events=[raw_event],
-                result=None,
-                session_id=session_id,
-                turn_id=turn_id,
-                seq=seq,
-            )
-            if not prepared:
-                continue
-            emitted_signatures.add(signature)
-            event = prepared[0]
-            deps.turn_cache.append(turn_id, event)
-            await websocket.send_json(event)
+    try:
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(run_worker)
+            while not worker_done or not queue.empty():
+                if cancel_flag.get("cancelled"):
+                    # Client requested cancel — stop forwarding events even
+                    # though the worker thread may still be running. nanobot
+                    # does not expose mid-run cancellation; this gives the
+                    # user immediate feedback and frees the WebSocket.
+                    break
+                try:
+                    raw_event = queue.get_nowait()
+                except Empty:
+                    await anyio.sleep(0.01)
+                    continue
+                signature = _runtime_stream_signature(raw_event)
+                prepared, seq = _prepare_runtime_stream_events(
+                    stream_events=[raw_event],
+                    result=None,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    seq=seq,
+                )
+                if not prepared:
+                    continue
+                emitted_signatures.add(signature)
+                event = prepared[0]
+                deps.turn_cache.append(turn_id, event)
+                await websocket.send_json(event)
+    finally:
+        deps.active_turns.pop(turn_id, None)
 
+    if cancel_flag.get("cancelled"):
+        raise TurnCancelled(f"turn {turn_id} cancelled by client")
     if error_box:
         raise error_box["error"]
     return result_box["result"], seq, emitted_signatures
@@ -487,6 +511,11 @@ async def unified_ws(websocket: WebSocket) -> None:
                     turn_id=turn_id,
                     seq=seq,
                 )
+            except TurnCancelled:
+                # cancel was already acknowledged via handle_cancel_turn
+                # which emits its own "done" event and updates session status.
+                deps.turn_cache.finish_turn(turn_id)
+                continue
             except Exception as exc:
                 session = deps.session_store.get_session(session_id)
                 if session is not None:

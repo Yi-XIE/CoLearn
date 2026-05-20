@@ -16,13 +16,16 @@ class RuntimeCompressionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+from colearn.config.defaults import Defaults
+
+
 class RuntimeCompressionBridge:
     def __init__(
         self,
         *,
-        max_retrieval_chars: int = 4000,
-        max_chunk_chars: int = 1200,
-        max_user_message_chars: int = 3000,
+        max_retrieval_chars: int = Defaults.RUNTIME_MAX_RETRIEVAL_CHARS,
+        max_chunk_chars: int = Defaults.RUNTIME_MAX_CHUNK_CHARS,
+        max_user_message_chars: int = Defaults.RUNTIME_MAX_USER_MESSAGE_CHARS,
     ) -> None:
         self.max_retrieval_chars = max_retrieval_chars
         self.max_chunk_chars = max_chunk_chars

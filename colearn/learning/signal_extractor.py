@@ -17,6 +17,8 @@ import re
 from typing import Any
 from uuid import uuid4
 
+from colearn.learning.events import MemoryEventKind
+
 
 # Capture group naming convention: (?P<concept>...) for the topic the student
 # understood / is blocked on. Patterns prefer Chinese first (primary user base)
@@ -56,7 +58,7 @@ def extract_learning_signals(final_text: str) -> list[dict[str, Any]]:
             if key in seen_concepts:
                 continue
             seen_concepts.add(key)
-            events.append(_make_event("understood_concept", concept, match.group(0)))
+            events.append(_make_event(MemoryEventKind.UNDERSTOOD_CONCEPT, concept, match.group(0)))
 
     for pattern in _BLOCKED_PATTERNS:
         for match in pattern.finditer(final_text):
@@ -67,7 +69,7 @@ def extract_learning_signals(final_text: str) -> list[dict[str, Any]]:
             if key in seen_concepts:
                 continue
             seen_concepts.add(key)
-            events.append(_make_event("still_blocked", concept, match.group(0)))
+            events.append(_make_event(MemoryEventKind.STILL_BLOCKED, concept, match.group(0)))
 
     return events
 

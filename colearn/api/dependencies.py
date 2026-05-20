@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from colearn.api.state import (
     AuthStateService,
@@ -33,6 +34,13 @@ orchestrator = LearningOrchestrator(
 )
 
 turn_cache = RecentTurnReplayCache(max_turns=128)
+
+# Tracks in-flight turns for cancellation. Maps turn_id → cancel flag dict
+# {"cancelled": bool}. When user sends cancel_turn, the flag flips and the
+# WebSocket loop stops forwarding events even though the orchestrator thread
+# may still be running (nanobot doesn't expose mid-run cancellation).
+active_turns: dict[str, dict[str, Any]] = {}
+
 settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
 memory_doc_service = MemoryDocStateService()
 auth_service = AuthStateService(JsonStateStore(state_store.root))
