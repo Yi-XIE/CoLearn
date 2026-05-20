@@ -259,19 +259,7 @@ class WritebackStage:
         loop = runtime_loop(self.executor)
         dream = getattr(loop, "dream", None) if loop is not None else None
         if dream is None or not hasattr(dream, "run"):
-            summary = self._consolidate_dream_events(
-                project=project,
-                session=session,
-                recent_events=self.memory_store.list_events()[-self.DREAM_CONSOLIDATION_EVENT_INTERVAL :],
-                fallback_text=result.review_summary or result.final_text,
-            )
-            self.memory_store.append(
-                MemoryEvent(
-                    event_id=str(uuid4()),
-                    kind=MemoryEventKind.PROFILE_CONSOLIDATED,
-                    payload=summary,
-                )
-            )
+            logger.debug("nanobot dream not available, skipping consolidation")
             return
         try:
             did_work = run_async_or_value(dream.run())
@@ -431,25 +419,3 @@ class WritebackStage:
         except Exception:
             append_session_warning(session, "nanobot_history_append_failed")
 
-    def _consolidate_dream_events(
-        self,
-        *,
-        project: LearningProject,
-        session: LearningSession,
-        recent_events: list[MemoryEvent],
-        fallback_text: str,
-    ) -> dict[str, Any]:
-        facts = [
-            str(event.payload.get("summary") or event.payload.get("content") or event.kind).strip()
-            for event in recent_events
-            if str(event.payload.get("summary") or event.payload.get("content") or event.kind).strip()
-        ]
-        combined = " | ".join(facts) or fallback_text[:240]
-        return {
-            "summary": combined[:240],
-            "session_id": session.session_id,
-            "project_id": project.project_id,
-            "source": "dream_consolidation",
-            "recent_event_count": len(recent_events),
-            "recent_event_kinds": [event.kind for event in recent_events],
-        }

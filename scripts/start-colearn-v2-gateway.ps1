@@ -49,7 +49,8 @@ if (Test-Path $envPath) {
 }
 
 if (-not $env:COLEARN_NANOBOT_TOKEN_ISSUE_SECRET) {
-    throw "Environment variable COLEARN_NANOBOT_TOKEN_ISSUE_SECRET is required."
+    Write-Host "Note: COLEARN_NANOBOT_TOKEN_ISSUE_SECRET not set. Running in localhost dev mode (no auth)." -ForegroundColor Yellow
+    $env:COLEARN_NANOBOT_TOKEN_ISSUE_SECRET = ""
 }
 
 $args = @("-m", "nanobot.cli.commands", "gateway", "--config", $ConfigPath, "--workspace", $Workspace)

@@ -251,14 +251,6 @@ class LearningOrchestrator:
     def _maybe_consolidate_memory(self, project, session, result):
         return self.writeback._maybe_consolidate_memory(project, session, result)
 
-    def _consolidate_dream_events(self, *, project, session, recent_events, fallback_text):
-        return self.writeback._consolidate_dream_events(
-            project=project,
-            session=session,
-            recent_events=recent_events,
-            fallback_text=fallback_text,
-        )
-
     def apply_background_result(
         self,
         *,

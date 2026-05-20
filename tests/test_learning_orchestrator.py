@@ -166,39 +166,6 @@ def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
 
 
-def test_dream_consolidation_builds_structured_event(tmp_path):
-    root = tmp_path / ".colearn" / "state"
-    project_service = LearningProjectService(state_store=JsonStateStore(root))
-    project = project_service.create_project("proj-dream", "Dream")
-    session_store = SessionStore(state_store=JsonStateStore(root))
-    session = session_store.create_session(session_id="sess-dream", project_id="proj-dream")
-    memory_store = EventMemoryStore(state_store=JsonStateStore(root))
-    for idx in range(20):
-        memory_store.append(
-            MemoryEvent(
-                event_id=f"evt-{idx}",
-                kind="review_written",
-                payload={"session_id": "sess-dream", "project_id": "proj-dream", "summary": f"fact {idx}"},
-            )
-        )
-    orchestrator = LearningOrchestrator(
-        project_service=project_service,
-        session_store=session_store,
-        executor=FakeExecutor(),
-        memory_store=memory_store,
-        retrieval_service=FakeRetrievalService(),
-    )
-
-    payload = orchestrator._consolidate_dream_events(
-        project=project,
-        session=session,
-        recent_events=memory_store.list_events()[-20:],
-        fallback_text="fallback text",
-    )
-
-    assert payload["source"] == "dream_consolidation"
-    assert payload["recent_event_count"] == 20
-    assert payload["summary"].startswith("fact 0")
 
 
 def test_session_autocompact_keeps_tail_and_continuation(tmp_path):
