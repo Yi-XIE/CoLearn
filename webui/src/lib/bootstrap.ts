@@ -68,7 +68,7 @@ export function deriveWsUrl(wsPath: string, token: string): string {
   const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
   const query = `?token=${encodeURIComponent(token)}`;
   if (typeof window === "undefined") {
-    return `ws://127.0.0.1:8765${path}${query}`;
+    return `ws://127.0.0.1:8001${path}${query}`;
   }
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;
