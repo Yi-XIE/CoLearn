@@ -15,7 +15,6 @@ from colearn.api.dependencies import (
     project_service,
     session_store,
     settings_service,
-    settings_test_service,
     state_store,
 )
 from colearn.api.routes.health import router as health_router

@@ -338,11 +338,6 @@ async def upload_knowledge_files(
     return {"task_id": task["task_id"], "message": task["message"]}
 
 
-@router.put("/api/v1/knowledge/default/{name}")
-def set_default_knowledge_base(name: str) -> dict[str, Any]:
-    return {"ok": True, "default": name}
-
-
 @router.post("/api/v1/knowledge/{name}/reindex")
 def reindex_knowledge_base(name: str) -> dict[str, Any]:
     files = knowledge_task_service.list_files(name)
@@ -369,11 +364,6 @@ def reindex_knowledge_base(name: str) -> dict[str, Any]:
         should_fail=False,
     )
     return {"task_id": task["task_id"], "message": task["message"]}
-
-
-@router.delete("/api/v1/knowledge/{name}")
-def delete_knowledge_base(name: str) -> dict[str, Any]:
-    return {"deleted": True, "name": name}
 
 
 @router.get("/api/v1/knowledge/tasks/{task_id}/stream")

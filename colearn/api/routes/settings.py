@@ -8,8 +8,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from colearn.api.dependencies import settings_service, settings_test_service
-from colearn.api.schemas import SettingsCatalogPayload, SettingsTestStartPayload, SettingsUiPayload
+from colearn.api.dependencies import settings_service
+from colearn.api.schemas import SettingsCatalogPayload, SettingsUiPayload
 
 router = APIRouter()
 
@@ -83,17 +83,3 @@ def update_settings_catalog(payload: SettingsCatalogPayload) -> dict[str, Any]:
 def apply_settings_catalog(payload: SettingsCatalogPayload) -> dict[str, Any]:
     catalog = payload.catalog
     return {"catalog": settings_service.apply_catalog(catalog if isinstance(catalog, dict) else None), "applied": True}
-
-
-@router.post("/api/v1/settings/tests/{service}/start")
-def start_settings_test(service: str, payload: SettingsTestStartPayload) -> dict[str, Any]:
-    run = settings_test_service.create_run(service, payload.catalog if isinstance(payload.catalog, dict) else {})
-    return {"run_id": run["run_id"], "detail": "", "accepted": True}
-
-
-@router.get("/api/v1/settings/tests/{service}/{run_id}/events")
-def settings_test_events(service: str, run_id: str) -> StreamingResponse:
-    run = settings_test_service.get_run(run_id)
-    if not run or run.get("service") != service:
-        raise HTTPException(status_code=404, detail="Test run not found")
-    return _message_sse(list(run.get("events") or []))

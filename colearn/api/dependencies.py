@@ -8,7 +8,6 @@ from colearn.api.state import (
     KnowledgeTaskService,
     MemoryDocStateService,
     SettingsStateService,
-    SettingsTestRunService,
 )
 from colearn.app.learning_orchestrator import LearningOrchestrator
 from colearn.paths import colearn_env_file
@@ -33,6 +32,5 @@ orchestrator = LearningOrchestrator(
 settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
 memory_doc_service = MemoryDocStateService()
 knowledge_task_service = KnowledgeTaskService(state_root=state_store.root)
-settings_test_service = SettingsTestRunService()
 
 WORKSPACE_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"

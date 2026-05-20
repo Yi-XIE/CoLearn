@@ -119,20 +119,6 @@ class SettingsCatalogPayload(BaseModel):
     catalog: dict[str, Any] = Field(default_factory=dict)
 
 
-class SettingsTestStartPayload(BaseModel):
-    catalog: dict[str, Any] = Field(default_factory=dict)
-
-
-class AuthLoginPayload(BaseModel):
-    username: str
-    password: str
-
-
-class AuthRegisterPayload(BaseModel):
-    username: str
-    password: str
-
-
 class MemoryUpdatePayload(BaseModel):
     file: Literal["summary", "profile"]
     content: str = ""

@@ -154,15 +154,6 @@ async def _run_schema_compat_checks() -> None:
         assert llm_options.status_code == 200
         assert llm_options.json()["active"]["model_id"] == "deepseek-v4-flash"
 
-        settings_test = await client.post(
-            "/api/v1/settings/tests/llm/start",
-            json={"catalog": {"version": 1}, "ignored": True},
-        )
-        assert settings_test.status_code == 200
-        payload = settings_test.json()
-        assert payload["run_id"].startswith("llm-")
-        assert payload["accepted"] is True
-
         refresh_empty = await client.post("/api/v1/memory/refresh", json={})
         assert refresh_empty.status_code == 200
         assert "changed" in refresh_empty.json()
@@ -335,8 +326,6 @@ async def _run_settings_events_checks() -> None:
         assert missing.status_code == 404
 
 
-def test_settings_test_events_endpoint() -> None:
-    anyio.run(_run_settings_events_checks)
 
 
 async def _run_memory_summary_checks() -> None:
