@@ -1,84 +1,41 @@
-"""Skill listing routes — read-only, disk SKILL.md files are the single source."""
+"""Skill listing routes — delegates to nanobot's native SkillsLoader."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+
+from nanobot.agent.skills import SkillsLoader
 
 from colearn.api.dependencies import WORKSPACE_SKILLS_DIR
 
 router = APIRouter()
 
-
-def _load_disk_skills() -> dict[str, dict[str, Any]]:
-    """Scan workspace/skills for SKILL.md files and parse YAML frontmatter."""
-    if not WORKSPACE_SKILLS_DIR.exists():
-        return {}
-    records: dict[str, dict[str, Any]] = {}
-    for skill_path in sorted(WORKSPACE_SKILLS_DIR.glob("*/SKILL.md")):
-        try:
-            content = skill_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        metadata = _parse_frontmatter(content)
-        name = str(metadata.get("name") or skill_path.parent.name).strip()
-        if not name:
-            continue
-        records[name] = {
-            "name": name,
-            "description": str(metadata.get("description") or ""),
-            "content": content,
-            "always": bool(metadata.get("always") or False),
-            "path": str(skill_path),
-        }
-    return records
-
-
-def _parse_frontmatter(markdown: str) -> dict[str, Any]:
-    """Minimal YAML-ish frontmatter parser (key: value, supports always: true)."""
-    if not markdown.startswith("---"):
-        return {}
-    parts = markdown.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    metadata: dict[str, Any] = {}
-    for raw_line in parts[1].splitlines():
-        line = raw_line.strip()
-        if not line or ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        val = value.strip().strip("\"'")
-        if val.lower() in ("true", "yes"):
-            metadata[key.strip()] = True
-        elif val.lower() in ("false", "no"):
-            metadata[key.strip()] = False
-        else:
-            metadata[key.strip()] = val
-    return metadata
+_loader = SkillsLoader(workspace=WORKSPACE_SKILLS_DIR.parent)
 
 
 @router.get("/api/v1/skills/list")
 def list_skills() -> dict[str, Any]:
-    skills = _load_disk_skills()
-    return {
-        "skills": [
-            {"name": r["name"], "description": r["description"], "always": r["always"]}
-            for r in skills.values()
-        ]
-    }
+    entries = _loader.list_skills(filter_unavailable=False)
+    skills = []
+    for entry in entries:
+        meta = _loader.get_skill_metadata(entry["name"]) or {}
+        always = bool(meta.get("always", False))
+        desc = str(meta.get("description") or entry["name"])
+        skills.append({"name": entry["name"], "description": desc, "always": always})
+    return {"skills": skills}
 
 
 @router.get("/api/v1/skills/{name}")
 def get_skill(name: str) -> dict[str, Any]:
-    skills = _load_disk_skills()
-    record = skills.get(name)
-    if not record:
+    content = _loader.load_skill(name)
+    if content is None:
         raise HTTPException(status_code=404, detail="Skill not found")
+    meta = _loader.get_skill_metadata(name) or {}
     return {
-        "name": record["name"],
-        "description": record["description"],
-        "content": record["content"],
-        "always": record["always"],
+        "name": name,
+        "description": str(meta.get("description") or name),
+        "content": content,
+        "always": bool(meta.get("always", False)),
     }
