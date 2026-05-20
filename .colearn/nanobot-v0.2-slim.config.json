@@ -71,19 +71,7 @@
     },
     "imageGeneration": {
       "enabled": false
-    },
-    "mcpServers": {
-      "colearn-ext": {
-        "command": "python",
-        "args": [
-          "-m",
-          "colearn.mcp_server"
-        ],
-        "enabledTools": [
-          "*"
-        ],
-        "toolTimeout": 30
-      }
     }
+  }
   }
 }
