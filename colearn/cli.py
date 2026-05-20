@@ -67,11 +67,86 @@ def cmd_retrieve(project_id: str, query: str, session_id: str = "") -> None:
     })
 
 
+def cmd_get_board(session_id: str) -> None:
+    ss = SessionStore(state_store=_store())
+    session = ss.get_session(session_id)
+    if not session:
+        _out({"error": "session_not_found"})
+        return
+    bf = session.board_facts or {}
+    _out({
+        "session_id": session.session_id,
+        "turn_mode": session.turn_mode or bf.get("current_turn_mode", "EXPLORE"),
+        "board_version": session.board_version,
+        "mastery_level": (bf.get("student_snapshot") or {}).get("mastery_level", 0),
+        "cognitive_load": (bf.get("student_snapshot") or {}).get("cognitive_load", "NORMAL"),
+        "active_node": (bf.get("current_progress") or {}).get("active_node_label", ""),
+        "completed_nodes": (bf.get("current_progress") or {}).get("completed_node_ids", []),
+        "blockers": (bf.get("gaps_and_blockers") or {}).get("critical_blockers", []),
+        "unverified_gaps": (bf.get("gaps_and_blockers") or {}).get("unverified_gaps", []),
+        "next_prompt_hint": (bf.get("continuation") or {}).get("next_prompt_hint", ""),
+    })
+
+
+def cmd_get_session_detail(session_id: str, messages: str = "5") -> None:
+    ss = SessionStore(state_store=_store())
+    session = ss.get_session(session_id)
+    if not session:
+        _out({"error": "session_not_found"})
+        return
+    n = int(messages)
+    recent = []
+    for msg in (session.messages or [])[-n:]:
+        recent.append({
+            "role": msg.get("role", ""),
+            "content": (msg.get("content") or "")[:200],
+            "turn_id": msg.get("turn_id", ""),
+        })
+    _out({
+        "session_id": session.session_id,
+        "project_id": session.project_id,
+        "title": session.title,
+        "status": session.status,
+        "turn_mode": session.turn_mode,
+        "board_facts": session.board_facts,
+        "recent_messages": recent,
+        "source_refs": session.source_refs,
+    })
+
+
+def cmd_list_concepts(project_id: str) -> None:
+    import re
+    from pathlib import Path
+    kb_dir = Path(colearn_state_root()) / "knowledge" / project_id
+    if not kb_dir.exists():
+        _out({"project_id": project_id, "concepts": [], "total": 0})
+        return
+    concepts = []
+    seen: set[str] = set()
+    for path in sorted(kb_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        stem = path.stem
+        for token in re.split(r"[^0-9A-Za-z一-鿿]+", stem):
+            token = token.strip()
+            if not token or len(token) < 2:
+                continue
+            key = token.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            concepts.append({"label": token, "source": path.name})
+    _out({"project_id": project_id, "concepts": concepts, "total": len(concepts)})
+
+
 COMMANDS = {
     "list_projects": cmd_list_projects,
     "list_sessions": cmd_list_sessions,
     "search_memory": cmd_search_memory,
     "retrieve": cmd_retrieve,
+    "get_board": cmd_get_board,
+    "get_session_detail": cmd_get_session_detail,
+    "list_concepts": cmd_list_concepts,
 }
 
 
