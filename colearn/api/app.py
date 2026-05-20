@@ -25,6 +25,7 @@ from colearn.api.routes.projects import router as projects_router
 from colearn.api.routes.sessions import router as sessions_router
 from colearn.api.routes.settings import router as settings_router
 from colearn.api.routes.skills import router as skills_router
+from colearn.api.gateway_proxy import router as gateway_proxy_router
 from colearn.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -51,6 +52,7 @@ app.include_router(memory_router)
 app.include_router(projects_router)
 app.include_router(sessions_router)
 app.include_router(knowledge_router)
+app.include_router(gateway_proxy_router)
 
 
 # Support test monkey-patching: when tests set `app_module.orchestrator = X`,
