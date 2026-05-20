@@ -7,13 +7,13 @@ import os
 
 
 def test_defaults_env_override(monkeypatch):
-    monkeypatch.setenv("COLEARN_TURN_CACHE_MAX", "64")
     monkeypatch.setenv("COLEARN_RUNTIME_MAX_RETRIEVAL", "2000")
+    monkeypatch.setenv("COLEARN_TURN_TIMEOUT", "60")
     # Reload to pick up env changes
     import colearn.config.defaults as m
     importlib.reload(m)
-    assert m.Defaults.TURN_CACHE_MAX_TURNS == 64
     assert m.Defaults.RUNTIME_MAX_RETRIEVAL_CHARS == 2000
+    assert m.Defaults.TURN_TIMEOUT_SECONDS == 60
     # Restore
     importlib.reload(m)
 
@@ -21,7 +21,6 @@ def test_defaults_env_override(monkeypatch):
 def test_defaults_have_sensible_values():
     from colearn.config.defaults import Defaults
     assert Defaults.TURN_TIMEOUT_SECONDS > 0
-    assert Defaults.TURN_CACHE_MAX_TURNS > 0
     assert Defaults.RUNTIME_MAX_RETRIEVAL_CHARS > 0
     assert Defaults.PROMPT_SUPPORT_MAX_ITEMS > 0
 
