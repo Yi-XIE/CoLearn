@@ -152,6 +152,9 @@ class NanobotTurnExecutor:
         )
         if request.model_preset:
             self._apply_model_preset(bot=bot, preset=request.model_preset, request=request)
+        import os
+        os.environ["COLEARN_SESSION_ID"] = request.session_id
+        os.environ["COLEARN_PROJECT_ID"] = request.project_id or ""
         timeout = request.metadata.get("turn_timeout_seconds")
         bot_coroutine = bot.run(
             prompt,
