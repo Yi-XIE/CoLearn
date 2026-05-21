@@ -285,30 +285,12 @@ class RetrievalStage:
         query: str,
     ) -> dict[str, Any]:
         try:
-            async_method = getattr(self.retrieval_service, "async_build_bundle_for_source_refs", None)
-            if callable(async_method):
-                bundle = await async_method(
-                    project_id=project.project_id,
-                    query=query,
-                    source_refs=source_refs,
-                    libraries=None,
-                )
-            elif hasattr(self.retrieval_service, "build_bundle_for_source_refs"):
-                bundle = await asyncio.to_thread(
-                    self.retrieval_service.build_bundle_for_source_refs,
-                    project_id=project.project_id,
-                    query=query,
-                    source_refs=source_refs,
-                    libraries=None,
-                )
-            else:
-                bundle = await asyncio.to_thread(
-                    self.retrieval_service.build_bundle,
-                    project=project,
-                    session=session,
-                    query=query,
-                    libraries=None,
-                )
+            bundle = await self.retrieval_service.async_build_bundle_for_source_refs(
+                project_id=project.project_id,
+                query=query,
+                source_refs=source_refs,
+                libraries=None,
+            )
         except (TimeoutError, OSError, RuntimeError) as exc:
             return {
                 "query": query,
