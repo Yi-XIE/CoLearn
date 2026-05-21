@@ -279,8 +279,10 @@ async def _serve_ws(websocket: WebSocket) -> None:
     async def send_event(event: dict[str, Any]) -> None:
         try:
             await websocket.send_json(event)
-        except Exception:
+        except WebSocketDisconnect:
             pass
+        except Exception as exc:
+            logger.warning("ws send_event failed: %s", exc)
 
     try:
         while True:

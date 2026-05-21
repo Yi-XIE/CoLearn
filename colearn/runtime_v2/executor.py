@@ -112,10 +112,25 @@ class NanobotTurnExecutor:
 
         Refuses to execute inside an active event loop (`_reject_sync_inside_event_loop`)
         because `asyncio.run` cannot be nested. Async callers must invoke
-        `_run_turn_async` directly or use `to_thread.run_sync`.
+        `run_turn_async` directly or use `to_thread.run_sync`.
         """
         _reject_sync_inside_event_loop("NanobotTurnExecutor.run_turn")
         final_text, messages, tools_used = asyncio.run(self._run_turn_async(request=request))
+        learning_result = {
+            "tool_events": [{"tool_name": name} for name in tools_used],
+            "raw_messages": messages,
+            "stream_events": list(request.metadata.get("_stream_events") or []),
+            "warnings": list(request.metadata.get("_runtime_warnings") or []),
+        }
+        return self.finalize(
+            request=request,
+            final_text=final_text,
+            learning_result=learning_result,
+        )
+
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+        """Async entry — drives nanobot directly without creating a new event loop."""
+        final_text, messages, tools_used = await self._run_turn_async(request=request)
         learning_result = {
             "tool_events": [{"tool_name": name} for name in tools_used],
             "raw_messages": messages,

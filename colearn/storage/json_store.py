@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 
 _PATH_LOCKS: dict[str, RLock] = {}
 _PATH_LOCKS_GUARD = RLock()
+_PATH_LOCKS_MAX = 256
 
 
 class JsonStateStore:
@@ -28,6 +29,9 @@ class JsonStateStore:
         with _PATH_LOCKS_GUARD:
             lock = _PATH_LOCKS.get(key)
             if lock is None:
+                if len(_PATH_LOCKS) >= _PATH_LOCKS_MAX:
+                    oldest_key = next(iter(_PATH_LOCKS))
+                    del _PATH_LOCKS[oldest_key]
                 lock = RLock()
                 _PATH_LOCKS[key] = lock
             return lock
