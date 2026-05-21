@@ -69,7 +69,7 @@ CoLearn 通过 `colearn.paths` 统一解析路径：
 - nanobot workspace：优先 `COLEARN_NANOBOT_WORKSPACE`，否则 `.colearn/nanobot-workspace`
 - env file：repo root 下的 `.env`
 
-`scripts/start-colearn-v2-gateway.ps1` 会显式设置这些环境变量，让 gateway 和 MCP 子进程使用同一套状态源。
+`scripts/start-colearn.ps1` 会显式设置这些环境变量，让 unified CoLearn server 和 MCP 子进程使用同一套状态源。
 
 ## 仍保留的边界
 

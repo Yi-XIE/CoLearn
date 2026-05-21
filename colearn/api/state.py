@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from colearn.storage import JsonStateStore
+from colearn.paths import colearn_slim_config
 
 
 def _env(name: str) -> str:
@@ -127,9 +128,10 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
             },
         ],
         "search": [
-            {"value": "brave", "label": "Brave Search"},
-            {"value": "tavily", "label": "Tavily"},
-            {"value": "perplexity", "label": "Perplexity"},
+            {"value": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
+            {"value": "brave", "label": "Brave Search", "credential": "api_key"},
+            {"value": "tavily", "label": "Tavily", "credential": "api_key"},
+            {"value": "searxng", "label": "SearXNG", "credential": "base_url"},
         ],
     },
 }
@@ -185,7 +187,10 @@ class SettingsStateService:
         self._dump()
 
     def settings(self) -> dict[str, Any]:
-        return deepcopy(self._state)
+        payload = deepcopy(self._state)
+        payload.setdefault("runtime", {})
+        payload["runtime"]["config_path"] = str(colearn_slim_config())
+        return payload
 
     def catalog(self) -> dict[str, Any]:
         return deepcopy(self._state["catalog"])
@@ -217,9 +222,10 @@ class SettingsStateService:
         services = dict(catalog.get("services") or {})
         llm_env = self._service_env_block(services.get("llm"), include_embedding=False)
         embedding_env = self._service_env_block(services.get("embedding"), include_embedding=True)
+        search_env = self._search_env_block(services.get("search"))
         lines = [
             f"{key}={self._quote_env_value(value)}"
-            for key, value in {**llm_env, **embedding_env}.items()
+            for key, value in {**llm_env, **embedding_env, **search_env}.items()
             if value is not None
         ]
         payload = "\n".join(lines).rstrip() + "\n"
@@ -263,6 +269,22 @@ class SettingsStateService:
         models = list((profile or {}).get("models") or [])
         model = next((item for item in models if str(item.get("id")) == active_model_id), models[0] if models else {})
         return dict(profile or {}), dict(model or {})
+
+    def _search_env_block(self, service: dict[str, Any] | None) -> dict[str, str | None]:
+        active_profile, _ = self._resolve_active_selection(service)
+        provider = str(active_profile.get("provider") or "").strip().lower()
+        block: dict[str, str | None] = {
+            "BRAVE_API_KEY": None,
+            "TAVILY_API_KEY": None,
+            "SEARXNG_BASE_URL": None,
+        }
+        if provider == "brave":
+            block["BRAVE_API_KEY"] = self._string_or_none(active_profile.get("api_key"))
+        elif provider == "tavily":
+            block["TAVILY_API_KEY"] = self._string_or_none(active_profile.get("api_key"))
+        elif provider == "searxng":
+            block["SEARXNG_BASE_URL"] = self._string_or_none(active_profile.get("base_url"))
+        return block
 
     def _string_or_none(self, value: Any) -> str | None:
         text = str(value or "").strip()

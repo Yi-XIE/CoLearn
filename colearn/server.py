@@ -14,6 +14,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from colearn.nanobot_bootstrap import ensure_nanobot_on_path
 from colearn.paths import colearn_repo_root
 
 
@@ -33,10 +34,19 @@ def main():
     # token issue flow. We keep an empty default in the unified server.
     import os
     os.environ.setdefault("COLEARN_NANOBOT_TOKEN_ISSUE_SECRET", "")
+    os.environ.setdefault("COLEARN_REPO_ROOT", str(repo_root))
+    os.environ.setdefault("COLEARN_NANOBOT_WORKSPACE", str(workspace))
+
+    nanobot_root = ensure_nanobot_on_path()
+    if nanobot_root is None:
+        print(
+            "Warning: bundled nanobot runtime not found under third_party. "
+            "WS runtime may fail to initialize.",
+            file=sys.stderr,
+        )
 
     # Initialize nanobot AgentLoop
     try:
-        import json
         import os
         import tempfile
         from nanobot.config.loader import load_config
@@ -70,6 +80,8 @@ def main():
         from colearn.api.ws_handler import set_agent_loop
         set_agent_loop(agent, session_manager)
         print(f"AgentLoop initialized: model={provider_snapshot.model}")
+        if nanobot_root is not None:
+            print(f"  Nanobot: {nanobot_root}")
 
     except Exception as exc:
         print(f"Warning: AgentLoop init failed ({exc}). WS will return errors but REST works.", file=sys.stderr)

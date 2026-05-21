@@ -230,9 +230,12 @@ describe("App layout", () => {
               },
               providers: {
                 search: [
-                  { value: "duckduckgo", label: "DuckDuckGo" },
-                  { value: "brave", label: "Brave Search" },
+                  { value: "duckduckgo", label: "DuckDuckGo", credential: "none" },
+                  { value: "brave", label: "Brave Search", credential: "api_key" },
                 ],
+              },
+              runtime: {
+                config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json",
               },
             }),
           };
@@ -295,20 +298,23 @@ describe("App layout", () => {
 
     expect(await screen.findByText("设置")).toBeInTheDocument();
     expect(document.title).toBe("设置 - CoLearn");
-    expect(screen.getByText("CoLearn mode")).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument(),
     );
+    expect(screen.getByText("Web Search")).toBeInTheDocument();
+    expect(
+      screen.getByText("D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json"),
+    ).toBeInTheDocument();
     expect(screen.getByText("连接")).toBeInTheDocument();
     expect(await screen.findByText("OpenRouter")).toBeInTheDocument();
     fireEvent.click(screen.getAllByText("OpenAI")[1]!);
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]!);
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-openai-key" },
     });
     fireEvent.click(screen.getByText("OpenRouter"));
     fireEvent.click(screen.getAllByText("OpenAI")[1]!);
-    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Save" }).length).toBeGreaterThan(0);
   });
 
   it("renders real knowledge garden data from the API", async () => {
@@ -522,9 +528,12 @@ describe("App layout", () => {
               },
               providers: {
                 search: [
-                  { value: "duckduckgo", label: "DuckDuckGo" },
-                  { value: "brave", label: "Brave Search" },
+                  { value: "duckduckgo", label: "DuckDuckGo", credential: "none" },
+                  { value: "brave", label: "Brave Search", credential: "api_key" },
                 ],
+              },
+              runtime: {
+                config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json",
               },
             }),
           };

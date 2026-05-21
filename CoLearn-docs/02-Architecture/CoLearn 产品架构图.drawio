@@ -19,10 +19,10 @@
         <mxCell id="6" value="Skills / Settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d8f3ff;strokeColor=#6c8ebf;fontSize=15;" vertex="1" parent="2">
           <mxGeometry x="145" y="135" width="95" height="55" as="geometry" />
         </mxCell>
-        <mxCell id="7" value="Gateway and API" style="swimlane;startSize=34;rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=18;" vertex="1" parent="1">
+        <mxCell id="7" value="Unified Server and API" style="swimlane;startSize=34;rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=18;" vertex="1" parent="1">
           <mxGeometry x="400" y="90" width="290" height="260" as="geometry" />
         </mxCell>
-        <mxCell id="8" value="nanobot gateway&#xa;slim config" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8dd;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="7">
+        <mxCell id="8" value="CoLearn unified server&#xa;slim config" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8dd;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="7">
           <mxGeometry x="35" y="55" width="220" height="55" as="geometry" />
         </mxCell>
         <mxCell id="9" value="FastAPI&#xa;colearn.api.app" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8dd;strokeColor=#d6b656;fontSize=15;" vertex="1" parent="7">

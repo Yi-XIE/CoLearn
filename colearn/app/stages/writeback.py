@@ -89,36 +89,10 @@ class WritebackStage:
     # Public entry
     # ------------------------------------------------------------------
     def run(self, ctx: TurnContext) -> None:
-        self._write_back(
-            project=ctx.project,
-            session=ctx.session,
-            request=ctx.request_with_metadata,
-            result=ctx.result,
-        )
-        # Background product compression must see the *pre-finalize* request,
-        # exactly as before — that's what the executor produced from compression.
-        self.background_finalizer.schedule(
-            project=ctx.project,
-            session=ctx.session,
-            board=ctx.board,
-            request=ctx.compressed.request,
-            result=ctx.result,
-        )
+        self._persist_turn_and_schedule_auxiliary(ctx)
 
     async def run_async(self, ctx: TurnContext) -> None:
-        self._write_back(
-            project=ctx.project,
-            session=ctx.session,
-            request=ctx.request_with_metadata,
-            result=ctx.result,
-        )
-        self.background_finalizer.schedule(
-            project=ctx.project,
-            session=ctx.session,
-            board=ctx.board,
-            request=ctx.compressed.request,
-            result=ctx.result,
-        )
+        self._persist_turn_and_schedule_auxiliary(ctx)
 
     # ------------------------------------------------------------------
     # Internals (lifted verbatim from LearningOrchestrator)
@@ -241,6 +215,26 @@ class WritebackStage:
             session.source_refs = list(project.source_refs)
         self.session_store.save_session(session)
         self.project_service.save_project(project)
+
+    def _persist_turn_and_schedule_auxiliary(self, ctx: TurnContext) -> None:
+        self._write_back(
+            project=ctx.project,
+            session=ctx.session,
+            request=ctx.request_with_metadata,
+            result=ctx.result,
+        )
+        self._schedule_auxiliary_writeback(ctx)
+
+    def _schedule_auxiliary_writeback(self, ctx: TurnContext) -> None:
+        # Auxiliary post-turn enrichment must never become part of the main turn
+        # completion contract. It always runs after core session/project writeback.
+        self.background_finalizer.schedule(
+            project=ctx.project,
+            session=ctx.session,
+            board=ctx.board,
+            request=ctx.compressed.request,
+            result=ctx.result,
+        )
 
     def _maybe_compact_session(self, session: LearningSession) -> None:
         max_messages = self.SESSION_AUTOCOMPACT_MAX_MESSAGES

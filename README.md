@@ -19,7 +19,7 @@ The mainline is now `webui + runtime_v2 + slim config`.
 - Backend API: `colearn.api.app:app`
 - Runtime layer: `colearn.runtime_v2`
 - Default config: `.colearn/nanobot-v0.2-slim.config.json`
-- Recommended gateway: `scripts/start-colearn-v2-gateway.ps1`
+- Unified local server: `python -m colearn.server`
 
 ## Notes
 

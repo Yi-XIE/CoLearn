@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from threading import Thread
 from time import time
 from typing import Any, Callable
@@ -214,29 +215,20 @@ class LearningOrchestrator:
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> LearningTurnResult:
-        """Synchronous turn entry — runs the five-stage pipeline.
-
-        Sync by design: callers (FastAPI WS handler) wrap it in `to_thread.run_sync`
-        so the nested `asyncio.run` inside the executor doesn't collide with the
-        request's event loop. Pipeline: preflight → retrieval → execute → finalize → writeback.
-        """
-        ctx = TurnContext(
-            session_id=session_id,
-            project_id=project_id,
-            user_message=user_message,
-            language=language,
-            attachments=list(attachments or []),
-            requested_skills=list(requested_skills or []),
-            stream_emit=stream_emit,
-            cancel_check=cancel_check,
+        """Synchronous compatibility wrapper over the async turn pipeline."""
+        _reject_sync_inside_event_loop("LearningOrchestrator.run_turn")
+        return asyncio.run(
+            self._run_turn_pipeline(
+                session_id=session_id,
+                user_message=user_message,
+                project_id=project_id,
+                language=language,
+                attachments=attachments,
+                requested_skills=requested_skills,
+                stream_emit=stream_emit,
+                cancel_check=cancel_check,
+            )
         )
-        ctx = self.preflight.run(ctx)
-        ctx = self.retrieval.run(ctx)
-        self.preflight.sync_project_retrieval_profile(ctx)
-        ctx = self.execute.run(ctx)
-        ctx = self.finalize.run(ctx)
-        self.writeback.run(ctx)
-        return ctx.result
 
     async def run_turn_async(
         self,
@@ -250,11 +242,30 @@ class LearningOrchestrator:
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> LearningTurnResult:
-        """Async turn entry — runs the five-stage pipeline without spawning threads.
+        """Async turn entry — the main internal turn pipeline."""
+        return await self._run_turn_pipeline(
+            session_id=session_id,
+            user_message=user_message,
+            project_id=project_id,
+            language=language,
+            attachments=attachments,
+            requested_skills=requested_skills,
+            stream_emit=stream_emit,
+            cancel_check=cancel_check,
+        )
 
-        Preferred path for the WebSocket handler. Eliminates the need for
-        `to_thread.run_sync` and nested `asyncio.run` calls.
-        """
+    async def _run_turn_pipeline(
+        self,
+        *,
+        session_id: str,
+        user_message: str,
+        project_id: str = "",
+        language: str = "zh",
+        attachments: list[dict[str, object]] | None = None,
+        requested_skills: list[str] | None = None,
+        stream_emit: Callable[[dict[str, Any]], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> LearningTurnResult:
         ctx = TurnContext(
             session_id=session_id,
             project_id=project_id,
@@ -317,22 +328,72 @@ class LearningOrchestrator:
         last_turn_result = dict(session.last_turn_result or {})
         warnings = list(last_turn_result.get("warnings") or [])
         if error is not None:
-            warning = f"product_compression_failed: {error}"
-            if warning not in warnings:
-                warnings.append(warning)
-            last_turn_result["warnings"] = warnings
-            last_turn_result["product_compression"] = {
-                **status_payload,
-                "status": "failed",
-                "finished_at": int(time()),
-                "error": str(error),
-            }
-            session.last_turn_result = last_turn_result
-            self._save_background_session_update(session)
+            self._apply_background_failure(
+                session=session,
+                last_turn_result=last_turn_result,
+                warnings=warnings,
+                status_payload=status_payload,
+                error=error,
+            )
             return
 
         if product_output is None:
             return
+        self._apply_background_success(
+            session=session,
+            project=project,
+            request=request,
+            board=board,
+            product_output=product_output,
+            last_turn_result=last_turn_result,
+            warnings=warnings,
+            status_payload=status_payload,
+        )
+
+    def _save_background_session_update(self, session: LearningSession) -> None:
+        try:
+            self.session_store.save_session(session)
+        except OSError as exc:
+            logger.warning(
+                "background session save skipped for %s: %s",
+                session.session_id,
+                exc,
+            )
+
+    def _apply_background_failure(
+        self,
+        *,
+        session: LearningSession,
+        last_turn_result: dict[str, Any],
+        warnings: list[str],
+        status_payload: dict[str, Any],
+        error: BaseException,
+    ) -> None:
+        warning = f"product_compression_failed: {error}"
+        if warning not in warnings:
+            warnings.append(warning)
+        last_turn_result["warnings"] = warnings
+        last_turn_result["product_compression"] = {
+            **status_payload,
+            "status": "failed",
+            "finished_at": int(time()),
+            "error": str(error),
+        }
+        session.last_turn_result = last_turn_result
+        self._save_background_session_update(session)
+
+    def _apply_background_success(
+        self,
+        *,
+        session: LearningSession,
+        project: LearningProject,
+        request,
+        board,
+        product_output: ProductCompressionResult,
+        last_turn_result: dict[str, Any],
+        warnings: list[str],
+        status_payload: dict[str, Any],
+    ) -> None:
         stale_board = int(session.board_version or 1) > int(board.board_version or 1) + 1
         if stale_board and "product_compression_stale_board_skipped" not in warnings:
             warnings.append("product_compression_stale_board_skipped")
@@ -357,14 +418,14 @@ class LearningOrchestrator:
         session.last_turn_result = last_turn_result
         project.latest_review = dict(pending_review)
         self._save_background_session_update(session)
-        self.project_service.save_project(project)
+        self._save_background_project_update(project, session_id=session.session_id)
 
-    def _save_background_session_update(self, session: LearningSession) -> None:
+    def _save_background_project_update(self, project: LearningProject, *, session_id: str) -> None:
         try:
-            self.session_store.save_session(session)
+            self.project_service.save_project(project)
         except OSError as exc:
             logger.warning(
-                "background session save skipped for %s: %s",
-                session.session_id,
+                "background project save skipped for session %s: %s",
+                session_id,
                 exc,
             )

@@ -170,17 +170,37 @@ class RetrievalStage:
             retrieval_query_context=retrieval_query_context,
         )
         try:
-            retrieval_bundle = await self.retrieval_service.async_build_bundle_for_source_refs(
-                project_id=project.project_id,
-                query=str(
-                    retrieval_query_context.get("final_query")
-                    or retrieval_focus.get("default_query")
-                    or user_message
-                    or ""
-                ),
-                source_refs=list(session.source_refs or project.source_subset or project.source_refs),
-                libraries=None,
+            query = str(
+                retrieval_query_context.get("final_query")
+                or retrieval_focus.get("default_query")
+                or user_message
+                or ""
             )
+            source_refs = list(session.source_refs or project.source_subset or project.source_refs)
+            async_method = getattr(self.retrieval_service, "async_build_bundle_for_source_refs", None)
+            if callable(async_method):
+                retrieval_bundle = await async_method(
+                    project_id=project.project_id,
+                    query=query,
+                    source_refs=source_refs,
+                    libraries=None,
+                )
+            elif hasattr(self.retrieval_service, "build_bundle_for_source_refs"):
+                retrieval_bundle = await asyncio.to_thread(
+                    self.retrieval_service.build_bundle_for_source_refs,
+                    project_id=project.project_id,
+                    query=query,
+                    source_refs=source_refs,
+                    libraries=None,
+                )
+            else:
+                retrieval_bundle = await asyncio.to_thread(
+                    self.retrieval_service.build_bundle,
+                    project=project,
+                    session=session,
+                    query=query,
+                    libraries=None,
+                )
         except (TimeoutError, OSError, RuntimeError) as exc:
             from colearn.learning.retrieval_bundle import empty_retrieval_bundle
             retrieval_bundle = empty_retrieval_bundle(

@@ -45,6 +45,9 @@ type RawSettingsState = {
     theme?: string;
     language?: string;
   };
+  runtime?: {
+    config_path?: string;
+  };
   catalog?: {
     version?: number;
     services?: {
@@ -55,7 +58,11 @@ type RawSettingsState = {
   };
   providers?: {
     llm?: Array<{ value?: string; label?: string; base_url?: string }>;
-    search?: Array<{ value?: string; label?: string }>;
+    search?: Array<{
+      value?: string;
+      label?: string;
+      credential?: "none" | "api_key" | "base_url";
+    }>;
   };
 };
 
@@ -122,6 +129,19 @@ function pickActiveModel(service: RawCatalogService | undefined, profile: RawCat
   );
 }
 
+function inferSearchCredential(
+  providerName: string,
+  credential?: "none" | "api_key" | "base_url",
+): "none" | "api_key" | "base_url" {
+  if (credential === "none" || credential === "api_key" || credential === "base_url") {
+    return credential;
+  }
+  const provider = providerName.trim().toLowerCase();
+  if (provider === "duckduckgo") return "none";
+  if (provider === "searxng") return "base_url";
+  return "api_key";
+}
+
 function normalizeSettingsPayload(raw: RawSettingsState): SettingsPayload {
   const services = raw.catalog?.services ?? {};
   const llmService = services.llm;
@@ -174,11 +194,14 @@ function normalizeSettingsPayload(raw: RawSettingsState): SettingsPayload {
       providers: (raw.providers?.search ?? []).map((provider) => ({
         name: String(provider.value ?? ""),
         label: String(provider.label ?? provider.value ?? ""),
-        credential: "api_key" as const,
+        credential: inferSearchCredential(
+          String(provider.value ?? ""),
+          provider.credential,
+        ),
       })),
     },
     runtime: {
-      config_path: "",
+      config_path: String(raw.runtime?.config_path ?? "").trim(),
     },
     requires_restart: false,
   };

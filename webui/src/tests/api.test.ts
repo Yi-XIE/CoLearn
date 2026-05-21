@@ -133,6 +133,7 @@ describe("webui API helpers", () => {
             },
           },
           providers: { search: [] },
+          runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
 
@@ -221,6 +222,7 @@ describe("webui API helpers", () => {
             },
           },
           providers: { search: [] },
+          runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
 
@@ -283,7 +285,10 @@ describe("webui API helpers", () => {
               },
             },
           },
-          providers: { search: [] },
+          providers: {
+            search: [{ value: "searxng", label: "SearXNG", credential: "base_url" }],
+          },
+          runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
 

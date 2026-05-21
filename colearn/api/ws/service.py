@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from threading import Thread
 from typing import Any, Callable
 
 import colearn.api.dependencies as _deps
@@ -109,6 +108,48 @@ def _run_orchestrator_turn(
     )
 
 
+async def _run_orchestrator_turn_async(
+    *,
+    turn: ActiveTurn,
+    user_message: str,
+    project_id: str,
+    project_title: str,
+    language: str,
+    attachments: list[dict[str, Any]],
+    requested_skills: list[str],
+    emit_stream_event: Callable[[dict[str, Any]], None],
+    cancel_check: Callable[[], bool],
+) -> Any:
+    orchestrator = getattr(_deps, "orchestrator", None)
+    if orchestrator is None:
+        raise RuntimeError("orchestrator not initialized")
+    _prepare_session_for_turn(turn=turn, project_id=project_id, project_title=project_title)
+    async_turn = getattr(orchestrator, "run_turn_async", None)
+    if callable(async_turn):
+        return await async_turn(
+            session_id=turn.session_id,
+            user_message=user_message,
+            project_id=project_id,
+            language=language,
+            attachments=attachments,
+            requested_skills=requested_skills,
+            stream_emit=emit_stream_event,
+            cancel_check=cancel_check,
+        )
+    return await asyncio.to_thread(
+        _run_orchestrator_turn,
+        turn=turn,
+        user_message=user_message,
+        project_id=project_id,
+        project_title=project_title,
+        language=language,
+        attachments=attachments,
+        requested_skills=requested_skills,
+        emit_stream_event=emit_stream_event,
+        cancel_check=cancel_check,
+    )
+
+
 async def _finalize_turn(turn: ActiveTurn) -> None:
     clear_active_turn(turn.turn_id, turn.session_id)
     _release_session_turn(turn.session_id, turn.turn_id)
@@ -134,11 +175,11 @@ async def execute_turn(
     def cancel_check() -> bool:
         return turn.cancel_requested
 
-    def worker() -> None:
+    async def runner() -> None:
         try:
             if turn.cancel_requested:
                 raise TurnCancelledBeforeStart("turn cancelled before execution")
-            turn.result = _run_orchestrator_turn(
+            turn.result = await _run_orchestrator_turn_async(
                 turn=turn,
                 user_message=user_message,
                 project_id=project_id,
@@ -154,15 +195,14 @@ async def execute_turn(
         finally:
             turn.done = True
             turn.finished_at = time.time()
-            loop.call_soon_threadsafe(wake_signal.set)
+            wake_signal.set()
 
-    thread = Thread(target=worker, daemon=True, name=f"colearn-turn-{turn.turn_id[:8]}")
-    thread.start()
+    task = asyncio.create_task(runner(), name=f"colearn-turn-{turn.turn_id[:8]}")
 
     while True:
         for item in turn.drain_stream_events():
             await broadcast_stream_event(turn, item)
-        if turn.done and not thread.is_alive():
+        if turn.done and task.done():
             break
         try:
             await asyncio.wait_for(wake_signal.wait(), timeout=0.1)
@@ -171,7 +211,7 @@ async def execute_turn(
         finally:
             wake_signal.clear()
 
-    thread.join(timeout=0.2)
+    await asyncio.gather(task, return_exceptions=True)
     for item in turn.drain_stream_events():
         await broadcast_stream_event(turn, item)
     latency_ms = int(((turn.finished_at or time.time()) - turn.started_at) * 1000)

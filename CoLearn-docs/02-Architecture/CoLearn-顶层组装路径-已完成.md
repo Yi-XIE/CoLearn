@@ -15,7 +15,7 @@
 ## 顶层运行链路
 
 1. `webui` 是当前可运行前端包，覆盖 Chat、Knowledge Garden、Memory、Skills、Settings。
-2. WebUI 通过 nanobot gateway 获取 bootstrap、WebSocket token、会话与基础设置能力，同时调用 CoLearn `/api/v1/*` 产品接口。
+2. WebUI 通过 unified CoLearn server 获取 bootstrap、WebSocket token、会话与基础设置能力，同时调用 CoLearn `/api/v1/*` 产品接口。
 3. `/api/v1/ws` 收到 `message` 或 `start_turn` 后，创建或恢复 session，写入 `active_turn_id`，发出 `session` 与 `stage_start` 事件。
 4. `LearningOrchestrator.run_turn()` 读取 session / project，执行 source readiness preflight，构建 Learning Board 和 State Snapshot。
 5. orchestrator 根据 Board 生成 `retrieval_focus`、`retrieval_reason` 和 `retrieval_query_context`，调用 `RetrievalService.build_bundle()` 做回合前预取，并用 `parallel_support` 对关键 query 做最多 3 路轻量并行补证。
@@ -30,7 +30,7 @@
 ## 当前默认入口
 
 - 后端 API：`uvicorn colearn.api.app:app --reload --host 127.0.0.1 --port 8000`
-- nanobot gateway：`scripts/start-colearn-v2-gateway.ps1`
+- unified local server：`python -m colearn.server`
 - slim config：`.colearn/nanobot-v0.2-slim.config.json`
 - JSON state：`.colearn/state`
 - nanobot workspace：`.colearn/nanobot-workspace`

@@ -6,6 +6,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from colearn.nanobot_bootstrap import ensure_nanobot_on_path
+
+ensure_nanobot_on_path()
+
 from nanobot.agent.skills import SkillsLoader
 
 from colearn.api.dependencies import WORKSPACE_SKILLS_DIR

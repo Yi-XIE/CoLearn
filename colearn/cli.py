@@ -205,12 +205,21 @@ COMMANDS = {
     "list_signals": cmd_list_signals,
 }
 
+COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Primary", ("get_current", "list_signals", "get_board", "get_session_detail")),
+    ("Diagnostics", ("search_memory", "retrieve", "list_concepts")),
+    ("Dev/Debug", ("list_projects", "list_sessions")),
+)
+
 
 def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
         print("Usage: python -m colearn.cli <command> [--key value ...]")
-        print(f"Commands: {', '.join(COMMANDS)}")
+        for group_name, command_names in COMMAND_GROUPS:
+            print(f"{group_name}:")
+            for command_name in command_names:
+                print(f"  - {command_name}")
         sys.exit(0)
     cmd_name = args[0]
     fn = COMMANDS.get(cmd_name)

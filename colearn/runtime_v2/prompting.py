@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from colearn.nanobot_bootstrap import ensure_nanobot_on_path
+
+ensure_nanobot_on_path()
+
 from nanobot.agent.context import ContextBuilder
 
 from colearn.learning.turn_contract import LearningTurnRequest

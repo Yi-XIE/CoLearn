@@ -27,6 +27,7 @@ nanobot = [
 test = [
     "pytest>=8",
     "pytest-cov>=5",
+    "websockets>=12",
 ]
 
 [tool.setuptools.packages.find]

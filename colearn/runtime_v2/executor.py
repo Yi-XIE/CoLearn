@@ -9,6 +9,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from colearn.nanobot_bootstrap import ensure_nanobot_on_path
+
+ensure_nanobot_on_path()
+
 from nanobot.agent.hook import AgentHook
 
 from colearn.learning.response_contract import LearningTurnResult
