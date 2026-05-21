@@ -27,7 +27,7 @@ from colearn.runtime_v2.result_bridge import normalize_learning_turn_result
 class FakeExecutor:
     last_request: Any = None
 
-    def run_turn(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
         self.last_request = request
         return LearningTurnResult(
             final_text=f"Answering: {request.user_message}",
@@ -40,7 +40,7 @@ class FakeExecutor:
         )
 
     async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
-        return self.run_turn(request=request)
+        return self._make_result(request)
 
     def finalize(
         self,

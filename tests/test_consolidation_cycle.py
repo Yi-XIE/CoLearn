@@ -57,7 +57,7 @@ def _make_orchestrator(tmp_path: Path, *, llm_responses: list[str], deriver_kwar
     return orchestrator
 
 
-def test_board_snapshot_event_appended_after_turn(tmp_path: Path):
+async def test_board_snapshot_event_appended_after_turn(tmp_path: Path):
     valid_response = json.dumps({
         "current_turn_mode": "VERIFY",
         "mastery_level": 0.6,
@@ -69,7 +69,7 @@ def test_board_snapshot_event_appended_after_turn(tmp_path: Path):
         "next_prompt_hint": "go deeper",
     })
     orchestrator = _make_orchestrator(tmp_path, llm_responses=[valid_response] * 5)
-    orchestrator.run_turn(
+    await orchestrator.run_turn_async(
         session_id="sess-1",
         project_id="proj-1",
         user_message="explain matrices",
@@ -80,9 +80,9 @@ def test_board_snapshot_event_appended_after_turn(tmp_path: Path):
     assert derived[0].payload["board_version"] >= 1
 
 
-def test_board_snapshot_failed_when_llm_returns_garbage(tmp_path: Path):
+async def test_board_snapshot_failed_when_llm_returns_garbage(tmp_path: Path):
     orchestrator = _make_orchestrator(tmp_path, llm_responses=["not json at all"] * 3)
-    orchestrator.run_turn(
+    await orchestrator.run_turn_async(
         session_id="sess-1",
         project_id="proj-1",
         user_message="hi",
@@ -92,7 +92,7 @@ def test_board_snapshot_failed_when_llm_returns_garbage(tmp_path: Path):
     assert len(failed) >= 1
 
 
-def test_no_deriver_means_no_board_snapshot_events(tmp_path: Path):
+async def test_no_deriver_means_no_board_snapshot_events(tmp_path: Path):
     """Backward-compat: without board_deriver, behavior is unchanged."""
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
@@ -114,6 +114,6 @@ def test_no_deriver_means_no_board_snapshot_events(tmp_path: Path):
         retrieval_service=FakeRetrievalService(),
         # board_deriver explicitly omitted
     )
-    orchestrator.run_turn(session_id="sess-1", project_id="proj-1", user_message="hi")
+    await orchestrator.run_turn_async(session_id="sess-1", project_id="proj-1", user_message="hi")
     events = orchestrator.memory_store.list_events_for_session("sess-1")
     assert not [e for e in events if e.kind.startswith("board_snapshot_")]

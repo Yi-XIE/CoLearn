@@ -89,17 +89,6 @@ def test_apply_model_preset_no_presets_set_directly():
     assert applied["preset"] == "any"
 
 
-def test_run_turn_inside_event_loop_raises():
-    executor = NanobotTurnExecutor()
-    request = _make_request()
-
-    async def attempt():
-        executor.run_turn(request=request)
-
-    with pytest.raises(RuntimeError, match="cannot run inside an active event loop"):
-        anyio.run(attempt)
-
-
 def test_reject_sync_inside_event_loop_outside_loop_is_noop():
     _reject_sync_inside_event_loop("test_caller")  # should not raise
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -19,7 +20,6 @@ from .utils import (
     build_compaction_summary,
     memory_excerpt,
     nanobot_history_entry,
-    run_async_or_value,
     runtime_loop,
 )
 
@@ -88,23 +88,6 @@ class WritebackStage:
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
-    def run(self, ctx: TurnContext) -> None:
-        self._write_back(
-            project=ctx.project,
-            session=ctx.session,
-            request=ctx.request_with_metadata,
-            result=ctx.result,
-        )
-        # Background product compression must see the *pre-finalize* request,
-        # exactly as before — that's what the executor produced from compression.
-        self.background_finalizer.schedule(
-            project=ctx.project,
-            session=ctx.session,
-            board=ctx.board,
-            request=ctx.compressed.request,
-            result=ctx.result,
-        )
-
     async def run_async(self, ctx: TurnContext) -> None:
         self._write_back(
             project=ctx.project,
@@ -277,7 +260,8 @@ class WritebackStage:
             logger.debug("nanobot dream not available, skipping consolidation")
             return
         try:
-            did_work = run_async_or_value(dream.run())
+            maybe = dream.run()
+            did_work = asyncio.run(maybe) if asyncio.iscoroutine(maybe) else maybe
             if not did_work:
                 return
             store = getattr(dream, "store", None) or getattr(getattr(loop, "context", None), "memory", None)
@@ -402,7 +386,8 @@ class WritebackStage:
         consolidator = getattr(loop, "consolidator", None) if loop is not None else None
         if consolidator is not None and hasattr(consolidator, "archive"):
             try:
-                summary = run_async_or_value(consolidator.archive(messages))
+                maybe = consolidator.archive(messages)
+                summary = asyncio.run(maybe) if asyncio.iscoroutine(maybe) else maybe
                 if summary:
                     return (
                         str(summary)[: self.SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS],

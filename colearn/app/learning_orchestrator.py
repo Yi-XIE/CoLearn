@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from threading import Thread
-from time import time
 from typing import Any, Callable
+
+from time import time
 
 from colearn.logging_config import get_logger
 
@@ -20,6 +20,7 @@ from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
 from colearn.runtime_v2.executor import NanobotTurnExecutor
 from colearn.sessions.store import LearningSession, SessionStore
+from .background_finalizer import BackgroundTurnFinalizer
 from .source_preflight import SourceReadinessPreflight
 from .stages import (
     TurnContext,
@@ -31,96 +32,6 @@ from .stages import (
 )
 
 logger = get_logger(__name__)
-
-from colearn.utils.async_guards import reject_sync_inside_event_loop as _reject_sync_inside_event_loop
-
-
-class BackgroundTurnFinalizer:
-    def __init__(
-        self,
-        *,
-        product_compression: ProductCompressionBridge,
-        on_result: Callable[..., None],
-    ) -> None:
-        self.product_compression = product_compression
-        self.on_result = on_result
-        self._threads: list[Thread] = []
-
-    def schedule(
-        self,
-        *,
-        project: LearningProject,
-        session: LearningSession,
-        board,
-        request,
-        result,
-    ) -> None:
-        """Spawn a daemon Thread for product compression that may outlive the turn."""
-        self._threads = [t for t in self._threads if t.is_alive()]
-        status_payload = {
-            "status": "scheduled",
-            "started_at": int(time()),
-            "finished_at": None,
-            "error": "",
-            "base_board_version": int(board.board_version or 1),
-        }
-        worker = Thread(
-            target=self._run,
-            kwargs={
-                "project": project,
-                "session": session,
-                "board": board,
-                "request": request,
-                "result": result,
-                "status_payload": status_payload,
-            },
-            daemon=True,
-        )
-        self._threads.append(worker)
-        worker.start()
-
-    def shutdown(self, timeout: float = 5.0) -> None:
-        for t in self._threads:
-            t.join(timeout=timeout)
-        self._threads = [t for t in self._threads if t.is_alive()]
-
-    def _run(
-        self,
-        *,
-        project: LearningProject,
-        session: LearningSession,
-        board,
-        request,
-        result,
-        status_payload: dict[str, Any],
-    ) -> None:
-        try:
-            product_output = self.product_compression.compress(
-                project=project,
-                session=session,
-                board=board,
-                request=request,
-                final_text=result.final_text,
-            )
-            self.on_result(
-                session_id=session.session_id,
-                project_id=project.project_id,
-                request=request,
-                board=board,
-                product_output=product_output,
-                error=None,
-                status_payload=status_payload,
-            )
-        except Exception as exc:
-            self.on_result(
-                session_id=session.session_id,
-                project_id=project.project_id,
-                request=request,
-                board=board,
-                product_output=None,
-                error=exc,
-                status_payload=status_payload,
-            )
 
 
 class LearningOrchestrator:
@@ -196,40 +107,6 @@ class LearningOrchestrator:
     def shutdown(self, timeout: float = 5.0) -> None:
         self.background_finalizer.shutdown(timeout=timeout)
 
-    def run_turn(
-        self,
-        *,
-        session_id: str,
-        user_message: str,
-        project_id: str = "",
-        language: str = "zh",
-        attachments: list[dict[str, object]] | None = None,
-        requested_skills: list[str] | None = None,
-        stream_emit: Callable[[dict[str, Any]], None] | None = None,
-    ) -> LearningTurnResult:
-        """Synchronous turn entry — runs the five-stage pipeline.
-
-        Sync by design: callers (FastAPI WS handler) wrap it in `to_thread.run_sync`
-        so the nested `asyncio.run` inside the executor doesn't collide with the
-        request's event loop. Pipeline: preflight → retrieval → execute → finalize → writeback.
-        """
-        ctx = TurnContext(
-            session_id=session_id,
-            project_id=project_id,
-            user_message=user_message,
-            language=language,
-            attachments=list(attachments or []),
-            requested_skills=list(requested_skills or []),
-            stream_emit=stream_emit,
-        )
-        ctx = self.preflight.run(ctx)
-        ctx = self.retrieval.run(ctx)
-        self.preflight.sync_project_retrieval_profile(ctx)
-        ctx = self.execute.run(ctx)
-        ctx = self.finalize.run(ctx)
-        self.writeback.run(ctx)
-        return ctx.result
-
     async def run_turn_async(
         self,
         *,
@@ -262,31 +139,6 @@ class LearningOrchestrator:
         ctx = self.finalize.run(ctx)
         await self.writeback.run_async(ctx)
         return ctx.result
-
-    # ------------------------------------------------------------------
-    # Proxy methods — delegate to stages so tests that call private methods
-    # on the orchestrator directly continue to work unchanged.
-    # ------------------------------------------------------------------
-    def _build_parallel_support(self, *, project, session, retrieval_query_context):
-        return self.retrieval._build_parallel_support(
-            project=project,
-            session=session,
-            retrieval_query_context=retrieval_query_context,
-        )
-
-    def _write_back(self, *, project, session, request, result):
-        return self.writeback._write_back(
-            project=project,
-            session=session,
-            request=request,
-            result=result,
-        )
-
-    def _maybe_compact_session(self, session):
-        return self.writeback._maybe_compact_session(session)
-
-    def _maybe_consolidate_memory(self, project, session, result):
-        return self.writeback._maybe_consolidate_memory(project, session, result)
 
     def apply_background_result(
         self,

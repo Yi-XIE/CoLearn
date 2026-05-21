@@ -26,6 +26,7 @@ nanobot = [
 ]
 test = [
     "pytest>=8",
+    "pytest-asyncio>=0.23",
     "pytest-cov>=5",
 ]
 
@@ -36,3 +37,4 @@ exclude = ["third_party*", "tests*", "webui*", "skills*", "scripts*", "CoLearn-d
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--basetemp=.tmp-pytest-local"
+asyncio_mode = "auto"
