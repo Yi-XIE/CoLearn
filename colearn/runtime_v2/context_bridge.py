@@ -30,6 +30,7 @@ def build_learning_turn_request(
     attachments: list[dict[str, Any]] | None = None,
     requested_skills: list[str] | None = None,
     stream_emit: Callable[[dict[str, Any]], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> LearningTurnRequest:
     metadata = metadata or {}
@@ -53,5 +54,6 @@ def build_learning_turn_request(
         attachments=attachments or [],
         requested_skills=requested_skills or [],
         stream_emit=stream_emit,
+        cancel_check=cancel_check,
         metadata=metadata,
     )

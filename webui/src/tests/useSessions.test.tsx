@@ -64,16 +64,16 @@ describe("useSessions", () => {
   it("removes a session from the local list after delete succeeds", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
         preview: "Alpha",
       },
       {
-        key: "websocket:chat-b",
-        channel: "websocket",
+        key: "chat-b",
+        channel: "",
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
@@ -89,19 +89,19 @@ describe("useSessions", () => {
     await waitFor(() => expect(result.current.sessions).toHaveLength(2));
 
     await act(async () => {
-      await result.current.deleteChat("websocket:chat-a");
+      await result.current.deleteChat("chat-a");
     });
 
-    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a");
-    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
+    expect(api.deleteSession).toHaveBeenCalledWith("tok", "chat-a");
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["chat-b"]);
   });
 
   it("refreshes sessions when the websocket reports a session update", async () => {
     vi.mocked(api.listSessions)
       .mockResolvedValueOnce([
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
@@ -110,8 +110,8 @@ describe("useSessions", () => {
       ])
       .mockResolvedValueOnce([
         {
-          key: "websocket:chat-a",
-          channel: "websocket",
+          key: "chat-a",
+          channel: "",
           chatId: "chat-a",
           createdAt: "2026-04-16T10:00:00Z",
           updatedAt: "2026-04-16T10:01:00Z",
@@ -158,7 +158,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-media"), {
+    const { result } = renderHook(() => useSessionHistory("chat-media"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -193,7 +193,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-video"), {
+    const { result } = renderHook(() => useSessionHistory("chat-video"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -220,7 +220,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-reasoning"), {
+    const { result } = renderHook(() => useSessionHistory("chat-reasoning"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -249,7 +249,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-tools"), {
+    const { result } = renderHook(() => useSessionHistory("chat-tools"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -280,7 +280,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-pending"), {
+    const { result } = renderHook(() => useSessionHistory("chat-pending"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -297,7 +297,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-done"), {
+    const { result } = renderHook(() => useSessionHistory("chat-done"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -309,7 +309,7 @@ describe("useSessions", () => {
   it("treats missing transcript (404) as empty history", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue(null);
 
-    const { result } = renderHook(() => useSessionHistory("websocket:new-chat"), {
+    const { result } = renderHook(() => useSessionHistory("new-chat"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -322,8 +322,8 @@ describe("useSessions", () => {
   it("keeps the session in the list when delete fails", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
@@ -340,10 +340,10 @@ describe("useSessions", () => {
 
     await expect(
       act(async () => {
-        await result.current.deleteChat("websocket:chat-a");
+        await result.current.deleteChat("chat-a");
       }),
     ).rejects.toThrow("boom");
 
-    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["chat-a"]);
   });
 });

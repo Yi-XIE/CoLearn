@@ -32,4 +32,5 @@ class LearningTurnRequest:
     attachments: list[dict[str, Any]] = field(default_factory=list)
     requested_skills: list[str] = field(default_factory=list)
     stream_emit: Callable[[dict[str, Any]], None] | None = None
+    cancel_check: Callable[[], bool] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

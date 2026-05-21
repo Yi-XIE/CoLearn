@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+from types import SimpleNamespace
 
 import anyio
 import httpx
@@ -187,6 +188,7 @@ class FakeWebSocketOrchestrator:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.last_kwargs = {}
+        self.executor = None
 
     def run_turn(self, **kwargs):
         self.last_kwargs = dict(kwargs)
@@ -215,6 +217,40 @@ class FakeWebSocketOrchestrator:
                 }
             ],
         )
+
+
+async def _run_ws_cancel_bridge_check() -> None:
+    from colearn.api import ws_handler
+
+    sent: list[dict[str, object]] = []
+
+    async def send_event(event: dict[str, object]) -> None:
+        sent.append(event)
+
+    class FakeExecutor:
+        def __init__(self) -> None:
+            self.cancelled_session_id: str | None = None
+
+        def cancel_session(self, session_id: str) -> bool:
+            self.cancelled_session_id = session_id
+            return True
+
+    executor = FakeExecutor()
+    turn = ws_handler.ActiveTurn(turn_id="turn-1", session_id="session-1", started_at=1.0)
+    ws_handler.remember_active_turn(turn)
+    original = getattr(ws_handler._deps, "orchestrator", None)
+    ws_handler._deps.orchestrator = SimpleNamespace(executor=executor)
+    try:
+        await ws_handler._handle_cancel_turn(frame={"turn_id": "turn-1"}, send_event=send_event)
+        assert turn.cancel_requested is True
+        assert executor.cancelled_session_id == "session-1"
+        assert sent == []
+    finally:
+        ws_handler._deps.orchestrator = original
+
+
+def test_ws_cancel_turn_bridges_to_executor() -> None:
+    anyio.run(_run_ws_cancel_bridge_check)
 
 
 

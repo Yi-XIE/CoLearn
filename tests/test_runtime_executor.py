@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from types import SimpleNamespace
 from typing import Any
 
@@ -248,3 +249,39 @@ def test_run_turn_async_swallows_stream_emit_exception():
     anyio.run(run)
     warnings = request.metadata.get("_runtime_warnings", [])
     assert any("stream_emit_failed:RuntimeError" in w for w in warnings)
+
+
+def test_cancel_session_returns_false_without_active_loop():
+    executor = NanobotTurnExecutor()
+    assert executor.cancel_session("missing") is False
+
+
+def test_cancel_session_dispatches_runtime_cancel(monkeypatch):
+    called: dict[str, Any] = {}
+
+    async def fake_cancel(key: str) -> int:
+        called["key"] = key
+        return 1
+
+    class FakeFuture:
+        def result(self, timeout=None):
+            called["timeout"] = timeout
+            return 1
+
+        def cancel(self):
+            called["cancelled"] = True
+
+    loop = SimpleNamespace(is_closed=lambda: False)
+    executor = NanobotTurnExecutor(_bot=SimpleNamespace(_loop=SimpleNamespace(_cancel_active_tasks=fake_cancel)))
+    executor._active_loops_by_session = {"s1": loop}
+
+    def fake_run_coroutine_threadsafe(coro, target_loop):
+      called["loop"] = target_loop
+      asyncio.run(coro)
+      return FakeFuture()
+
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+    assert executor.cancel_session("s1") is True
+    assert called["key"] == "colearn:s1"
+    assert called["loop"] is loop
+    assert called["timeout"] == 2.0

@@ -1,32 +1,30 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { MemoryPanel } from "@/components/panels/MemoryPanel";
 import { KnowledgeGardenPanel } from "@/components/panels/KnowledgeGardenPanel";
 import { SkillsPanel } from "@/components/panels/SkillsPanel";
-import { Sidebar } from "@/components/Sidebar";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { Sidebar } from "@/components/Sidebar";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useSessions } from "@/hooks/useSessions";
 import { useTheme } from "@/hooks/useTheme";
-import { OfflineNanobotClient } from "@/lib/nanobot-client";
+import { ColearnWsClient } from "@/lib/nanobot-client";
 import type { ChatSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 
-type BootState =
-  | {
-      client: OfflineNanobotClient;
-      token: string;
-      modelName: string | null;
-    };
+type BootState = {
+  client: ColearnWsClient;
+  token: string;
+  modelName: string | null;
+};
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
-const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 const BRAND_NAME = "CoLearn";
-const SETTINGS_TITLE = "设置";
 
 type ShellView = "chat" | "knowledge" | "memory" | "skills" | "settings";
 
@@ -41,15 +39,37 @@ function readSidebarOpen(): boolean {
   }
 }
 
+function deriveApiWsUrl(): string {
+  if (typeof window === "undefined") return "ws://127.0.0.1:8001/api/v1/ws";
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${window.location.host}/api/v1/ws`;
+}
+
+function viewTitle(view: ShellView): string {
+  switch (view) {
+    case "knowledge":
+      return "\u77e5\u8bc6\u82b1\u56ed";
+    case "memory":
+      return "\u8bb0\u5fc6";
+    case "skills":
+      return "\u6280\u80fd";
+    case "settings":
+      return "\u8bbe\u7f6e";
+    default:
+      return BRAND_NAME;
+  }
+}
+
 export default function App() {
   const [state, setState] = useState<BootState>(() => ({
-    client: new OfflineNanobotClient(),
+    client: new ColearnWsClient({ url: deriveApiWsUrl(), baseUrl: "" }),
     token: "",
     modelName: null,
   }));
 
   useEffect(() => {
     let cancelled = false;
+    state.client.connect();
     (async () => {
       try {
         const boot = await fetch("/api/v1/system/status", { credentials: "same-origin" });
@@ -62,8 +82,9 @@ export default function App() {
     })();
     return () => {
       cancelled = true;
+      state.client.close();
     };
-  }, []);
+  }, [state.client]);
 
   const handleModelNameChange = useCallback((modelName: string | null) => {
     setState((current) => ({ ...current, modelName }));
@@ -93,9 +114,6 @@ function Shell({
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ key: string; label: string } | null>(null);
-  const restartSawDisconnectRef = useRef(false);
-  const [restartToast, setRestartToast] = useState<string | null>(null);
-  const [isRestarting, setIsRestarting] = useState(false);
 
   useEffect(() => {
     try {
@@ -107,7 +125,7 @@ function Shell({
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
-    return sessions.find((s) => s.key === activeKey) ?? null;
+    return sessions.find((session) => session.key === activeKey) ?? null;
   }, [sessions, activeKey]);
 
   const closeDesktopSidebar = useCallback(() => setDesktopSidebarOpen(false), []);
@@ -118,21 +136,21 @@ function Shell({
       typeof window !== "undefined" &&
       window.matchMedia("(min-width: 1024px)").matches;
     if (isDesktop) {
-      setDesktopSidebarOpen((v) => !v);
+      setDesktopSidebarOpen((value) => !value);
     } else {
-      setMobileSidebarOpen((v) => !v);
+      setMobileSidebarOpen((value) => !value);
     }
   }, []);
 
   const onCreateChat = useCallback(async () => {
     try {
       const chatId = await createChat();
-      setActiveKey(`websocket:${chatId}`);
+      setActiveKey(chatId);
       setView("chat");
       setMobileSidebarOpen(false);
       return chatId;
-    } catch (e) {
-      console.error("Failed to create chat", e);
+    } catch (error) {
+      console.error("Failed to create chat", error);
       return null;
     }
   }, [createChat]);
@@ -159,54 +177,15 @@ function Shell({
     });
   }, [sessions]);
 
-  const onRestart = useCallback(() => {
-    const chatId = activeSession?.chatId ?? client.defaultChatId;
-    if (!chatId) return;
-    restartSawDisconnectRef.current = false;
-    setIsRestarting(true);
-    try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
-    } catch {
-      // ignore storage errors
-    }
-    client.sendMessage(chatId, "/restart");
-  }, [activeSession?.chatId, client]);
-
   useEffect(() => {
     return client.onRuntimeModelUpdate((modelName) => onModelNameChange(modelName));
   }, [client, onModelNameChange]);
-
-  useEffect(() => {
-    return client.onStatus((status) => {
-      let startedAt = 0;
-      try {
-        startedAt = Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
-      } catch {
-        startedAt = 0;
-      }
-      if (!startedAt) return;
-      if (status !== "open") {
-        restartSawDisconnectRef.current = true;
-        return;
-      }
-      const elapsedMs = Date.now() - startedAt;
-      if (!restartSawDisconnectRef.current && elapsedMs < 1500) return;
-      try {
-        window.localStorage.removeItem(RESTART_STARTED_KEY);
-      } catch {
-        // ignore storage errors
-      }
-      setIsRestarting(false);
-      setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
-      window.setTimeout(() => setRestartToast(null), 3500);
-    });
-  }, [client, t]);
 
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
     const key = pendingDelete.key;
     const deletingActive = activeKey === key;
-    const currentIndex = sessions.findIndex((s) => s.key === key);
+    const currentIndex = sessions.findIndex((session) => session.key === key);
     const fallbackKey = deletingActive
       ? sessions[currentIndex + 1]?.key ?? sessions[currentIndex - 1]?.key ?? null
       : activeKey;
@@ -214,9 +193,9 @@ function Shell({
     if (deletingActive) setActiveKey(fallbackKey);
     try {
       await deleteChat(key);
-    } catch (e) {
+    } catch (error) {
       if (deletingActive) setActiveKey(key);
-      console.error("Failed to delete session", e);
+      console.error("Failed to delete session", error);
     }
   }, [activeKey, deleteChat, pendingDelete, sessions]);
 
@@ -227,24 +206,12 @@ function Shell({
     : BRAND_NAME;
 
   useEffect(() => {
-    if (view === "settings") {
-      document.title = `${SETTINGS_TITLE} - ${BRAND_NAME}`;
-      return;
-    }
-    if (view === "knowledge") {
-      document.title = `知识花园 - ${BRAND_NAME}`;
-      return;
-    }
-    if (view === "memory") {
-      document.title = `记忆 - ${BRAND_NAME}`;
-      return;
-    }
-    if (view === "skills") {
-      document.title = `技能 - ${BRAND_NAME}`;
+    if (view !== "chat") {
+      document.title = `${viewTitle(view)} - ${BRAND_NAME}`;
       return;
     }
     document.title = activeSession ? `${headerTitle} - ${BRAND_NAME}` : BRAND_NAME;
-  }, [activeSession, headerTitle, view, t]);
+  }, [activeSession, headerTitle, view]);
 
   const sidebarProps = {
     activeView: view,
@@ -359,8 +326,8 @@ function Shell({
               onBackToChat={onBackToChat}
               onModelNameChange={onModelNameChange}
               onLogout={onLogout}
-              onRestart={onRestart}
-              isRestarting={isRestarting}
+              onRestart={undefined}
+              isRestarting={false}
             />
           </div>
         ) : null}
@@ -372,16 +339,6 @@ function Shell({
         onCancel={() => setPendingDelete(null)}
         onConfirm={onConfirmDelete}
       />
-
-      {restartToast ? (
-        <div
-          role="status"
-          className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
-        >
-          {restartToast}
-        </div>
-      ) : null}
     </div>
   );
 }
-

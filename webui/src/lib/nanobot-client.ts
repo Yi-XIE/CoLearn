@@ -6,11 +6,13 @@ import type {
   OutboundMedia,
   GoalStateWsPayload,
 } from "./types";
+export { ColearnWsClient } from "./colearn-ws-client";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
 const WS_OPEN = 1;
 const WS_CLOSING = 2;
+const MAX_PENDING_INBOUND = 2000;
 
 /** Inbound WebSocket ``console.log`` / parse-failure ``console.warn``.
  *
@@ -50,11 +52,11 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   return row;
 }
 
-type Unsubscribe = () => void;
-type EventHandler = (ev: InboundEvent) => void;
-type StatusHandler = (status: ConnectionStatus) => void;
-type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
-type SessionUpdateHandler = (chatId: string) => void;
+export type Unsubscribe = () => void;
+export type EventHandler = (ev: InboundEvent) => void;
+export type StatusHandler = (status: ConnectionStatus) => void;
+export type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
+export type SessionUpdateHandler = (chatId: string) => void;
 
 /** Structured connection-level errors surfaced to the UI.
  *
@@ -70,7 +72,7 @@ export type StreamError =
    * ``maxMessageBytes`` on the server. */
   | { kind: "message_too_big" };
 
-type ErrorHandler = (error: StreamError) => void;
+export type ErrorHandler = (error: StreamError) => void;
 
 interface PendingNewChat {
   resolve: (chatId: string) => void;
@@ -129,7 +131,6 @@ export class NanobotClient implements NanobotClientLike {
   private chatHandlers = new Map<string, Set<EventHandler>>();
   /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
-  private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
@@ -425,7 +426,7 @@ export class NanobotClient implements NanobotClientLike {
       this.pendingInboundByChat.set(chatId, q);
     }
     q.push(ev);
-    const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
+    const over = q.length - MAX_PENDING_INBOUND;
     if (over > 0) {
       q.splice(0, over);
     }

@@ -50,6 +50,7 @@ class ExecuteStage:
             attachments=ctx.attachments,
             requested_skills=ctx.requested_skills,
             stream_emit=ctx.stream_emit,
+            cancel_check=ctx.cancel_check,
         )
         compressed, normalized = self._execute_turn(
             project=ctx.project,
@@ -80,6 +81,7 @@ class ExecuteStage:
         attachments: list[dict[str, object]],
         requested_skills: list[str],
         stream_emit: Callable[[dict[str, Any]], None] | None,
+        cancel_check: Callable[[], bool] | None,
     ):
         return build_learning_turn_request(
             session_id=session.session_id,
@@ -100,6 +102,7 @@ class ExecuteStage:
             attachments=attachments,
             requested_skills=requested_skills,
             stream_emit=stream_emit,
+            cancel_check=cancel_check,
             metadata=self._build_turn_request_metadata(
                 source_profile=source_profile,
                 retrieval_context=retrieval_context,

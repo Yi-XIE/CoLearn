@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { NanobotClient } from "@/lib/nanobot-client";
+import { ColearnWsClient, NanobotClient } from "@/lib/nanobot-client";
 
 /**
  * Minimal fake WebSocket implementing the subset NanobotClient touches.
@@ -237,6 +237,78 @@ describe("NanobotClient", () => {
 
     expect(globalHandler).toHaveBeenCalledWith("chat-title");
     expect(chatHandler).not.toHaveBeenCalled();
+  });
+
+  it("dispatches session updates globally for Colearn WS frames", () => {
+    const client = new ColearnWsClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const globalHandler = vi.fn();
+    const chatHandler = vi.fn();
+    client.onSessionUpdate(globalHandler);
+    client.onChat("chat-title", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({ event: "session_updated", chat_id: "chat-title" });
+
+    expect(globalHandler).toHaveBeenCalledWith("chat-title");
+    expect(chatHandler).not.toHaveBeenCalled();
+  });
+
+  it("attaches chat subscriptions on open for Colearn WS sessions", () => {
+    const client = new ColearnWsClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.onChat("chat-open", vi.fn());
+    client.connect();
+    lastSocket().fakeOpen();
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({ type: "attach", chat_id: "chat-open" }),
+    );
+  });
+
+  it("resumes Colearn WS turns from the next sequence after reconnect", async () => {
+    const client = new ColearnWsClient({
+      url: "ws://test",
+      reconnect: true,
+      maxBackoffMs: 10,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.onChat("chat-reconnect", vi.fn());
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      type: "session",
+      session_id: "chat-reconnect",
+      turn_id: "turn-1",
+      seq: 0,
+      timestamp: 1,
+    });
+    lastSocket().fakeMessage({
+      type: "content_delta",
+      session_id: "chat-reconnect",
+      turn_id: "turn-1",
+      seq: 1,
+      content: "hi",
+      timestamp: 2,
+    });
+
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(20);
+
+    const reconnected = lastSocket();
+    expect(reconnected).not.toBe(FakeSocket.instances[0]);
+    reconnected.fakeOpen();
+
+    expect(reconnected.sent).toContain(
+      JSON.stringify({ type: "subscribe_turn", turn_id: "turn-1", after_seq: 2 }),
+    );
   });
 
   it("resolves newChat() via the server-assigned chat_id", async () => {

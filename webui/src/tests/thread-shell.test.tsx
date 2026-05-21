@@ -74,8 +74,8 @@ function wrap(client: ReturnType<typeof makeClient>, children: ReactNode) {
 
 function session(chatId: string) {
   return {
-    key: `websocket:${chatId}`,
-    channel: "websocket" as const,
+    key: chatId,
+    channel: "" as const,
     chatId,
     createdAt: null,
     updatedAt: null,
@@ -250,7 +250,7 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByText("delete me cleanly")).not.toBeInTheDocument();
     });
-    expect(screen.getByPlaceholderText("先告诉我你想从哪开始")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("先告诉我你想从哪里开始")).toBeInTheDocument();
   });
 
   it("creates a chat only when the blank landing sends a first message", async () => {
@@ -394,9 +394,9 @@ describe("ThreadShell", () => {
 
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByPlaceholderText("先告诉我你想从哪开始")).toBeInTheDocument(),
+      expect(screen.getByPlaceholderText("先告诉我你想从哪里开始")).toBeInTheDocument(),
     );
-    const input = screen.getByPlaceholderText("先告诉我你想从哪开始");
+    const input = screen.getByPlaceholderText("先告诉我你想从哪里开始");
     expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });

@@ -81,7 +81,7 @@ export interface ToolProgressEvent {
 }
 
 export interface ChatSummary {
-  /** Server-side session key, e.g. ``websocket:abcd-...``. */
+  /** Server-side session key, usually the raw ``session_id``. */
   key: string;
   /** Local channel + chat_id parts derived from ``key`` for convenience. */
   channel: string;

@@ -56,13 +56,13 @@ export function useSessions(): {
 
   const createChat = useCallback(async (): Promise<string> => {
     const chatId = await client.newChat();
-    const key = `websocket:${chatId}`;
+    const key = chatId;
     // Optimistic insert; a subsequent refresh will replace it with the
     // authoritative row once the server persists the session.
     setSessions((prev) => [
       {
         key,
-        channel: "websocket",
+        channel: "",
         chatId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

@@ -67,7 +67,7 @@ vi.mock("@/lib/nanobot-client", () => {
     updateUrl = vi.fn();
   }
 
-  return { NanobotClient: MockClient };
+  return { NanobotClient: MockClient, ColearnWsClient: MockClient };
 });
 
 import App from "@/App";
@@ -107,16 +107,16 @@ describe("App layout", () => {
   it("switches to the next session when deleting the active chat", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
         preview: "First chat",
       },
       {
-        key: "websocket:chat-b",
-        channel: "websocket",
+        key: "chat-b",
+        channel: "",
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
@@ -145,7 +145,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() =>
-      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a"),
+      expect(deleteChatSpy).toHaveBeenCalledWith("chat-a"),
     );
     await waitFor(() =>
       expect(
@@ -159,8 +159,8 @@ describe("App layout", () => {
   it("opens the settings view from the sidebar footer", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
@@ -170,44 +170,116 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        if (String(input).includes("/api/v1/settings")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "auto",
-                resolved_provider: "openai",
-                has_api_key: true,
+              ui: {
+                theme: "light",
+                language: "zh",
               },
-              providers: [
-                {
-                  name: "openai",
-                  label: "OpenAI",
-                  configured: true,
-                  api_key_hint: "open-key",
+              catalog: {
+                services: {
+                  llm: {
+                    active_profile_id: "openai",
+                    active_model_id: "gpt-4o",
+                    profiles: [
+                      {
+                        id: "openai",
+                        name: "OpenAI",
+                        binding: "openai",
+                        provider: "openai",
+                        api_key: "open-key",
+                        models: [
+                          {
+                            id: "gpt-4o",
+                            name: "openai/gpt-4o",
+                            model: "openai/gpt-4o",
+                          },
+                        ],
+                      },
+                      {
+                        id: "openrouter",
+                        name: "OpenRouter",
+                        binding: "openrouter",
+                        provider: "openrouter",
+                        base_url: "https://openrouter.ai/api/v1",
+                        models: [
+                          {
+                            id: "openrouter-auto",
+                            name: "openrouter/auto",
+                            model: "openrouter/auto",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  search: {
+                    active_profile_id: "brave",
+                    profiles: [
+                      {
+                        id: "brave",
+                        name: "Brave Search",
+                        provider: "brave",
+                        api_key: "brave-key",
+                      },
+                    ],
+                  },
                 },
-                {
-                  name: "openrouter",
-                  label: "OpenRouter",
-                  configured: false,
-                  default_api_base: "https://openrouter.ai/api/v1",
-                },
-              ],
-              web_search: {
-                provider: "brave",
-                api_key_hint: "brave-key",
-                base_url: null,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
+              },
+              providers: {
+                search: [
+                  { value: "duckduckgo", label: "DuckDuckGo" },
+                  { value: "brave", label: "Brave Search" },
                 ],
               },
-              runtime: {
-                config_path: "/tmp/config.json",
+            }),
+          };
+        }
+        if (String(input).includes("/api/v1/settings/catalog")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              catalog: {
+                services: {
+                  llm: {
+                    active_profile_id: "openai",
+                    active_model_id: "gpt-4o",
+                    profiles: [
+                      {
+                        id: "openai",
+                        name: "OpenAI",
+                        binding: "openai",
+                        provider: "openai",
+                        api_key: "open-key",
+                        models: [
+                          {
+                            id: "gpt-4o",
+                            name: "openai/gpt-4o",
+                            model: "openai/gpt-4o",
+                          },
+                        ],
+                      },
+                      {
+                        id: "openrouter",
+                        name: "OpenRouter",
+                        binding: "openrouter",
+                        provider: "openrouter",
+                        base_url: "https://openrouter.ai/api/v1",
+                        models: [
+                          {
+                            id: "openrouter-auto",
+                            name: "openrouter/auto",
+                            model: "openrouter/auto",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
               },
-              requires_restart: false,
             }),
           };
         }
@@ -223,19 +295,20 @@ describe("App layout", () => {
 
     expect(await screen.findByText("设置")).toBeInTheDocument();
     expect(document.title).toBe("设置 - CoLearn");
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.getByText("CoLearn mode")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument(),
+    );
     expect(screen.getByText("连接")).toBeInTheDocument();
-    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("OpenAI"));
+    expect(await screen.findByText("OpenRouter")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("OpenAI")[1]!);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-openai-key" },
     });
     fireEvent.click(screen.getByText("OpenRouter"));
-    fireEvent.click(screen.getByText("OpenAI"));
-    expect(screen.getByRole("button", { name: "重启运行时" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("OpenAI")[1]!);
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
   it("renders real knowledge garden data from the API", async () => {
@@ -385,16 +458,16 @@ describe("App layout", () => {
   it("returns from settings to the blank start page when no session was active", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
         preview: "First chat",
       },
       {
-        key: "websocket:chat-b",
-        channel: "websocket",
+        key: "chat-b",
+        channel: "",
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
@@ -404,31 +477,55 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        if (String(input).includes("/api/v1/settings")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "openai",
-                resolved_provider: "openai",
-                has_api_key: true,
+              ui: {
+                theme: "light",
+                language: "zh",
               },
-              providers: [{ name: "openai", label: "OpenAI", configured: true }],
-              web_search: {
-                provider: "duckduckgo",
-                api_key_hint: null,
-                base_url: null,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
+              catalog: {
+                services: {
+                  llm: {
+                    active_profile_id: "openai",
+                    active_model_id: "gpt-4o",
+                    profiles: [
+                      {
+                        id: "openai",
+                        name: "OpenAI",
+                        binding: "openai",
+                        provider: "openai",
+                        api_key: "open-key",
+                        models: [
+                          {
+                            id: "gpt-4o",
+                            name: "openai/gpt-4o",
+                            model: "openai/gpt-4o",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  search: {
+                    active_profile_id: "duckduckgo",
+                    profiles: [
+                      {
+                        id: "duckduckgo",
+                        name: "DuckDuckGo",
+                        provider: "duckduckgo",
+                      },
+                    ],
+                  },
+                },
+              },
+              providers: {
+                search: [
+                  { value: "duckduckgo", label: "DuckDuckGo" },
+                  { value: "brave", label: "Brave Search" },
                 ],
               },
-              runtime: {
-                config_path: "/tmp/config.json",
-              },
-              requires_restart: false,
             }),
           };
         }
@@ -454,8 +551,8 @@ describe("App layout", () => {
   it("filters sidebar sessions through the lightweight search row", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-alpha",
-        channel: "websocket",
+        key: "chat-alpha",
+        channel: "",
         chatId: "chat-alpha",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -463,8 +560,8 @@ describe("App layout", () => {
         preview: "Project planning notes",
       },
       {
-        key: "websocket:chat-beta",
-        channel: "websocket",
+        key: "chat-beta",
+        channel: "",
         chatId: "chat-beta",
         createdAt: "2026-04-15T10:00:00Z",
         updatedAt: "2026-04-15T10:00:00Z",
@@ -497,8 +594,8 @@ describe("App layout", () => {
   it("opens a blank start page without creating an empty chat", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",

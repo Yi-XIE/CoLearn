@@ -202,6 +202,7 @@ class LearningOrchestrator:
         attachments: list[dict[str, object]] | None = None,
         requested_skills: list[str] | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ):
         """Synchronous turn entry — runs the five-stage pipeline.
 
@@ -217,6 +218,7 @@ class LearningOrchestrator:
             attachments=list(attachments or []),
             requested_skills=list(requested_skills or []),
             stream_emit=stream_emit,
+            cancel_check=cancel_check,
         )
         ctx = self.preflight.run(ctx)
         ctx = self.retrieval.run(ctx)

@@ -17,7 +17,7 @@ describe("webui API helpers", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ deleted: true, key: "websocket:chat-1", messages: [] }),
+        json: async () => ({ deleted: true, key: "chat-1", messages: [] }),
       }),
     );
   });
@@ -81,45 +81,226 @@ describe("webui API helpers", () => {
     expect(support?.prompt_support_bundle[0]?.summary).toBe("Core idea");
   });
 
-  it("serializes settings updates as a narrow query string", async () => {
+  it("updates settings through the catalog apply flow", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: {
+            services: {
+              llm: {
+                active_profile_id: "openrouter",
+                active_model_id: "model-1",
+                profiles: [
+                  {
+                    id: "openrouter",
+                    binding: "openrouter",
+                    provider: "openrouter",
+                    models: [{ id: "model-1", name: "old-model", model: "old-model" }],
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ catalog: { services: {} } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ applied: true }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: {
+            services: {
+              llm: {
+                active_profile_id: "openrouter",
+                active_model_id: "model-1",
+                profiles: [
+                  {
+                    id: "openrouter",
+                    binding: "openrouter",
+                    provider: "openrouter",
+                    api_key: "sk-test",
+                    models: [{ id: "model-1", name: "openrouter/test", model: "openrouter/test" }],
+                  },
+                ],
+              },
+            },
+          },
+          providers: { search: [] },
+        }),
+      } as Response);
+
     await updateSettings("tok", {
       model: "openrouter/test",
       provider: "openrouter",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/settings/update?model=openrouter%2Ftest&provider=openrouter",
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/settings/catalog",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/settings/catalog",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/settings/apply",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
       }),
     );
   });
 
-  it("serializes provider settings updates without returning secrets", async () => {
+  it("updates provider settings through catalog persistence", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: {
+            services: {
+              llm: {
+                profiles: [
+                  { id: "openrouter", binding: "openrouter", provider: "openrouter" },
+                ],
+              },
+              embedding: {
+                profiles: [
+                  { id: "openrouter-embed", binding: "openrouter", provider: "openrouter" },
+                ],
+              },
+            },
+          },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ catalog: { services: {} } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ applied: true }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: {
+            services: {
+              llm: {
+                profiles: [
+                  {
+                    id: "openrouter",
+                    binding: "openrouter",
+                    provider: "openrouter",
+                    api_key: "sk-or-test",
+                    base_url: "https://openrouter.ai/api/v1",
+                  },
+                ],
+              },
+            },
+          },
+          providers: { search: [] },
+        }),
+      } as Response);
+
     await updateProviderSettings("tok", {
       provider: "openrouter",
       apiKey: "sk-or-test",
       apiBase: "https://openrouter.ai/api/v1",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/settings/catalog",
       expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
+        method: "PUT",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
       }),
     );
   });
 
-  it("serializes web search settings updates", async () => {
+  it("updates web search settings through catalog persistence", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: {
+            services: {
+              search: {
+                active_profile_id: "search-1",
+                profiles: [{ id: "search-1", provider: "duckduckgo" }],
+              },
+            },
+          },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ catalog: { services: {} } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ applied: true }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: {
+            services: {
+              search: {
+                active_profile_id: "search-1",
+                profiles: [
+                  {
+                    id: "search-1",
+                    provider: "searxng",
+                    base_url: "https://search.example.com",
+                  },
+                ],
+              },
+            },
+          },
+          providers: { search: [] },
+        }),
+      } as Response);
+
     await updateWebSearchSettings("tok", {
       provider: "searxng",
       baseUrl: "https://search.example.com",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com",
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/settings/catalog",
       expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
+        method: "PUT",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
       }),
     );
   });
@@ -133,7 +314,7 @@ describe("webui API helpers", () => {
             session_id: "websocket:chat-1",
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
-            title: "优化 WebUI 标题",
+            title: "Generated title",
           },
         ],
       }),
@@ -142,7 +323,9 @@ describe("webui API helpers", () => {
     await expect(listSessions("tok")).resolves.toMatchObject([
       {
         key: "websocket:chat-1",
-        title: "优化 WebUI 标题",
+        channel: "websocket",
+        chatId: "chat-1",
+        title: "Generated title",
         preview: "",
       },
     ]);

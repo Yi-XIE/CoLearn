@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from nanobot.agent.hook import AgentHook
@@ -27,6 +29,10 @@ class TurnTimeoutError(TimeoutError):
     """Raised when a turn exceeds the configured timeout."""
 
 
+class TurnCancelledError(RuntimeError):
+    """Raised when a turn is cancelled cooperatively."""
+
+
 from colearn.utils.async_guards import reject_sync_inside_event_loop as _reject_sync_inside_event_loop
 
 
@@ -39,6 +45,12 @@ class NanobotTurnExecutor:
     retrieval_service: RetrievalService | None = None
     memory_store: EventMemoryStore | None = None
     _bot: Any = None
+    _active_loops_by_session: dict[str, asyncio.AbstractEventLoop] | None = None
+    _active_loops_lock: Lock = Lock()
+
+    def __post_init__(self) -> None:
+        if self._active_loops_by_session is None:
+            self._active_loops_by_session = {}
 
     @staticmethod
     def _coerce_stream_event(event_type: str, content: str = "", **metadata: Any) -> dict[str, Any]:
@@ -123,8 +135,11 @@ class NanobotTurnExecutor:
     ) -> tuple[str, list[dict[str, Any]], list[str]]:
         prompt = build_turn_prompt(request)
         bot = self._get_bot()
+        session_key = f"colearn:{request.session_id}"
         stream_events: list[dict[str, Any]] = []
         event_index = 0
+        active_loop = asyncio.get_running_loop()
+        self._register_session_loop(request.session_id, active_loop)
 
         def emit_stream_event(event: dict[str, Any]) -> None:
             nonlocal event_index
@@ -155,20 +170,57 @@ class NanobotTurnExecutor:
         timeout = request.metadata.get("turn_timeout_seconds")
         bot_coroutine = bot.run(
             prompt,
-            session_key=f"colearn:{request.session_id}",
+            session_key=session_key,
             hooks=[self._StreamHook(emit_stream_event)],
         )
         try:
+            if request.cancel_check is not None and request.cancel_check():
+                raise TurnCancelledError(f"turn {request.turn_id or '?'} cancelled before runtime start")
             if timeout is not None and float(timeout) > 0:
                 result = await asyncio.wait_for(bot_coroutine, timeout=float(timeout))
             else:
                 result = await bot_coroutine
+        except asyncio.CancelledError as exc:
+            raise TurnCancelledError(f"turn {request.turn_id or '?'} cancelled") from exc
         except asyncio.TimeoutError as exc:
             raise TurnTimeoutError(
                 f"turn {request.turn_id or '?'} exceeded timeout of {timeout}s"
             ) from exc
-        request.metadata["_stream_events"] = stream_events
+        finally:
+            request.metadata["_stream_events"] = stream_events
+            self._unregister_session_loop(request.session_id, active_loop)
         return result.content, result.messages, result.tools_used
+
+    def cancel_session(self, session_id: str) -> bool:
+        with self._active_loops_lock:
+            loop = (self._active_loops_by_session or {}).get(session_id)
+        if loop is None or loop.is_closed() or self._bot is None:
+            return False
+        bot_loop = getattr(self._bot, "_loop", None)
+        if bot_loop is None or not hasattr(bot_loop, "_cancel_active_tasks"):
+            return False
+        future = asyncio.run_coroutine_threadsafe(
+            bot_loop._cancel_active_tasks(f"colearn:{session_id}"),
+            loop,
+        )
+        try:
+            return bool(future.result(timeout=2.0))
+        except (TimeoutError, concurrent.futures.TimeoutError, RuntimeError):
+            future.cancel()
+            return False
+
+    def _register_session_loop(self, session_id: str, loop: asyncio.AbstractEventLoop) -> None:
+        with self._active_loops_lock:
+            assert self._active_loops_by_session is not None
+            self._active_loops_by_session[session_id] = loop
+
+    def _unregister_session_loop(self, session_id: str, loop: asyncio.AbstractEventLoop) -> None:
+        with self._active_loops_lock:
+            if self._active_loops_by_session is None:
+                return
+            current = self._active_loops_by_session.get(session_id)
+            if current is loop:
+                self._active_loops_by_session.pop(session_id, None)
 
     def _apply_model_preset(self, *, bot: Any, preset: str, request: LearningTurnRequest) -> None:
         loop = getattr(bot, "_loop", None)

@@ -38,7 +38,9 @@ function toModelBadgeLabel(modelName: string | null): string | null {
   return leaf || trimmed;
 }
 
-function toLearningGoalLabel(goalState: { active?: boolean; ui_summary?: string | null; objective?: string | null } | undefined): string | null {
+function toLearningGoalLabel(
+  goalState: { active?: boolean; ui_summary?: string | null; objective?: string | null } | undefined,
+): string | null {
   if (!goalState?.active) return null;
   const summary = goalState.ui_summary?.trim();
   if (summary) return `Learning goal: ${summary}`;
@@ -51,6 +53,15 @@ interface PendingFirstMessage {
   content: string;
   images?: SendImage[];
 }
+
+const HERO_PLACEHOLDERS = [
+  "\u5148\u544a\u8bc9\u6211\u4f60\u60f3\u4ece\u54ea\u91cc\u5f00\u59cb",
+  "\u628a\u4f60\u7684\u5b66\u4e60\u76ee\u6807\u53d1\u7ed9\u6211",
+  "\u8f93\u5165\u4e00\u53e5\u8bdd\uff0c\u6211\u6765\u5e2e\u4f60\u5c55\u5f00",
+  "\u8bf4\u8bf4\u4f60\u73b0\u5728\u6700\u60f3\u5f04\u61c2\u4ec0\u4e48",
+  "\u5148\u5199\u4e0b\u4f60\u60f3\u5b66\u7684\u65b9\u5411",
+  "\u544a\u8bc9\u6211\u4eca\u5929\u60f3\u63a8\u8fdb\u4ec0\u4e48",
+];
 
 export function ThreadShell({
   session,
@@ -78,9 +89,7 @@ export function ThreadShell({
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
-  /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
-  /** Skip one message-cache write right after chatId changes (messages may not match yet). */
   const skipLayoutCacheRef = useRef(false);
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
@@ -90,6 +99,7 @@ export function ThreadShell({
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
+
   const refreshLearningSupport = useCallback(async () => {
     if (!chatId) {
       setLearningSupport(null);
@@ -107,6 +117,7 @@ export function ThreadShell({
     onTurnEnd?.();
     void refreshLearningSupport();
   }, [onTurnEnd, refreshLearningSupport]);
+
   const {
     messages,
     isStreaming,
@@ -129,7 +140,6 @@ export function ThreadShell({
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const goalHeaderLabel = useMemo(() => toLearningGoalLabel(goalState), [goalState]);
-
   const showHeroComposer = messages.length === 0 && !loading;
 
   useEffect(() => {
@@ -138,11 +148,6 @@ export function ThreadShell({
     const appliedVersion = appliedHistoryVersionRef.current.get(chatId) ?? 0;
     const hasPendingCanonicalHydrate = pendingCanonicalHydrateRef.current.has(chatId);
     const hasNewCanonicalHistory = hasPendingCanonicalHydrate && historyVersion > appliedVersion;
-    // When the user switches away and back, keep the local in-memory thread
-    // state (including not-yet-persisted messages) instead of replacing it with
-    // whatever the history endpoint currently knows about. Once a fresh
-    // canonical replay arrives (e.g. after ``session_updated`` refresh), prefer it
-    // so rendering converges to the same shape as a manual refresh.
     setMessages((prev) => {
       if (hasNewCanonicalHistory && historical.length > 0) {
         pendingCanonicalHydrateRef.current.delete(chatId);
@@ -158,8 +163,7 @@ export function ThreadShell({
       if (historical.length > 0) messageCacheRef.current.set(chatId, next);
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, chatId, historical, historyVersion]);
+  }, [chatId, historical, historyVersion, loading, setMessages]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -189,32 +193,25 @@ export function ThreadShell({
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = chatId;
-    } else {
-      if (prevChatIdForCacheRef.current) {
-        messageCacheRef.current.set(
-          prevChatIdForCacheRef.current,
-          projectWebuiThreadMessages(messages),
-        );
-        skipLayoutCacheRef.current = true;
-      }
-      prevChatIdForCacheRef.current = null;
-    }
-  }, [chatId, messages]);
-
-  // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
-  // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
-  // sees the *previous* chat's ``messages`` (avoids stale rows leaking across sessions).
-  useEffect(() => {
-    if (!chatId) {
       return;
     }
+    if (prevChatIdForCacheRef.current) {
+      messageCacheRef.current.set(
+        prevChatIdForCacheRef.current,
+        projectWebuiThreadMessages(messages),
+      );
+      skipLayoutCacheRef.current = true;
+    }
+    prevChatIdForCacheRef.current = null;
+  }, [chatId, messages]);
+
+  useEffect(() => {
+    if (!chatId) return;
     if (skipLayoutCacheRef.current) {
       skipLayoutCacheRef.current = false;
       return;
     }
-    if (loading) {
-      return;
-    }
+    if (loading) return;
     messageCacheRef.current.set(chatId, projectWebuiThreadMessages(messages));
   }, [chatId, loading, messages]);
 
@@ -255,28 +252,14 @@ export function ThreadShell({
   const composer = (
     <>
       {streamError ? (
-        <StreamErrorNotice
-          error={streamError}
-          onDismiss={dismissStreamError}
-        />
+        <StreamErrorNotice error={streamError} onDismiss={dismissStreamError} />
       ) : null}
       {session ? (
         <ThreadComposer
           onSend={handleThreadSend}
           disabled={!chatId}
           isStreaming={isStreaming}
-          placeholder={
-            showHeroComposer
-              ? [
-                  "先告诉我你想从哪开始",
-                  "把你的学习目标发给我",
-                  "输入一句话，我来帮你展开",
-                  "说说你现在最想弄懂什么",
-                  "先写下你想学的方向",
-                  "告诉我今天想推进什么",
-                ]
-              : t("thread.composer.placeholderThread")
-          }
+          placeholder={showHeroComposer ? HERO_PLACEHOLDERS : t("thread.composer.placeholderThread")}
           modelLabel={toModelBadgeLabel(modelName)}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
@@ -289,18 +272,7 @@ export function ThreadShell({
           onSend={handleWelcomeSend}
           disabled={booting}
           isStreaming={isStreaming}
-          placeholder={
-            booting
-              ? t("thread.composer.placeholderOpening")
-              : [
-                  "先告诉我你想从哪开始",
-                  "把你的学习目标发给我",
-                  "输入一句话，我来帮你展开",
-                  "说说你现在最想弄懂什么",
-                  "先写下你想学的方向",
-                  "告诉我今天想推进什么",
-                ]
-          }
+          placeholder={booting ? t("thread.composer.placeholderOpening") : HERO_PLACEHOLDERS}
           modelLabel={toModelBadgeLabel(modelName)}
           variant="hero"
           slashCommands={slashCommands}

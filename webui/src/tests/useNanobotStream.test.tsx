@@ -646,7 +646,7 @@ describe("useNanobotStream", () => {
     });
 
     expect(fake.client.sendMessage).toHaveBeenLastCalledWith("chat-stop", "/stop");
-    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.isStreaming).toBe(true);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("long task");
   });
