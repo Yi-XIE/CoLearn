@@ -8,8 +8,11 @@ from typing import Any, Callable
 
 from colearn.logging_config import get_logger
 
+from colearn.config.defaults import Defaults
 from colearn.compression import ProductCompressionBridge, ProductCompressionResult, RuntimeCompressionBridge
 from colearn.knowledge import KnowledgeWorkspaceService
+from colearn.learning.board_deriver import BoardSnapshotDeriver
+from colearn.learning.response_contract import LearningTurnResult
 from colearn.memory.store import EventMemoryStore
 from colearn.paths import colearn_nanobot_workspace
 from colearn.projects.models import LearningProject
@@ -53,6 +56,7 @@ class BackgroundTurnFinalizer:
         result,
     ) -> None:
         """Spawn a daemon Thread for product compression that may outlive the turn."""
+        self._threads = [t for t in self._threads if t.is_alive()]
         status_payload = {
             "status": "scheduled",
             "started_at": int(time()),
@@ -120,11 +124,11 @@ class BackgroundTurnFinalizer:
 
 
 class LearningOrchestrator:
-    SESSION_AUTOCOMPACT_MAX_MESSAGES = 24
-    SESSION_AUTOCOMPACT_KEEP_TAIL = 12
+    SESSION_AUTOCOMPACT_MAX_MESSAGES = Defaults.SESSION_AUTOCOMPACT_MAX_MESSAGES
+    SESSION_AUTOCOMPACT_KEEP_TAIL = Defaults.SESSION_AUTOCOMPACT_KEEP_TAIL
     SESSION_AUTOCOMPACT_SUMMARY_MAX_CHARS = 800
-    DREAM_CONSOLIDATION_EVENT_INTERVAL = 20
-    BOARD_DERIVATION_EVENT_INTERVAL = 5
+    DREAM_CONSOLIDATION_EVENT_INTERVAL = Defaults.DREAM_CONSOLIDATION_EVENT_INTERVAL
+    BOARD_DERIVATION_EVENT_INTERVAL = Defaults.BOARD_DERIVATION_EVENT_INTERVAL
 
     def __init__(
         self,
@@ -137,7 +141,7 @@ class LearningOrchestrator:
         executor: NanobotTurnExecutor | None = None,
         runtime_compression: RuntimeCompressionBridge | None = None,
         product_compression: ProductCompressionBridge | None = None,
-        board_deriver: Any = None,
+        board_deriver: BoardSnapshotDeriver | None = None,
     ) -> None:
         self.project_service = project_service or LearningProjectService()
         self.session_store = session_store or SessionStore()
@@ -202,7 +206,7 @@ class LearningOrchestrator:
         attachments: list[dict[str, object]] | None = None,
         requested_skills: list[str] | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
-    ):
+    ) -> LearningTurnResult:
         """Synchronous turn entry — runs the five-stage pipeline.
 
         Sync by design: callers (FastAPI WS handler) wrap it in `to_thread.run_sync`
@@ -224,6 +228,39 @@ class LearningOrchestrator:
         ctx = self.execute.run(ctx)
         ctx = self.finalize.run(ctx)
         self.writeback.run(ctx)
+        return ctx.result
+
+    async def run_turn_async(
+        self,
+        *,
+        session_id: str,
+        user_message: str,
+        project_id: str = "",
+        language: str = "zh",
+        attachments: list[dict[str, object]] | None = None,
+        requested_skills: list[str] | None = None,
+        stream_emit: Callable[[dict[str, Any]], None] | None = None,
+    ) -> LearningTurnResult:
+        """Async turn entry — runs the five-stage pipeline without spawning threads.
+
+        Preferred path for the WebSocket handler. Eliminates the need for
+        `to_thread.run_sync` and nested `asyncio.run` calls.
+        """
+        ctx = TurnContext(
+            session_id=session_id,
+            project_id=project_id,
+            user_message=user_message,
+            language=language,
+            attachments=list(attachments or []),
+            requested_skills=list(requested_skills or []),
+            stream_emit=stream_emit,
+        )
+        ctx = self.preflight.run(ctx)
+        ctx = await self.retrieval.run_async(ctx)
+        self.preflight.sync_project_retrieval_profile(ctx)
+        ctx = await self.execute.run_async(ctx)
+        ctx = self.finalize.run(ctx)
+        await self.writeback.run_async(ctx)
         return ctx.result
 
     # ------------------------------------------------------------------

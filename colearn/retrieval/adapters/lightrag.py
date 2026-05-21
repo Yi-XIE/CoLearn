@@ -438,7 +438,8 @@ class LightRAGClient:
             }
         try:
             backend_result = await self._backend.initialize(self._kb_name, indexed_paths)
-        except Exception as exc:
+        except (TimeoutError, OSError, urllib_error.URLError) as exc:
+            logger.warning("lightrag sync transient failure (will not retry): %s", exc)
             return {
                 "project_id": project_key,
                 "enabled": True,
@@ -446,7 +447,18 @@ class LightRAGClient:
                 "source_count": len(source_refs),
                 "indexed_paths": indexed_paths,
                 "sync_status": "error",
-                "warnings": [f"lightrag_sync_failed:{exc}"],
+                "warnings": [f"lightrag_sync_transient:{type(exc).__name__}:{exc}"],
+            }
+        except Exception as exc:
+            logger.error("lightrag sync permanent failure: %s", exc)
+            return {
+                "project_id": project_key,
+                "enabled": True,
+                "synced": False,
+                "source_count": len(source_refs),
+                "indexed_paths": indexed_paths,
+                "sync_status": "error",
+                "warnings": [f"lightrag_sync_permanent:{type(exc).__name__}:{exc}"],
             }
         if not isinstance(backend_result, dict):
             backend_result = {"status": "synced" if backend_result else "submitted", "track_id": ""}
@@ -624,6 +636,12 @@ def get_lightrag_client(
             base_url=config.base_url,
             api_key=config.api_key,
         )
+    if resolved_backend is None and config.provider == "local":
+        from .local_backend import LocalLightRAGBackend
+        resolved_backend = LocalLightRAGBackend()
+    if resolved_backend is None and config.provider == "lightrag_hku":
+        from .lightrag_hku_backend import LightRAGHKUBackend
+        resolved_backend = LightRAGHKUBackend(working_root=workspace / ".colearn" / "lightrag-store")
     if enabled is False:
         raise LightRAGConfigurationError("LightRAG was explicitly disabled by the caller.")
     if resolved_backend is None:

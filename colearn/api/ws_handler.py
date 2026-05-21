@@ -15,7 +15,6 @@ import time
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
-from anyio import to_thread
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from colearn.logging_config import get_logger
@@ -56,8 +55,10 @@ async def unified_ws(websocket: WebSocket):
     async def send_event(event: dict[str, Any]):
         try:
             await websocket.send_json(event)
-        except Exception:
+        except WebSocketDisconnect:
             pass
+        except Exception as exc:
+            logger.warning("ws send_event failed: %s", exc)
 
     try:
         while True:
@@ -143,13 +144,12 @@ async def _handle_message(
         "started_at": start,
     })
 
-    # Bridge synchronous executor stream events to async WS frames via a queue.
+    # Bridge stream events to async WS frames via a queue.
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     def stream_emit(ev: dict[str, Any]) -> None:
-        # Called from worker thread (executor's hooks). Hand off to event loop.
-        asyncio.run_coroutine_threadsafe(queue.put(ev), loop)
+        loop.call_soon_threadsafe(queue.put_nowait, ev)
 
     async def pump_events(stop_event: asyncio.Event) -> None:
         """Translate executor's stream events into front-end WS protocol."""
@@ -183,13 +183,11 @@ async def _handle_message(
     pump_task = asyncio.create_task(pump_events(stop))
 
     try:
-        result = await to_thread.run_sync(
-            lambda: orchestrator.run_turn(
-                session_id=session_id,
-                user_message=content,
-                project_id=project_id,
-                stream_emit=stream_emit,
-            )
+        result = await orchestrator.run_turn_async(
+            session_id=session_id,
+            user_message=content,
+            project_id=project_id,
+            stream_emit=stream_emit,
         )
         # Drain any remaining queued events before sending final message.
         stop.set()
@@ -214,8 +212,8 @@ async def _handle_message(
         stop.set()
         try:
             await pump_task
-        except Exception:
-            pass
+        except Exception as pump_exc:
+            logger.error("pump_task failed during error recovery: %s", pump_exc)
         await send_event({"event": "error", "chat_id": chat_id, "detail": str(exc)})
     finally:
         await send_event({"event": "goal_status", "chat_id": chat_id, "status": "idle"})

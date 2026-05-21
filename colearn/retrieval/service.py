@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from colearn.config.defaults import Defaults
 from colearn.knowledge.library import SourceLibrary
 from colearn.learning.retrieval_bundle import (
     RetrievalBundle,
@@ -15,6 +16,7 @@ from colearn.learning.retrieval_bundle import (
 from colearn.projects.models import LearningProject
 from colearn.sessions.store import LearningSession
 from .adapters import LightRAGClientProtocol, LightRAGConfigurationError, get_lightrag_client
+from .cache import RetrievalCache
 
 
 class RetrievalService:
@@ -31,11 +33,13 @@ class RetrievalService:
         *,
         lightrag_client: LightRAGClientProtocol | None = None,
         workspace: str | Path | None = None,
+        cache: RetrievalCache | None = None,
     ) -> None:
         self._library_root = Path(library_root).resolve() if library_root else None
         self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
         self._lightrag_client = lightrag_client
         self._lightrag_error: Exception | None = None
+        self._cache = cache or RetrievalCache()
         if self._lightrag_client is None:
             try:
                 self._lightrag_client = get_lightrag_client(workspace=self._workspace)
@@ -74,14 +78,18 @@ class RetrievalService:
                 warning="No project sources attached yet.",
             )
 
+        cached = self._cache.get(project_id=project_id, query=query, source_refs=source_refs)
+        if cached is not None:
+            return cached
+
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
         lightrag_result = self._require_lightrag_client().retrieve_project_context(
             project_id=project_id,
             query=query,
             source_refs=normalized_refs,
-            top_k=5,
+            top_k=Defaults.RETRIEVAL_TOP_K,
         )
-        return self._bundle_from_lightrag_result(
+        bundle = self._bundle_from_lightrag_result(
             lightrag_result=lightrag_result,
             project_id=project_id,
             query=query,
@@ -89,6 +97,9 @@ class RetrievalService:
             normalized_refs=normalized_refs,
             libraries=libraries or [],
         )
+        if bundle.retrieval_status == "ready":
+            self._cache.put(project_id=project_id, query=query, source_refs=source_refs, value=bundle)
+        return bundle
 
     async def async_build_bundle_for_source_refs(
         self,
@@ -106,6 +117,10 @@ class RetrievalService:
                 warning="No project sources attached yet.",
             )
 
+        cached = self._cache.get(project_id=project_id, query=query, source_refs=source_refs)
+        if cached is not None:
+            return cached
+
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
         client = self._require_lightrag_client()
         async_retrieve = getattr(client, "async_retrieve_project_context", None)
@@ -114,7 +129,7 @@ class RetrievalService:
                 project_id=project_id,
                 query=query,
                 source_refs=normalized_refs,
-                top_k=5,
+                top_k=Defaults.RETRIEVAL_TOP_K,
             )
         else:
             lightrag_result = await asyncio.to_thread(
@@ -122,9 +137,9 @@ class RetrievalService:
                 project_id=project_id,
                 query=query,
                 source_refs=normalized_refs,
-                top_k=5,
+                top_k=Defaults.RETRIEVAL_TOP_K,
             )
-        return self._bundle_from_lightrag_result(
+        bundle = self._bundle_from_lightrag_result(
             lightrag_result=lightrag_result,
             project_id=project_id,
             query=query,
@@ -132,6 +147,9 @@ class RetrievalService:
             normalized_refs=normalized_refs,
             libraries=libraries or [],
         )
+        if bundle.retrieval_status == "ready":
+            self._cache.put(project_id=project_id, query=query, source_refs=source_refs, value=bundle)
+        return bundle
 
     def _bundle_from_lightrag_result(
         self,
@@ -241,6 +259,7 @@ class RetrievalService:
     ) -> dict[str, Any]:
         source_refs = session.source_refs or project.source_subset or project.source_refs
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
+        self._cache.invalidate_project(project.project_id)
         return self._require_lightrag_client().sync_project_sources(project.project_id, normalized_refs)
 
     def sync_source_refs(
@@ -251,6 +270,7 @@ class RetrievalService:
         libraries: list[SourceLibrary] | None = None,
     ) -> dict[str, Any]:
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
+        self._cache.invalidate_project(project_id)
         return self._require_lightrag_client().sync_project_sources(project_id, normalized_refs)
 
     async def async_sync_source_refs(
@@ -261,6 +281,7 @@ class RetrievalService:
         libraries: list[SourceLibrary] | None = None,
     ) -> dict[str, Any]:
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
+        self._cache.invalidate_project(project_id)
         client = self._require_lightrag_client()
         async_sync = getattr(client, "async_sync_project_sources", None)
         if async_sync is not None:

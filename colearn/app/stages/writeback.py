@@ -105,6 +105,21 @@ class WritebackStage:
             result=ctx.result,
         )
 
+    async def run_async(self, ctx: TurnContext) -> None:
+        self._write_back(
+            project=ctx.project,
+            session=ctx.session,
+            request=ctx.request_with_metadata,
+            result=ctx.result,
+        )
+        self.background_finalizer.schedule(
+            project=ctx.project,
+            session=ctx.session,
+            board=ctx.board,
+            request=ctx.compressed.request,
+            result=ctx.result,
+        )
+
     # ------------------------------------------------------------------
     # Internals (lifted verbatim from LearningOrchestrator)
     # ------------------------------------------------------------------

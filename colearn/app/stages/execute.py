@@ -62,6 +62,36 @@ class ExecuteStage:
         ctx.result = normalized
         return ctx
 
+    async def run_async(self, ctx: TurnContext) -> TurnContext:
+        ctx.turn_policy = policy(
+            board=ctx.board,
+            user_message=ctx.user_message,
+        )
+        ctx.request = self._build_turn_request(
+            session=ctx.session,
+            project=ctx.project,
+            board=ctx.board,
+            snapshot=ctx.snapshot,
+            source_profile=ctx.source_profile,
+            retrieval_context=ctx.retrieval_context(),
+            user_message=ctx.user_message,
+            language=ctx.language,
+            turn_policy=ctx.turn_policy,
+            attachments=ctx.attachments,
+            requested_skills=ctx.requested_skills,
+            stream_emit=ctx.stream_emit,
+        )
+        compressed, normalized = await self._execute_turn_async(
+            project=ctx.project,
+            session=ctx.session,
+            request=ctx.request,
+            snapshot=ctx.snapshot,
+            turn_policy=ctx.turn_policy,
+        )
+        ctx.compressed = compressed
+        ctx.result = normalized
+        return ctx
+
     # ------------------------------------------------------------------
     # Internals (lifted verbatim from LearningOrchestrator)
     # ------------------------------------------------------------------
@@ -140,6 +170,40 @@ class ExecuteStage:
         )
         compressed = self.runtime_compression.compress(request=prepared_request)
         result = self.executor.run_turn(request=compressed.request)
+        closure_payload = build_learning_closure(
+            project=project,
+            session=session,
+            request=compressed.request,
+            final_text=result.final_text,
+            raw_learning_result=result.raw_learning_result,
+            warnings=[
+                *list(result.warnings),
+                *compressed.notes,
+            ],
+        )
+        normalized = self.executor.finalize(
+            request=compressed.request,
+            final_text=result.final_text,
+            learning_result=closure_payload,
+        )
+        return compressed, normalized
+
+    async def _execute_turn_async(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        request,
+        snapshot,
+        turn_policy,
+    ) -> tuple[Any, Any]:
+        prepared_request = before_turn(
+            request=request,
+            snapshot=snapshot,
+            decision=turn_policy,
+        )
+        compressed = self.runtime_compression.compress(request=prepared_request)
+        result = await self.executor.run_turn_async(request=compressed.request)
         closure_payload = build_learning_closure(
             project=project,
             session=session,

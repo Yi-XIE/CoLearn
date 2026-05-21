@@ -61,6 +61,23 @@ class RetrievalStage:
         ctx.prompt_support_bundle = retrieval_context["prompt_support_bundle"]
         return ctx
 
+    async def run_async(self, ctx: TurnContext) -> TurnContext:
+        retrieval_context = await self._prepare_retrieval_context_async(
+            project=ctx.project,
+            session=ctx.session,
+            board=ctx.board,
+            source_profile=ctx.source_profile,
+            user_message=ctx.user_message,
+        )
+        ctx.retrieval_focus = retrieval_context["retrieval_focus"]
+        ctx.retrieval_reason = retrieval_context["retrieval_reason"]
+        ctx.retrieval_query_context = retrieval_context["retrieval_query_context"]
+        ctx.parallel_support = retrieval_context["parallel_support"]
+        ctx.retrieval_bundle = retrieval_context["retrieval_bundle"]
+        ctx.prefetched_references = retrieval_context["prefetched_references"]
+        ctx.prompt_support_bundle = retrieval_context["prompt_support_bundle"]
+        return ctx
+
     # ------------------------------------------------------------------
     # Internals (lifted verbatim from LearningOrchestrator)
     # ------------------------------------------------------------------
@@ -101,9 +118,7 @@ class RetrievalStage:
                 ),
                 libraries=None,
             )
-        except Exception as exc:
-            # No knowledge base / LightRAG unavailable / etc. — degrade gracefully.
-            # Pure-conversation tutoring still works without retrieval.
+        except (TimeoutError, OSError, RuntimeError) as exc:
             from colearn.learning.retrieval_bundle import empty_retrieval_bundle
             retrieval_bundle = empty_retrieval_bundle(
                 query=str(retrieval_query_context.get("final_query") or user_message or ""),
@@ -128,6 +143,99 @@ class RetrievalStage:
             "prefetched_references": prefetched_references,
             "prompt_support_bundle": prompt_support_bundle,
         }
+
+    async def _prepare_retrieval_context_async(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        board,
+        source_profile: dict[str, Any],
+        user_message: str,
+    ) -> dict[str, Any]:
+        retrieval_focus = build_retrieval_focus(board=board, turn_mode=board.current_turn_mode)
+        retrieval_reason = build_retrieval_reason(
+            board=board,
+            source_readiness=source_profile,
+        )
+        retrieval_query_context = build_retrieval_query_context(
+            board=board,
+            user_message=user_message,
+            retrieval_focus=retrieval_focus,
+            continuation_prompt=session.continuation_prompt,
+        )
+        parallel_support = await self._build_parallel_support_dispatch(
+            project=project,
+            session=session,
+            retrieval_query_context=retrieval_query_context,
+        )
+        try:
+            retrieval_bundle = await self.retrieval_service.async_build_bundle_for_source_refs(
+                project_id=project.project_id,
+                query=str(
+                    retrieval_query_context.get("final_query")
+                    or retrieval_focus.get("default_query")
+                    or user_message
+                    or ""
+                ),
+                source_refs=list(session.source_refs or project.source_subset or project.source_refs),
+                libraries=None,
+            )
+        except (TimeoutError, OSError, RuntimeError) as exc:
+            from colearn.learning.retrieval_bundle import empty_retrieval_bundle
+            retrieval_bundle = empty_retrieval_bundle(
+                query=str(retrieval_query_context.get("final_query") or user_message or ""),
+                status="unavailable",
+                fallback_reason=f"retrieval_unavailable:{type(exc).__name__}",
+                warning=str(exc)[:200],
+            )
+        prefetched_references = self._prefetched_references_from_bundle(retrieval_bundle)
+        parallel_references = self._prefetched_references_from_parallel_support(parallel_support)
+        prompt_references = self._merge_prefetched_references(prefetched_references, parallel_references)
+        prompt_support_bundle = build_prompt_support_bundle(
+            board=board,
+            prefetched_references=prompt_references,
+            retrieval_focus=retrieval_focus,
+        )
+        return {
+            "retrieval_focus": retrieval_focus,
+            "retrieval_reason": retrieval_reason,
+            "retrieval_query_context": retrieval_query_context,
+            "parallel_support": parallel_support,
+            "retrieval_bundle": retrieval_bundle,
+            "prefetched_references": prefetched_references,
+            "prompt_support_bundle": prompt_support_bundle,
+        }
+
+    async def _build_parallel_support_dispatch(
+        self,
+        *,
+        project: LearningProject,
+        session: LearningSession,
+        retrieval_query_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Async version of _build_parallel_support — calls _build_parallel_support_async directly."""
+        queries = self._parallel_support_queries(retrieval_query_context)
+        source_refs = list(session.source_refs or project.source_subset or project.source_refs)
+        if not source_refs:
+            return {"status": "skipped", "reason": "no_source_refs", "queries": queries, "results": []}
+        if not queries:
+            return {"status": "skipped", "reason": "no_parallel_queries", "queries": [], "results": []}
+        try:
+            results = await self._build_parallel_support_async(
+                project=project,
+                session=session,
+                source_refs=source_refs,
+                queries=queries,
+            )
+        except (TimeoutError, OSError, RuntimeError) as exc:
+            return {"status": "error", "reason": f"{type(exc).__name__}: {exc}", "queries": queries, "results": []}
+        statuses = {str(item.get("retrieval_status") or item.get("status") or "") for item in results}
+        if any(status == "ready" for status in statuses):
+            status = "partial" if any(status in {"error", "empty"} for status in statuses) else "ready"
+        else:
+            status = "error" if "error" in statuses else "empty"
+        return {"status": status, "reason": "", "queries": queries, "results": results}
 
     def _prefetched_references_from_bundle(self, bundle) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = [dict(item) for item in list(getattr(bundle, "references", []) or [])]
@@ -238,7 +346,7 @@ class RetrievalStage:
                     queries=queries,
                 )
             )
-        except Exception as exc:
+        except (TimeoutError, OSError, RuntimeError) as exc:
             return {
                 "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}",
@@ -334,7 +442,7 @@ class RetrievalStage:
                     query=query,
                     libraries=None,
                 )
-        except Exception as exc:
+        except (TimeoutError, OSError, RuntimeError) as exc:
             return {
                 "query": query,
                 "retrieval_status": "error",
