@@ -29,17 +29,32 @@ def main():
     config_path = args.config or str(repo_root / ".colearn" / "nanobot-v0.2-slim.config.json")
     workspace = args.workspace or str(repo_root / ".colearn" / "nanobot-workspace")
 
+    # nanobot's config validator requires this env var (was for the old standalone
+    # gateway's WS auth). We don't run the standalone gateway anymore — empty default.
+    import os
+    os.environ.setdefault("COLEARN_NANOBOT_TOKEN_ISSUE_SECRET", "")
+
     # Initialize nanobot AgentLoop
     try:
-        from nanobot.config.schema import load_config
+        import json
+        import os
+        import tempfile
+        from nanobot.config.loader import load_config
         from nanobot.agent.loop import AgentLoop
         from nanobot.providers.factory import build_provider_snapshot
         from nanobot.session.manager import SessionManager
 
-        config = load_config(Path(config_path))
-        config.workspace_path = Path(workspace)
+        # Expand ${VAR} placeholders in config (nanobot's load_config doesn't)
+        with open(config_path, encoding="utf-8") as f:
+            raw = f.read()
+        expanded = os.path.expandvars(raw)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+            tmp.write(expanded)
+            tmp_config_path = tmp.name
+
+        config = load_config(Path(tmp_config_path))
         provider_snapshot = build_provider_snapshot(config)
-        session_manager = SessionManager(config.workspace_path)
+        session_manager = SessionManager(Path(workspace))
 
         agent = AgentLoop.from_config(
             config,

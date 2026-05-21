@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -67,7 +68,11 @@ def cmd_retrieve(project_id: str, query: str, session_id: str = "") -> None:
     })
 
 
-def cmd_get_board(session_id: str) -> None:
+def cmd_get_board(session_id: str = "") -> None:
+    session_id = session_id or os.environ.get("COLEARN_SESSION_ID", "")
+    if not session_id:
+        _out({"error": "no session_id (pass --session_id or set COLEARN_SESSION_ID)"})
+        return
     ss = SessionStore(state_store=_store())
     session = ss.get_session(session_id)
     if not session:
@@ -88,7 +93,11 @@ def cmd_get_board(session_id: str) -> None:
     })
 
 
-def cmd_get_session_detail(session_id: str, messages: str = "5") -> None:
+def cmd_get_session_detail(session_id: str = "", messages: str = "5") -> None:
+    session_id = session_id or os.environ.get("COLEARN_SESSION_ID", "")
+    if not session_id:
+        _out({"error": "no session_id (pass --session_id or set COLEARN_SESSION_ID)"})
+        return
     ss = SessionStore(state_store=_store())
     session = ss.get_session(session_id)
     if not session:
@@ -139,14 +148,61 @@ def cmd_list_concepts(project_id: str) -> None:
     _out({"project_id": project_id, "concepts": concepts, "total": len(concepts)})
 
 
+def cmd_get_current() -> None:
+    """Show the current learning context (session_id, board, recent messages)."""
+    session_id = os.environ.get("COLEARN_SESSION_ID", "")
+    if not session_id:
+        _out({"error": "no current session (COLEARN_SESSION_ID not set)"})
+        return
+    ss = SessionStore(state_store=_store())
+    session = ss.get_session(session_id)
+    if not session:
+        _out({"error": "session_not_found", "session_id": session_id})
+        return
+    bf = session.board_facts or {}
+    recent = []
+    for msg in (session.messages or [])[-3:]:
+        recent.append({
+            "role": msg.get("role", ""),
+            "content": (msg.get("content") or "")[:150],
+        })
+    _out({
+        "session_id": session.session_id,
+        "project_id": session.project_id,
+        "turn_mode": session.turn_mode,
+        "mastery_level": (bf.get("student_snapshot") or {}).get("mastery_level", 0),
+        "cognitive_load": (bf.get("student_snapshot") or {}).get("cognitive_load", "NORMAL"),
+        "active_node": (bf.get("current_progress") or {}).get("active_node_label", ""),
+        "blockers": (bf.get("gaps_and_blockers") or {}).get("critical_blockers", []),
+        "next_prompt_hint": (bf.get("continuation") or {}).get("next_prompt_hint", ""),
+        "recent_messages": recent,
+    })
+
+
+def cmd_list_signals(session_id: str = "", limit: str = "10") -> None:
+    """List recent learning signals extracted by the harness (understood/blocked concepts)."""
+    session_id = session_id or os.environ.get("COLEARN_SESSION_ID", "")
+    if not session_id:
+        _out({"error": "no session_id (pass --session_id or set COLEARN_SESSION_ID)"})
+        return
+    ms = EventMemoryStore(state_store=_store())
+    n = int(limit)
+    relevant_kinds = {"understood_concept", "still_blocked", "board_snapshot_derived", "review_written"}
+    events = ms.list_events_for_session(session_id)
+    filtered = [memory_event_to_record(e) for e in events if e.kind in relevant_kinds][-n:]
+    _out({"session_id": session_id, "signals": filtered, "total": len(filtered)})
+
+
 COMMANDS = {
     "list_projects": cmd_list_projects,
     "list_sessions": cmd_list_sessions,
     "search_memory": cmd_search_memory,
     "retrieve": cmd_retrieve,
+    "get_current": cmd_get_current,
     "get_board": cmd_get_board,
     "get_session_detail": cmd_get_session_detail,
     "list_concepts": cmd_list_concepts,
+    "list_signals": cmd_list_signals,
 }
 
 

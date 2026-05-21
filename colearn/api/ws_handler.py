@@ -36,7 +36,7 @@ _session_manager = None
 
 
 def set_agent_loop(loop, session_manager=None):
-    """Called at startup to inject the initialized AgentLoop."""
+    """Called at startup to inject the initialized AgentLoop (model_name display only)."""
     global _agent_loop, _session_manager
     _agent_loop = loop
     _session_manager = session_manager
