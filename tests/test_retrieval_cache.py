@@ -92,6 +92,9 @@ class _CountingLightRAG:
     def sync_project_sources(self, project_id, normalized_refs):
         return {"synced": True, "source_count": len(normalized_refs)}
 
+    async def async_sync_project_sources(self, project_id, normalized_refs):
+        return {"synced": True, "source_count": len(normalized_refs)}
+
 
 def test_service_caches_repeated_sync_query():
     client = _CountingLightRAG()
@@ -99,7 +102,7 @@ def test_service_caches_repeated_sync_query():
     service.build_bundle_for_source_refs(project_id="p1", query="q", source_refs=["a.md"])
     service.build_bundle_for_source_refs(project_id="p1", query="q", source_refs=["a.md"])
     service.build_bundle_for_source_refs(project_id="p1", query="q", source_refs=["a.md"])
-    assert client.calls == 1
+    assert client.async_calls == 1
     assert service._cache.stats["hits"] == 2
     assert service._cache.stats["misses"] == 1
 
@@ -123,4 +126,4 @@ def test_service_invalidates_cache_on_sync():
     service.build_bundle_for_source_refs(project_id="p1", query="q", source_refs=["a.md"])
     service.sync_source_refs(project_id="p1", source_refs=["a.md"])
     service.build_bundle_for_source_refs(project_id="p1", query="q", source_refs=["a.md"])
-    assert client.calls == 2  # cache cleared after sync, second call hits backend
+    assert client.async_calls == 2  # cache cleared after sync, second call hits backend

@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 import colearn.api.dependencies as _deps
 from colearn.logging_config import get_logger
+from colearn.runtime_v2.executor import TurnCancelledError
 
 from .frames import (
     colearn_frame,
@@ -95,8 +96,11 @@ def _run_orchestrator_turn(
     orchestrator = getattr(_deps, "orchestrator", None)
     if orchestrator is None:
         raise RuntimeError("orchestrator not initialized")
+    sync_turn = getattr(orchestrator, "run_turn", None)
+    if not callable(sync_turn):
+        raise RuntimeError("orchestrator has no sync turn entrypoint")
     _prepare_session_for_turn(turn=turn, project_id=project_id, project_title=project_title)
-    return orchestrator.run_turn(
+    return sync_turn(
         session_id=turn.session_id,
         user_message=user_message,
         project_id=project_id,
@@ -216,7 +220,7 @@ async def execute_turn(
         await broadcast_stream_event(turn, item)
     latency_ms = int(((turn.finished_at or time.time()) - turn.started_at) * 1000)
 
-    if isinstance(turn.error, TurnCancelledBeforeStart):
+    if isinstance(turn.error, (TurnCancelledBeforeStart, TurnCancelledError)):
         await broadcast_turn_frame(turn, final_turn_state_frame(turn=turn, status="cancelled", latency_ms=latency_ms))
         await broadcast_turn_frame(turn, done_frame(turn=turn, status="cancelled", latency_ms=latency_ms))
         await emit_session_updated(turn)

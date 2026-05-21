@@ -38,12 +38,17 @@ class _FakeLightRAGClient:
         self.calls.append(("retrieve_project_context", {"project_id": project_id, "query": query, "source_refs": list(source_refs), "top_k": top_k}))
         return self.ready_result
 
+    async def async_retrieve_project_context(self, *, project_id, query, source_refs, top_k=5):
+        self.calls.append(("async_retrieve_project_context", {"project_id": project_id, "query": query, "source_refs": list(source_refs), "top_k": top_k}))
+        return self.ready_result
+
     def sync_project_sources(self, project_id, normalized_refs):
         self.calls.append(("sync_project_sources", {"project_id": project_id, "refs": list(normalized_refs)}))
         return {"synced": True, "source_count": len(normalized_refs)}
 
-    if True:  # placeholder so we can conditionally add async method below
-        pass
+    async def async_sync_project_sources(self, project_id, normalized_refs):
+        self.calls.append(("async_sync_project_sources", {"project_id": project_id, "refs": list(normalized_refs)}))
+        return {"synced": True, "source_count": len(normalized_refs)}
 
 
 class _AsyncLightRAGClient(_FakeLightRAGClient):
@@ -155,10 +160,10 @@ def test_async_build_bundle_with_async_client(tmp_path: Path):
     assert client.calls[0][0] == "async_retrieve_project_context"
 
 
-def test_async_build_bundle_without_async_client_uses_to_thread(tmp_path: Path):
+def test_async_build_bundle_calls_async_retrieve(tmp_path: Path):
     client = _FakeLightRAGClient(
         ready_result=_FakeRetrievalResult(
-            text="sync via thread",
+            text="async result",
             retrieval_status="ready",
         )
     )
@@ -172,8 +177,8 @@ def test_async_build_bundle_without_async_client_uses_to_thread(tmp_path: Path):
         )
 
     bundle = anyio.run(run)
-    assert bundle.text == "sync via thread"
-    assert client.calls[0][0] == "retrieve_project_context"
+    assert bundle.text == "async result"
+    assert client.calls[0][0] == "async_retrieve_project_context"
 
 
 def test_async_build_bundle_no_source_refs_short_circuits():

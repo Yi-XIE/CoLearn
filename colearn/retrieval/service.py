@@ -70,36 +70,14 @@ class RetrievalService:
         source_refs: list[str],
         libraries: list[SourceLibrary] | None = None,
     ) -> RetrievalBundle:
-        if not source_refs:
-            return empty_retrieval_bundle(
+        return asyncio.run(
+            self.async_build_bundle_for_source_refs(
+                project_id=project_id,
                 query=query,
-                status="empty",
-                fallback_reason="no_source_refs",
-                warning="No project sources attached yet.",
+                source_refs=source_refs,
+                libraries=libraries,
             )
-
-        cached = self._cache.get(project_id=project_id, query=query, source_refs=source_refs)
-        if cached is not None:
-            return cached
-
-        normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        lightrag_result = self._require_lightrag_client().retrieve_project_context(
-            project_id=project_id,
-            query=query,
-            source_refs=normalized_refs,
-            top_k=Defaults.RETRIEVAL_TOP_K,
         )
-        bundle = self._bundle_from_lightrag_result(
-            lightrag_result=lightrag_result,
-            project_id=project_id,
-            query=query,
-            source_refs=source_refs,
-            normalized_refs=normalized_refs,
-            libraries=libraries or [],
-        )
-        if bundle.retrieval_status == "ready":
-            self._cache.put(project_id=project_id, query=query, source_refs=source_refs, value=bundle)
-        return bundle
 
     async def async_build_bundle_for_source_refs(
         self,
@@ -123,22 +101,12 @@ class RetrievalService:
 
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
         client = self._require_lightrag_client()
-        async_retrieve = getattr(client, "async_retrieve_project_context", None)
-        if async_retrieve is not None:
-            lightrag_result = await async_retrieve(
-                project_id=project_id,
-                query=query,
-                source_refs=normalized_refs,
-                top_k=Defaults.RETRIEVAL_TOP_K,
-            )
-        else:
-            lightrag_result = await asyncio.to_thread(
-                client.retrieve_project_context,
-                project_id=project_id,
-                query=query,
-                source_refs=normalized_refs,
-                top_k=Defaults.RETRIEVAL_TOP_K,
-            )
+        lightrag_result = await client.async_retrieve_project_context(
+            project_id=project_id,
+            query=query,
+            source_refs=normalized_refs,
+            top_k=Defaults.RETRIEVAL_TOP_K,
+        )
         bundle = self._bundle_from_lightrag_result(
             lightrag_result=lightrag_result,
             project_id=project_id,
@@ -258,9 +226,11 @@ class RetrievalService:
         libraries: list[SourceLibrary] | None = None,
     ) -> dict[str, Any]:
         source_refs = session.source_refs or project.source_subset or project.source_refs
-        normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        self._cache.invalidate_project(project.project_id)
-        return self._require_lightrag_client().sync_project_sources(project.project_id, normalized_refs)
+        return self.sync_source_refs(
+            project_id=project.project_id,
+            source_refs=source_refs,
+            libraries=libraries,
+        )
 
     def sync_source_refs(
         self,
@@ -269,9 +239,13 @@ class RetrievalService:
         source_refs: list[str],
         libraries: list[SourceLibrary] | None = None,
     ) -> dict[str, Any]:
-        normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
-        self._cache.invalidate_project(project_id)
-        return self._require_lightrag_client().sync_project_sources(project_id, normalized_refs)
+        return asyncio.run(
+            self.async_sync_source_refs(
+                project_id=project_id,
+                source_refs=source_refs,
+                libraries=libraries,
+            )
+        )
 
     async def async_sync_source_refs(
         self,
@@ -283,14 +257,7 @@ class RetrievalService:
         normalized_refs = self._normalize_source_refs(source_refs, libraries=libraries or [])
         self._cache.invalidate_project(project_id)
         client = self._require_lightrag_client()
-        async_sync = getattr(client, "async_sync_project_sources", None)
-        if async_sync is not None:
-            return await async_sync(project_id, normalized_refs)
-        return await asyncio.to_thread(
-            client.sync_project_sources,
-            project_id,
-            normalized_refs,
-        )
+        return await client.async_sync_project_sources(project_id, normalized_refs)
 
     def _require_lightrag_client(self) -> LightRAGClientProtocol:
         if self._lightrag_client is None and self._lightrag_error is not None:

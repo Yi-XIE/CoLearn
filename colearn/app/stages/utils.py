@@ -7,12 +7,39 @@ relevant stage file, not here.
 from __future__ import annotations
 
 import asyncio
+import inspect
+from threading import Thread
 from typing import Any
 
 from colearn.logging_config import get_logger
 from colearn.sessions.store import LearningSession
 
 logger = get_logger(__name__)
+
+
+def run_async_or_value(maybe: Any) -> Any:
+    """Resolve awaitables from sync code without nesting ``asyncio.run``."""
+    if not inspect.isawaitable(maybe):
+        return maybe
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(maybe)
+
+    outcome: dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            outcome["value"] = asyncio.run(maybe)
+        except BaseException as exc:
+            outcome["error"] = exc
+
+    worker = Thread(target=runner, daemon=True)
+    worker.start()
+    worker.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
 
 
 def runtime_loop(executor: Any) -> Any:
@@ -30,13 +57,6 @@ def runtime_loop(executor: Any) -> Any:
         logger.debug("runtime_loop: get_bot failed: %s", exc)
         return None
     return getattr(bot, "_loop", None)
-
-
-def run_async_or_value(value: Any) -> Any:
-    """If ``value`` is a coroutine, drive it to completion via ``asyncio.run``."""
-    if asyncio.iscoroutine(value):
-        return asyncio.run(value)
-    return value
 
 
 def truncate_for_memory(value: Any, limit: int = 600) -> str:

@@ -88,9 +88,6 @@ class WritebackStage:
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
-    def run(self, ctx: TurnContext) -> None:
-        self._persist_turn_and_schedule_auxiliary(ctx)
-
     async def run_async(self, ctx: TurnContext) -> None:
         self._persist_turn_and_schedule_auxiliary(ctx)
 

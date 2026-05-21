@@ -27,7 +27,7 @@ from colearn.storage.json_store import JsonStateStore
 
 @dataclass
 class FakeExecutor:
-    def run_turn(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
         self.last_request = request
         return LearningTurnResult(
             final_text=f"Answering: {request.user_message}",
@@ -38,6 +38,9 @@ class FakeExecutor:
             retrieval_bundle=request.retrieval_bundle,
             raw_learning_result={"tool_events": [], "raw_messages": []},
         )
+
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+        return self._make_result(request)
 
     def finalize(
         self,
@@ -90,6 +93,10 @@ class FakeRetrievalService:
             metadata={},
         )
 
+    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
+        _ = (project_id, source_refs)
+        return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
+
 
 class EmptyRetrievalService(FakeRetrievalService):
     def build_bundle(self, *, project, session, query: str, libraries=None):
@@ -106,13 +113,17 @@ class EmptyRetrievalService(FakeRetrievalService):
             metadata={},
         )
 
+    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
+        _ = (project_id, source_refs)
+        return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
+
 
 class FailingProductCompression:
     def compress(self, **kwargs):
         raise RuntimeError("compression offline")
 
 
-def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
+async def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-1", "Linear Algebra")
@@ -136,7 +147,7 @@ def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
         retrieval_service=FakeRetrievalService(),
     )
 
-    result = orchestrator.run_turn(
+    result = await orchestrator.run_turn_async(
         session_id="sess-1",
         project_id="proj-1",
         user_message="Explain why matrix multiplication is not commutative.",
@@ -181,7 +192,7 @@ def test_session_autocompact_keeps_tail_and_continuation(tmp_path):
     session.continuation_prompt = "keep going"
     session.messages = [{"role": "user", "content": f"message {idx}"} for idx in range(30)]
 
-    orchestrator._maybe_compact_session(session)
+    orchestrator.writeback._maybe_compact_session(session)
 
     assert len(session.messages) == orchestrator.SESSION_AUTOCOMPACT_KEEP_TAIL + 1
     assert session.messages[0]["content"].startswith("[compacted history]")
@@ -211,9 +222,9 @@ def test_session_autocompact_uses_nanobot_consolidator_and_keeps_single_summary(
     session = orchestrator.session_store.create_session(session_id="sess-compact-llm", project_id="proj-compact")
     session.messages = [{"role": "user", "content": f"message {idx}"} for idx in range(30)]
 
-    orchestrator._maybe_compact_session(session)
+    orchestrator.writeback._maybe_compact_session(session)
     session.messages.extend({"role": "user", "content": f"new {idx}"} for idx in range(20))
-    orchestrator._maybe_compact_session(session)
+    orchestrator.writeback._maybe_compact_session(session)
 
     compacted = [item for item in session.messages if item.get("metadata", {}).get("colearn_compacted")]
     assert len(compacted) == 1
@@ -263,7 +274,7 @@ def test_nanobot_dream_consolidation_success_and_failure(tmp_path):
     )
     result = LearningTurnResult(final_text="answer")
 
-    orchestrator._maybe_consolidate_memory(project, session, result)
+    orchestrator.writeback._maybe_consolidate_memory(project, session, result)
     event = memory_store.list_events()[-1]
     assert event.kind == "profile_consolidated"
     assert event.payload["source"] == "nanobot_dream"
@@ -290,12 +301,12 @@ def test_nanobot_dream_consolidation_success_and_failure(tmp_path):
         retrieval_service=FakeRetrievalService(),
     )
     session.last_turn_result = {}
-    failure_orchestrator._maybe_consolidate_memory(project, session, result)
+    failure_orchestrator.writeback._maybe_consolidate_memory(project, session, result)
     assert failure_store.list_events()[-1].kind == "profile_consolidation_failed"
     assert "dream_consolidation_failed:RuntimeError" in session.last_turn_result["warnings"]
 
 
-def test_before_turn_adds_runtime_turn_metadata(tmp_path):
+async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-meta", "Metadata")
@@ -342,7 +353,7 @@ def test_before_turn_adds_runtime_turn_metadata(tmp_path):
         retrieval_service=FakeRetrievalService(),
     )
 
-    orchestrator.run_turn(
+    await orchestrator.run_turn_async(
         session_id="sess-meta",
         project_id="proj-meta",
         user_message="Continue this node.",
@@ -360,7 +371,7 @@ def test_before_turn_adds_runtime_turn_metadata(tmp_path):
     assert request.metadata["policy_restrictions"] == []
 
 
-def test_orchestrator_persists_learning_state_writeback(tmp_path):
+async def test_orchestrator_persists_learning_state_writeback(tmp_path):
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-learning", "Learning")
@@ -406,7 +417,7 @@ def test_orchestrator_persists_learning_state_writeback(tmp_path):
         retrieval_service=FakeRetrievalService(),
     )
 
-    result = orchestrator.run_turn(
+    result = await orchestrator.run_turn_async(
         session_id="sess-learning",
         project_id="proj-learning",
         user_message="Please continue.",
@@ -423,7 +434,7 @@ def test_orchestrator_persists_learning_state_writeback(tmp_path):
     assert saved_project.board_facts["continuation"]["next_prompt_hint"]
 
 
-def test_product_compression_failure_keeps_main_result(tmp_path):
+async def test_product_compression_failure_keeps_main_result(tmp_path):
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-fail", "Failure Safety")
@@ -441,7 +452,7 @@ def test_product_compression_failure_keeps_main_result(tmp_path):
         retrieval_service=FakeRetrievalService(),
     )
 
-    result = orchestrator.run_turn(
+    result = await orchestrator.run_turn_async(
         session_id="sess-fail",
         project_id="proj-fail",
         user_message="Explain safe async writeback.",
@@ -573,7 +584,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
         board_version=1,
     )
 
-    orchestrator._write_back(
+    orchestrator.writeback._write_back(
         project=stale_project,
         session=stale_session,
         request=request,
@@ -675,7 +686,7 @@ def test_knowledge_workspace_builds_source_profile(tmp_path: Path) -> None:
     assert profile["sources"][0]["indexed"] is True
 
 
-def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> None:
+async def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> None:
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-source", "Sources")
@@ -694,7 +705,7 @@ def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> N
         retrieval_service=FakeRetrievalService(),
     )
 
-    orchestrator.run_turn(
+    await orchestrator.run_turn_async(
         session_id="sess-source",
         project_id="proj-source",
         user_message="Use sources",
@@ -713,7 +724,7 @@ def test_source_profile_reaches_request_metadata_and_prompt(tmp_path: Path) -> N
     assert "Source readiness:" in prompt
 
 
-def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: Path) -> None:
+async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: Path) -> None:
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-retrieval", "Retrieval")
@@ -765,7 +776,7 @@ def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: Path) -
         retrieval_service=retrieval_service,
     )
 
-    result = orchestrator.run_turn(
+    result = await orchestrator.run_turn_async(
         session_id="sess-retrieval",
         project_id="proj-retrieval",
         user_message="Verify this step with evidence.",
@@ -793,7 +804,7 @@ def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: Path) -
     assert result.turn_mode_after == "CORRECTION"
 
 
-def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp_path: Path) -> None:
+async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp_path: Path) -> None:
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
     project = project_service.create_project("proj-miss", "Retrieval Miss")
@@ -809,7 +820,7 @@ def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp_path:
         retrieval_service=EmptyRetrievalService(),
     )
 
-    orchestrator.run_turn(
+    await orchestrator.run_turn_async(
         session_id="sess-miss",
         project_id="proj-miss",
         user_message="Need a source-backed explanation.",
@@ -970,7 +981,7 @@ def test_runtime_v2_prompt_passes_requested_skills(monkeypatch, tmp_path) -> Non
     assert "CoLearn root context" in prompt
 
 
-def test_orchestrator_passes_requested_skills_to_turn_request(tmp_path) -> None:
+async def test_orchestrator_passes_requested_skills_to_turn_request(tmp_path) -> None:
     root = tmp_path / ".colearn" / "state"
     executor = FakeExecutor()
     orchestrator = LearningOrchestrator(
@@ -983,7 +994,7 @@ def test_orchestrator_passes_requested_skills_to_turn_request(tmp_path) -> None:
     orchestrator.project_service.create_project("proj-skills", "Skills Project")
     orchestrator.session_store.create_session(session_id="sess-skills-turn", project_id="proj-skills")
 
-    orchestrator.run_turn(
+    await orchestrator.run_turn_async(
         session_id="sess-skills-turn",
         project_id="proj-skills",
         user_message="Use a skill",
@@ -1006,7 +1017,7 @@ def test_default_executor_workspace_uses_nanobot_workspace(monkeypatch, tmp_path
     assert orchestrator.executor.workspace == workspace.resolve()
 
 
-def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path) -> None:
+async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path) -> None:
     root = tmp_path / ".colearn" / "state"
     orchestrator = LearningOrchestrator(
         project_service=LearningProjectService(state_store=JsonStateStore(root)),
@@ -1023,7 +1034,7 @@ def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path) -> No
         "unverified_gaps": ["gap one", "gap two"],
     }
 
-    skipped = orchestrator._build_parallel_support(
+    skipped = await orchestrator.retrieval._build_parallel_support_dispatch(
         project=project,
         session=session,
         retrieval_query_context=query_context,
@@ -1033,7 +1044,7 @@ def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path) -> No
     assert len(skipped["queries"]) == 3
 
     project.source_refs = ["source.md"]
-    ready = orchestrator._build_parallel_support(
+    ready = await orchestrator.retrieval._build_parallel_support_dispatch(
         project=project,
         session=session,
         retrieval_query_context=query_context,

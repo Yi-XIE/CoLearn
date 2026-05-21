@@ -1,12 +1,11 @@
-"""Integration test — full 5-stage pipeline with fakes."""
+"""Integration test — full 5-stage pipeline with fakes (async only)."""
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
 from pathlib import Path
 
-from conftest import FakeExecutor, FakeRetrievalService, make_board
+from conftest import FakeExecutor, FakeRetrievalService
 
 from colearn.app.learning_orchestrator import LearningOrchestrator
 from colearn.compression import RuntimeCompressionBridge, ProductCompressionBridge
@@ -35,30 +34,13 @@ def _tmpdir():
     return tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 
 
-def test_sync_pipeline_end_to_end():
+async def test_pipeline_end_to_end():
     with _tmpdir() as tmp:
         orch = _build_orchestrator(tmp)
-        result = orch.run_turn(
-            session_id="test-session",
-            user_message="What is photosynthesis?",
-            project_id="test-project",
-        )
-        assert result is not None
-        assert "photosynthesis" in result.final_text.lower()
-        session = orch.session_store.get_session("test-session")
-        assert session is not None
-        assert len(session.messages) == 2
-
-
-def test_async_pipeline_end_to_end():
-    with _tmpdir() as tmp:
-        orch = _build_orchestrator(tmp)
-        result = asyncio.run(
-            orch.run_turn_async(
-                session_id="async-session",
-                user_message="Explain gravity",
-                project_id="async-project",
-            )
+        result = await orch.run_turn_async(
+            session_id="async-session",
+            user_message="Explain gravity",
+            project_id="async-project",
         )
         assert result is not None
         assert "gravity" in result.final_text.lower()
@@ -67,12 +49,12 @@ def test_async_pipeline_end_to_end():
         assert len(session.messages) == 2
 
 
-def test_multi_turn_session():
+async def test_multi_turn_session():
     with _tmpdir() as tmp:
         orch = _build_orchestrator(tmp)
-        orch.run_turn(session_id="multi", user_message="Turn 1", project_id="p")
-        orch.run_turn(session_id="multi", user_message="Turn 2", project_id="p")
-        orch.run_turn(session_id="multi", user_message="Turn 3", project_id="p")
+        await orch.run_turn_async(session_id="multi", user_message="Turn 1", project_id="p")
+        await orch.run_turn_async(session_id="multi", user_message="Turn 2", project_id="p")
+        await orch.run_turn_async(session_id="multi", user_message="Turn 3", project_id="p")
 
         session = orch.session_store.get_session("multi")
         assert len(session.messages) == 6
