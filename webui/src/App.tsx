@@ -66,7 +66,6 @@ export default function App() {
     token: "",
     modelName: null,
   }));
-
   useEffect(() => {
     let cancelled = false;
     state.client.connect();
@@ -89,7 +88,6 @@ export default function App() {
   const handleModelNameChange = useCallback((modelName: string | null) => {
     setState((current) => ({ ...current, modelName }));
   }, []);
-
   return (
     <ClientProvider client={state.client} token={state.token} modelName={state.modelName}>
       <Shell onModelNameChange={handleModelNameChange} onLogout={undefined} />
