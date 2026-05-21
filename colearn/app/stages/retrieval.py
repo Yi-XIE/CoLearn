@@ -89,17 +89,28 @@ class RetrievalStage:
             session=session,
             retrieval_query_context=retrieval_query_context,
         )
-        retrieval_bundle = self.retrieval_service.build_bundle(
-            project=project,
-            session=session,
-            query=str(
-                retrieval_query_context.get("final_query")
-                or retrieval_focus.get("default_query")
-                or user_message
-                or ""
-            ),
-            libraries=None,
-        )
+        try:
+            retrieval_bundle = self.retrieval_service.build_bundle(
+                project=project,
+                session=session,
+                query=str(
+                    retrieval_query_context.get("final_query")
+                    or retrieval_focus.get("default_query")
+                    or user_message
+                    or ""
+                ),
+                libraries=None,
+            )
+        except Exception as exc:
+            # No knowledge base / LightRAG unavailable / etc. — degrade gracefully.
+            # Pure-conversation tutoring still works without retrieval.
+            from colearn.learning.retrieval_bundle import empty_retrieval_bundle
+            retrieval_bundle = empty_retrieval_bundle(
+                query=str(retrieval_query_context.get("final_query") or user_message or ""),
+                status="unavailable",
+                fallback_reason=f"retrieval_unavailable:{type(exc).__name__}",
+                warning=str(exc)[:200],
+            )
         prefetched_references = self._prefetched_references_from_bundle(retrieval_bundle)
         parallel_references = self._prefetched_references_from_parallel_support(parallel_support)
         prompt_references = self._merge_prefetched_references(prefetched_references, parallel_references)
