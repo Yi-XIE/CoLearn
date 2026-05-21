@@ -12,7 +12,7 @@
 
 ## Current Boundary
 
-- `nanobot` keeps the loop, session, goal, stream, WebUI, and gateway.
+- `nanobot` keeps the loop, session, goal, stream, and WebUI runtime.
 - CoLearn owns learning, retrieval, knowledge, and project semantics.
 - `runtime_v2` is the only active runtime wrapper.
 

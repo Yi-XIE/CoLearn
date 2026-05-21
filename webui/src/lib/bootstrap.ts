@@ -30,10 +30,7 @@ export function clearSavedSecret(): void {
   }
 }
 
-/**
- * Fetch a short-lived token + the WebSocket path from the gateway's
- * ``/webui/bootstrap`` endpoint.
- */
+/** Fetch a short-lived token + the WebSocket path from CoLearn's bootstrap endpoint. */
 export async function fetchBootstrap(
   baseUrl: string = "",
   secret: string = "",

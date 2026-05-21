@@ -112,15 +112,21 @@ class BackgroundTurnFinalizer:
                 status_payload=status_payload,
             )
         except Exception as exc:
-            self.on_result(
-                session_id=session.session_id,
-                project_id=project.project_id,
-                request=request,
-                board=board,
-                product_output=None,
-                error=exc,
-                status_payload=status_payload,
-            )
+            try:
+                self.on_result(
+                    session_id=session.session_id,
+                    project_id=project.project_id,
+                    request=request,
+                    board=board,
+                    product_output=None,
+                    error=exc,
+                    status_payload=status_payload,
+                )
+            except Exception:
+                logger.exception(
+                    "background finalizer error callback failed for session %s",
+                    session.session_id,
+                )
 
 
 class LearningOrchestrator:
@@ -322,7 +328,7 @@ class LearningOrchestrator:
                 "error": str(error),
             }
             session.last_turn_result = last_turn_result
-            self.session_store.save_session(session)
+            self._save_background_session_update(session)
             return
 
         if product_output is None:
@@ -350,5 +356,15 @@ class LearningOrchestrator:
         }
         session.last_turn_result = last_turn_result
         project.latest_review = dict(pending_review)
-        self.session_store.save_session(session)
+        self._save_background_session_update(session)
         self.project_service.save_project(project)
+
+    def _save_background_session_update(self, session: LearningSession) -> None:
+        try:
+            self.session_store.save_session(session)
+        except OSError as exc:
+            logger.warning(
+                "background session save skipped for %s: %s",
+                session.session_id,
+                exc,
+            )

@@ -34,8 +34,7 @@ export default defineConfig(({ mode }) => {
         port: 5192,
       },
       proxy: {
-        // Single gateway: all traffic goes to CoLearn FastAPI which proxies
-        // /webui, /auth, and / (WS) to nanobot internally.
+        // Single backend entry: all dev traffic goes to CoLearn FastAPI.
         "/webui": { target: apiTarget, changeOrigin: true },
         "/auth": { target: apiTarget, changeOrigin: true },
         "/api": { target: apiTarget, changeOrigin: true },

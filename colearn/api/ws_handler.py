@@ -20,8 +20,14 @@ from colearn.api.ws import (
     get_active_turn,
     get_session_turn,
     message_event,
+    normalize_attachments,
+    normalize_turn_frame,
+    project_id_from_frame,
+    project_title_from_frame,
+    ready_event,
     remember_active_turn,
     send_protocol_error,
+    skills_from_frame,
     subscribe_turn_stream,
     unsubscribe_connection,
 )
@@ -69,39 +75,6 @@ async def bootstrap():
     }
 
 
-def _normalize_attachments(frame: dict[str, Any]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for item in list(frame.get("attachments") or frame.get("media") or []):
-        if not isinstance(item, dict):
-            continue
-        normalized.append(
-            {
-                "name": str(item.get("name") or ""),
-                "content_type": str(item.get("content_type") or item.get("kind") or "image"),
-                "data": str(item.get("data") or item.get("data_url") or ""),
-                "size": int(item.get("size") or 0),
-            }
-        )
-    return normalized
-
-
-def _project_id_from_frame(frame: dict[str, Any]) -> str:
-    return str(frame.get("project_id") or "default-project")
-
-
-def _project_title_from_frame(frame: dict[str, Any]) -> str:
-    return str(frame.get("project_title") or _project_id_from_frame(frame) or "CoLearn")
-
-
-def _skills_from_frame(frame: dict[str, Any]) -> list[str]:
-    skills: list[str] = []
-    for item in list(frame.get("skills") or []):
-        value = str(item or "").strip()
-        if value:
-            skills.append(value)
-    return skills
-
-
 async def _handle_start_turn(
     *,
     connection_id: str,
@@ -139,11 +112,11 @@ async def _handle_start_turn(
     await execute_turn(
         turn=turn,
         user_message=str(frame.get("content") or ""),
-        project_id=_project_id_from_frame(frame),
-        project_title=_project_title_from_frame(frame),
+        project_id=project_id_from_frame(frame),
+        project_title=project_title_from_frame(frame),
         language=str(frame.get("language") or "zh"),
-        attachments=_normalize_attachments(frame),
-        requested_skills=_skills_from_frame(frame),
+        attachments=normalize_attachments(frame),
+        requested_skills=skills_from_frame(frame),
     )
 
 
@@ -226,14 +199,9 @@ async def _dispatch_frame(
     msg_type = str(frame.get("type") or "").strip()
 
     if msg_type == "new_chat":
-        session_id = str(uuid4())
-        await send_event(
-            {
-                "event": "ready",
-                "chat_id": session_id,
-                "client_id": str(uuid4())[:8],
-            }
-        )
+        event = ready_event()
+        await send_event(event)
+        session_id = str(event["chat_id"])
         await send_event({"event": "attached", "chat_id": session_id})
         return
 
@@ -242,18 +210,7 @@ async def _dispatch_frame(
         return
 
     if msg_type in {"message", "start_turn"}:
-        normalized = frame
-        if msg_type == "message":
-            normalized = {
-                "type": "start_turn",
-                "session_id": str(frame.get("chat_id") or frame.get("session_id") or ""),
-                "project_id": _project_id_from_frame(frame),
-                "project_title": _project_title_from_frame(frame),
-                "content": str(frame.get("content") or ""),
-                "attachments": list(frame.get("media") or []),
-                "language": "zh",
-                "skills": list(frame.get("skills") or []),
-            }
+        normalized = normalize_turn_frame(frame)
         await _handle_start_turn(connection_id=connection_id, frame=normalized, send_event=send_event)
         return
 

@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Tidak dapat menjangkau nanobot",
-      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
+      "gatewayHint": "Pastikan server CoLearn sedang berjalan dan halaman ini dibuka pada mesin yang sama."
     },
     "system": {
       "section": "Sistem",
@@ -66,7 +66,7 @@
       "language": "Pilih bahasa yang digunakan WebUI.",
       "provider": "Pilih penyedia untuk permintaan model baru.",
       "model": "Atur nama model default yang digunakan nanobot.",
-      "configPath": "File konfigurasi gateway yang sedang digunakan."
+      "configPath": "File konfigurasi server CoLearn yang sedang digunakan."
     },
     "values": {
       "light": "Terang",

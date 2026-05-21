@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "nanobot に接続できませんでした",
-      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
+      "gatewayHint": "CoLearn サーバーが起動しており、このページが同じマシン上で開かれていることを確認してください。"
     },
     "system": {
       "section": "システム",

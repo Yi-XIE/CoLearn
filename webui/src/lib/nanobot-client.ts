@@ -570,7 +570,7 @@ export class OfflineNanobotClient implements NanobotClientLike {
   }
 
   async newChat(): Promise<string> {
-    throw new Error("Chat is unavailable without gateway");
+    throw new Error("Chat is unavailable while the CoLearn server is offline");
   }
 
   attach(_chatId: string): void {}

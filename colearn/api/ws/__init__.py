@@ -9,6 +9,14 @@ from .frames import (
     metadata,
     stream_event_to_frame,
 )
+from .normalize import (
+    normalize_attachments,
+    normalize_turn_frame,
+    project_id_from_frame,
+    project_title_from_frame,
+    ready_event,
+    skills_from_frame,
+)
 from .registry import (
     ActiveTurn,
     EventSender,
@@ -45,8 +53,14 @@ __all__ = [
     "get_session_turn",
     "message_event",
     "metadata",
+    "normalize_attachments",
+    "normalize_turn_frame",
+    "project_id_from_frame",
+    "project_title_from_frame",
+    "ready_event",
     "remember_active_turn",
     "send_protocol_error",
+    "skills_from_frame",
     "stream_event_to_frame",
     "subscribe_turn_stream",
     "unsubscribe_connection",

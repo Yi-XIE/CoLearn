@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "No se pudo conectar con nanobot",
-      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
+      "gatewayHint": "Asegúrate de que el servidor de CoLearn esté en ejecución y de que esta página esté abierta en la misma máquina."
     },
     "system": {
       "section": "Sistema",
@@ -66,7 +66,7 @@
       "language": "Elige el idioma usado por la WebUI.",
       "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
       "model": "Define el nombre del modelo predeterminado que usa nanobot.",
-      "configPath": "El archivo de configuración que usa actualmente el gateway."
+      "configPath": "El archivo de configuración que usa actualmente el servidor de CoLearn."
     },
     "values": {
       "light": "Claro",

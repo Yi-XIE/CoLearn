@@ -295,7 +295,7 @@ export function SettingsView({
                   {onLogout ? (
                     <SettingsRow
                       title="账户"
-                      description="将当前浏览器与正在使用的 gateway 会话断开。"
+                      description="将当前浏览器与当前 CoLearn 会话断开。"
                     >
                       <Button
                         type="button"

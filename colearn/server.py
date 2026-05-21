@@ -1,7 +1,7 @@
 """Unified CoLearn server — single process, single port.
 
 Starts FastAPI with REST + WebSocket, using nanobot AgentLoop as a library.
-No separate nanobot gateway needed.
+No separate standalone gateway is required.
 
 Usage:
     python -m colearn.server
@@ -29,8 +29,8 @@ def main():
     config_path = args.config or str(repo_root / ".colearn" / "nanobot-v0.2-slim.config.json")
     workspace = args.workspace or str(repo_root / ".colearn" / "nanobot-workspace")
 
-    # nanobot's config validator requires this env var (was for the old standalone
-    # gateway's WS auth). We don't run the standalone gateway anymore — empty default.
+    # nanobot's config validator still expects this env var from the legacy
+    # token issue flow. We keep an empty default in the unified server.
     import os
     os.environ.setdefault("COLEARN_NANOBOT_TOKEN_ISSUE_SECRET", "")
 
