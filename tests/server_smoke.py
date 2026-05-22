@@ -2,7 +2,7 @@
 
 Checks:
 1. ``python -m colearn.server`` boots on localhost
-2. ``GET /webui/bootstrap`` returns token + ws_path
+2. ``GET /webui/bootstrap`` returns ws_path
 3. ``WS /api/v1/ws`` accepts ``new_chat`` and returns ``ready`` + ``attached``
 """
 
@@ -52,10 +52,7 @@ async def _wait_for_bootstrap(base_url: str, timeout_seconds: float = 20.0) -> d
 async def _run_smoke(port: int) -> None:
     base_url = f"http://127.0.0.1:{port}"
     payload = await _wait_for_bootstrap(base_url)
-    token = str(payload.get("token") or "")
     ws_path = str(payload.get("ws_path") or "")
-    if not token:
-        raise RuntimeError("bootstrap payload missing token")
     if ws_path != "/api/v1/ws":
         raise RuntimeError(f"unexpected ws_path: {ws_path!r}")
 
@@ -66,16 +63,15 @@ async def _run_smoke(port: int) -> None:
         second = json.loads(await asyncio.wait_for(websocket.recv(), timeout=5.0))
     if first.get("event") != "ready":
         raise RuntimeError(f"expected ready event, got: {first}")
-    if not first.get("chat_id"):
-        raise RuntimeError(f"ready event missing chat_id: {first}")
+    if not first.get("session_id"):
+        raise RuntimeError(f"ready event missing session_id: {first}")
     if second.get("event") != "attached":
         raise RuntimeError(f"expected attached event, got: {second}")
-    if second.get("chat_id") != first.get("chat_id"):
-        raise RuntimeError(f"attached chat_id mismatch: {second} vs {first}")
+    if second.get("session_id") != first.get("session_id"):
+        raise RuntimeError(f"attached session_id mismatch: {second} vs {first}")
 
-    print(f"bootstrap token : OK ({token[:12]}...)")
     print(f"ws path         : OK ({ws_path})")
-    print(f"new_chat ready  : OK ({first['chat_id']})")
+    print(f"new_chat ready  : OK ({first['session_id']})")
 
 
 def main() -> int:

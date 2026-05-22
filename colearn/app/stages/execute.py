@@ -115,15 +115,26 @@ class ExecuteStage:
         source_profile: dict[str, Any],
         retrieval_context: dict[str, Any],
     ) -> dict[str, Any]:
-        return {
-            "turn_id": str(uuid4()),
-            "source_profile": dict(source_profile),
-            "retrieval_focus": retrieval_context["retrieval_focus"],
-            "retrieval_query_context": retrieval_context["retrieval_query_context"],
-            "retrieval_reason": retrieval_context["retrieval_reason"],
+        retrieval_metadata = {
+            "focus": retrieval_context["retrieval_focus"],
+            "query_context": retrieval_context["retrieval_query_context"],
+            "reason": retrieval_context["retrieval_reason"],
             "prefetched_references": retrieval_context["prefetched_references"],
             "parallel_support": retrieval_context["parallel_support"],
             "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
+        }
+        return {
+            "turn_id": str(uuid4()),
+            "source_profile": dict(source_profile),
+            "retrieval": retrieval_metadata,
+            # Compatibility bridge for older prompt/result helpers. New code
+            # should read from metadata["retrieval"] instead.
+            "retrieval_focus": retrieval_metadata["focus"],
+            "retrieval_query_context": retrieval_metadata["query_context"],
+            "retrieval_reason": retrieval_metadata["reason"],
+            "prefetched_references": retrieval_metadata["prefetched_references"],
+            "parallel_support": retrieval_metadata["parallel_support"],
+            "prompt_support_bundle": retrieval_metadata["prompt_support_bundle"],
             "workspace": str(getattr(self.executor, "workspace", None) or colearn_nanobot_workspace()),
         }
 

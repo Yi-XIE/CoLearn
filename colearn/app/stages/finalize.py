@@ -187,19 +187,31 @@ class FinalizeStage:
         retrieval_misses: list[dict[str, Any]],
         retrieval_evidence_map: dict[str, list[dict[str, Any]]],
     ):
+        retrieval_metadata = {
+            "focus": retrieval_focus,
+            "query_context": retrieval_query_context,
+            "reason": retrieval_reason,
+            "prefetched_references": prefetched_references,
+            "parallel_support": parallel_support,
+            "prompt_support_bundle": prompt_support_bundle,
+            "hits": retrieval_hits,
+            "misses": retrieval_misses,
+            "evidence_map": retrieval_evidence_map,
+        }
         return replace(
             request,
             metadata={
                 **dict(request.metadata or {}),
-                "retrieval_focus": retrieval_focus,
-                "retrieval_query_context": retrieval_query_context,
-                "retrieval_reason": retrieval_reason,
-                "prefetched_references": prefetched_references,
-                "parallel_support": parallel_support,
-                "prompt_support_bundle": prompt_support_bundle,
-                "retrieval_hits": retrieval_hits,
-                "retrieval_misses": retrieval_misses,
-                "retrieval_evidence_map": retrieval_evidence_map,
+                "retrieval": retrieval_metadata,
+                "retrieval_focus": retrieval_metadata["focus"],
+                "retrieval_query_context": retrieval_metadata["query_context"],
+                "retrieval_reason": retrieval_metadata["reason"],
+                "prefetched_references": retrieval_metadata["prefetched_references"],
+                "parallel_support": retrieval_metadata["parallel_support"],
+                "prompt_support_bundle": retrieval_metadata["prompt_support_bundle"],
+                "retrieval_hits": retrieval_metadata["hits"],
+                "retrieval_misses": retrieval_metadata["misses"],
+                "retrieval_evidence_map": retrieval_metadata["evidence_map"],
             },
         )
 
@@ -223,8 +235,6 @@ class FinalizeStage:
             "final_text": result.final_text,
             "warnings": warnings,
             "board_patch": result.board_patch,
-            "tool_events": list(result.tool_events),
-            "stream_events": list(result.stream_events),
             **payload,
             "turn_mode_before": result.turn_mode_before,
             "turn_mode_after": result.turn_mode_after,
@@ -250,47 +260,6 @@ class FinalizeStage:
         runtime_v2 = dict((result.raw_learning_result or {}).get("runtime_v2") or {})
         retrieval_payload = dict(runtime_v2.get("retrieval") or {})
         return {
-            "raw_learning_result": dict(result.raw_learning_result or {}),
             "runtime_v2": runtime_v2,
-            "prompt_support_bundle": list(
-                retrieval_payload.get("prompt_support_bundle")
-                or (result.raw_learning_result or {}).get("prompt_support_bundle")
-                or []
-            ),
-            "retrieval_query_context": dict(
-                retrieval_payload.get("retrieval_query_context")
-                or (result.raw_learning_result or {}).get("retrieval_query_context")
-                or {}
-            ),
-            "knowledge_support_summary": dict(
-                retrieval_payload.get("knowledge_support_summary")
-                or (result.raw_learning_result or {}).get("knowledge_support_summary")
-                or {}
-            ),
-            "blocker_support_refs": dict(
-                retrieval_payload.get("blocker_support_refs")
-                or (result.raw_learning_result or {}).get("blocker_support_refs")
-                or {}
-            ),
-            "continuation_retrieval_hint": dict(
-                retrieval_payload.get("continuation_retrieval_hint")
-                or (result.raw_learning_result or {}).get("continuation_retrieval_hint")
-                or {}
-            ),
-            "retrieval_hits": list(
-                retrieval_payload.get("retrieval_hits")
-                or (result.raw_learning_result or {}).get("retrieval_hits")
-                or []
-            ),
-            "retrieval_misses": list(
-                retrieval_payload.get("retrieval_misses")
-                or (result.raw_learning_result or {}).get("retrieval_misses")
-                or []
-            ),
-            "retrieval_evidence_map": dict(
-                retrieval_payload.get("retrieval_evidence_map")
-                or (result.raw_learning_result or {}).get("retrieval_evidence_map")
-                or {}
-            ),
-            "writeback_envelope": dict((result.raw_learning_result or {}).get("writeback_envelope") or {}),
+            "continuation_retrieval_hint": dict(retrieval_payload.get("continuation_retrieval_hint") or {}),
         }

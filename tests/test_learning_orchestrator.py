@@ -790,17 +790,16 @@ async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: P
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_reason"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["prefetched_references"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["prompt_support_bundle"]
-    assert saved_session.last_turn_result["prompt_support_bundle"]
-    support_item = saved_session.last_turn_result["prompt_support_bundle"][0]
+    support_item = saved_session.last_turn_result["runtime_v2"]["retrieval"]["prompt_support_bundle"][0]
     assert support_item["target_type"] == "blocker"
     assert support_item["target_id"] == "blk-1"
-    assert saved_session.last_turn_result["retrieval_query_context"]["final_query"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_hits"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_evidence_map"]["blk-1"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_evidence_map"]["chunk:chunk-1"]
-    assert saved_session.last_turn_result["knowledge_support_summary"]["active_node_id"] == "node-verify"
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_query_context"]["final_query"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["knowledge_support_summary"]["active_node_id"] == "node-verify"
     assert saved_session.last_turn_result["continuation_retrieval_hint"]["active_node_id"] == "node-verify"
-    assert saved_session.last_turn_result["blocker_support_refs"]["blk-1"]
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["blocker_support_refs"]["blk-1"]
     assert result.turn_mode_after == "CORRECTION"
 
 
@@ -828,7 +827,7 @@ async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp
 
     saved_session = session_store.get_session("sess-miss")
     assert saved_session is not None
-    misses = saved_session.last_turn_result["retrieval_misses"]
+    misses = saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_misses"]
     assert misses
     assert misses[0]["reason"] == "no_prefetched_references"
 

@@ -113,19 +113,14 @@ class PreflightStage:
         project.retrieval_profile = {
             **project.retrieval_profile,
             **source_profile,
-            "board": board.to_dict(),
-            "retrieval_focus": retrieval_context["retrieval_focus"],
-            "retrieval_query_context": retrieval_context["retrieval_query_context"],
-            "retrieval_reason": retrieval_context["retrieval_reason"],
-            "prefetched_references": retrieval_context["prefetched_references"],
-            "parallel_support": retrieval_context["parallel_support"],
-            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
+            "active_turn_mode": board.current_turn_mode,
             "prefetch_bundle": {
                 "query": retrieval_bundle.query,
                 "retrieval_status": retrieval_bundle.retrieval_status,
                 "fallback_reason": retrieval_bundle.fallback_reason,
                 "warnings": list(retrieval_bundle.warnings or []),
             },
+            "last_retrieval_status": retrieval_bundle.retrieval_status,
         }
 
     def _get_or_create_session(

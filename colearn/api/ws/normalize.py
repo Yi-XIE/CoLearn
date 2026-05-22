@@ -42,6 +42,7 @@ def ready_event() -> dict[str, Any]:
     return {
         "event": "ready",
         "chat_id": session_id,
+        "session_id": session_id,
         "client_id": str(uuid4())[:8],
     }
 

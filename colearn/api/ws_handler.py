@@ -1,9 +1,8 @@
-"""Unified WebSocket endpoints for the CoLearn web UI."""
+"""Unified WebSocket endpoints for the local CoLearn WebUI."""
 
 from __future__ import annotations
 
 import json
-import secrets
 import time
 from typing import Any
 from uuid import uuid4
@@ -65,10 +64,9 @@ def _current_model_name() -> str:
 
 @router.get("/webui/bootstrap")
 async def bootstrap():
-    """Issue a short-lived token (no auth for localhost dev)."""
-    token = f"nbwt_{secrets.token_urlsafe(16)}"
+    """Return local WebUI connection details for the unified CoLearn server."""
     return {
-        "token": token,
+        "token": "local-dev",
         "ws_path": "/api/v1/ws",
         "expires_in": 3600,
         "model_name": _current_model_name(),
@@ -173,10 +171,10 @@ async def _handle_attach(
 ) -> None:
     session_id = str(frame.get("chat_id") or frame.get("session_id") or "").strip()
     if not session_id:
-        await send_protocol_error(send_event, detail="missing chat_id")
+        await send_protocol_error(send_event, detail="missing session_id")
         return
 
-    await send_event({"event": "attached", "chat_id": session_id})
+    await send_event({"event": "attached", "chat_id": session_id, "session_id": session_id})
 
     turn = get_session_turn(session_id)
     if turn is None:
@@ -201,8 +199,8 @@ async def _dispatch_frame(
     if msg_type == "new_chat":
         event = ready_event()
         await send_event(event)
-        session_id = str(event["chat_id"])
-        await send_event({"event": "attached", "chat_id": session_id})
+        session_id = str(event["session_id"])
+        await send_event({"event": "attached", "chat_id": session_id, "session_id": session_id})
         return
 
     if msg_type == "attach":

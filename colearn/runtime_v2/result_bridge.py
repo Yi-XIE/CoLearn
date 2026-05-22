@@ -16,6 +16,7 @@ def normalize_learning_turn_result(
     learning_result: dict[str, Any] | None = None,
 ) -> LearningTurnResult:
     payload = dict(learning_result or {})
+    retrieval_metadata = dict(request.metadata.get("retrieval") or {})
     board_summary = {
         "turn_mode": request.turn_mode,
         "active_node_id": request.board_facts.current_progress.active_node_id,
@@ -37,14 +38,46 @@ def normalize_learning_turn_result(
         "policy_restrictions": list(request.metadata.get("policy_restrictions") or []),
     }
     runtime_retrieval = {
-        "prefetched_references": list(request.metadata.get("prefetched_references") or []),
-        "prompt_support_bundle": list(request.metadata.get("prompt_support_bundle") or []),
-        "retrieval_focus": dict(request.metadata.get("retrieval_focus") or {}),
-        "retrieval_query_context": dict(request.metadata.get("retrieval_query_context") or {}),
-        "retrieval_reason": str(request.metadata.get("retrieval_reason") or ""),
-        "retrieval_hits": list(payload.get("retrieval_hits") or []),
-        "retrieval_misses": list(payload.get("retrieval_misses") or []),
-        "retrieval_evidence_map": dict(payload.get("retrieval_evidence_map") or {}),
+        "prefetched_references": list(
+            retrieval_metadata.get("prefetched_references")
+            or request.metadata.get("prefetched_references")
+            or []
+        ),
+        "prompt_support_bundle": list(
+            retrieval_metadata.get("prompt_support_bundle")
+            or request.metadata.get("prompt_support_bundle")
+            or []
+        ),
+        "retrieval_focus": dict(
+            retrieval_metadata.get("focus")
+            or request.metadata.get("retrieval_focus")
+            or {}
+        ),
+        "retrieval_query_context": dict(
+            retrieval_metadata.get("query_context")
+            or request.metadata.get("retrieval_query_context")
+            or {}
+        ),
+        "retrieval_reason": str(
+            retrieval_metadata.get("reason")
+            or request.metadata.get("retrieval_reason")
+            or ""
+        ),
+        "retrieval_hits": list(
+            retrieval_metadata.get("hits")
+            or payload.get("retrieval_hits")
+            or []
+        ),
+        "retrieval_misses": list(
+            retrieval_metadata.get("misses")
+            or payload.get("retrieval_misses")
+            or []
+        ),
+        "retrieval_evidence_map": dict(
+            retrieval_metadata.get("evidence_map")
+            or payload.get("retrieval_evidence_map")
+            or {}
+        ),
         "knowledge_support_summary": dict(payload.get("knowledge_support_summary") or {}),
         "blocker_support_refs": dict(payload.get("blocker_support_refs") or {}),
         "continuation_retrieval_hint": dict(payload.get("continuation_retrieval_hint") or {}),

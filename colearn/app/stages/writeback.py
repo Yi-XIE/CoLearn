@@ -163,12 +163,6 @@ class WritebackStage:
         project.current_main_goal = (
             request.turn_policy.main_goal if request.turn_policy else project.current_main_goal
         )
-        project.retrieval_profile = {
-            **project.retrieval_profile,
-            "last_stream_events": list(result.stream_events),
-            "last_tool_events": list(result.tool_events),
-            "board": dict(project.board_facts or result.board_after.to_dict()),
-        }
         for item in result.memory_events:
             self.memory_store.append(
                 MemoryEvent(

@@ -24,6 +24,7 @@ const MAX_PENDING_INBOUND = 2000;
 type ColearnWsFrame = {
   event?: string;
   chat_id?: string;
+  client_id?: string;
   type?: string;
   session_id?: string;
   turn_id?: string;
@@ -35,6 +36,10 @@ type ColearnWsFrame = {
 
 function colearnMetadata(frame: ColearnWsFrame): Record<string, unknown> {
   return frame.metadata ?? {};
+}
+
+function colearnSessionKey(frame: Pick<ColearnWsFrame, "session_id" | "chat_id">): string {
+  return String(frame.session_id ?? frame.chat_id ?? "").trim();
 }
 
 function colearnToolEvents(frame: ColearnWsFrame): ToolProgressEvent[] | undefined {
@@ -234,7 +239,7 @@ export class ColearnWsClient implements NanobotClientLike {
       this.resumeActiveTurn(chatId);
       return;
     }
-    this.rawSend({ type: "attach", chat_id: chatId });
+    this.rawSend({ type: "attach", session_id: chatId, chat_id: chatId });
   }
 
   sendMessage(
@@ -313,12 +318,26 @@ export class ColearnWsClient implements NanobotClientLike {
     } catch {
       return;
     }
-    if (frame.event === "session_updated") {
-      const updatedChatId = String(frame.chat_id ?? frame.session_id ?? "").trim();
-      if (updatedChatId) this.emitSessionUpdate(updatedChatId);
+    const sessionKey = colearnSessionKey(frame);
+    if (frame.event === "ready") {
+      if (sessionKey) this.defaultChatId_ = sessionKey;
       return;
     }
-    const sessionId = String(frame.session_id ?? "").trim();
+    if (frame.event === "attached") {
+      if (!sessionKey) return;
+      this.defaultChatId_ = sessionKey;
+      this.dispatch(sessionKey, {
+        event: "attached",
+        chat_id: sessionKey,
+        session_id: sessionKey,
+      });
+      return;
+    }
+    if (frame.event === "session_updated") {
+      if (sessionKey) this.emitSessionUpdate(sessionKey);
+      return;
+    }
+    const sessionId = sessionKey;
     const turnId = String(frame.turn_id ?? "").trim();
     const seq = typeof frame.seq === "number" ? Math.floor(frame.seq) : undefined;
     const timestampSeconds =

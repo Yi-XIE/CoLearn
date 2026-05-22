@@ -99,6 +99,8 @@ def after_turn_payload(
     final_text: str,
     tool_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    metadata = dict(getattr(request, "metadata", {}) or {})
+    retrieval_metadata = dict(metadata.get("retrieval") or {})
     board = getattr(request, "board_facts", None)
     if board is None:
         board = extract_board_facts(
@@ -114,13 +116,27 @@ def after_turn_payload(
         source_references=list(getattr(request, "source_references", []) or []),
         tool_events=tool_events,
     )
-    retrieval_hits = dedupe_evidence_items(list(getattr(request, "metadata", {}).get("retrieval_hits") or []))
-    retrieval_misses = list(getattr(request, "metadata", {}).get("retrieval_misses") or [])
-    prompt_support_bundle = list(getattr(request, "metadata", {}).get("prompt_support_bundle") or [])
-    retrieval_query_context = dict(getattr(request, "metadata", {}).get("retrieval_query_context") or {})
+    retrieval_hits = dedupe_evidence_items(
+        list(retrieval_metadata.get("hits") or metadata.get("retrieval_hits") or [])
+    )
+    retrieval_misses = list(retrieval_metadata.get("misses") or metadata.get("retrieval_misses") or [])
+    prompt_support_bundle = list(
+        retrieval_metadata.get("prompt_support_bundle")
+        or metadata.get("prompt_support_bundle")
+        or []
+    )
+    retrieval_query_context = dict(
+        retrieval_metadata.get("query_context")
+        or metadata.get("retrieval_query_context")
+        or {}
+    )
     retrieval_evidence_map = {
         key: dedupe_evidence_items(list(value or []))
-        for key, value in dict(getattr(request, "metadata", {}).get("retrieval_evidence_map") or {}).items()
+        for key, value in dict(
+            retrieval_metadata.get("evidence_map")
+            or metadata.get("retrieval_evidence_map")
+            or {}
+        ).items()
     }
     review_summary = final_text[:240].strip()
     continuation_prompt = updated_board.continuation.next_prompt_hint or str(
@@ -153,11 +169,6 @@ def after_turn_payload(
             "gaps_and_blockers": asdict(updated_board.gaps_and_blockers),
             "evidence_refs": list(updated_board.evidence_refs),
         },
-        "retrieval_hits": retrieval_hits,
-        "retrieval_misses": retrieval_misses,
-        "prompt_support_bundle": prompt_support_bundle,
-        "retrieval_query_context": retrieval_query_context,
-        "retrieval_evidence_map": retrieval_evidence_map,
         "knowledge_support_summary": {
             "active_node_id": updated_board.current_progress.active_node_id,
             "critical_blockers": [blocker.id for blocker in updated_board.gaps_and_blockers.critical_blockers],
@@ -173,7 +184,7 @@ def after_turn_payload(
         "continuation_retrieval_hint": {
             "active_node_id": updated_board.current_progress.active_node_id,
             "evidence_refs": list(updated_board.evidence_refs or []),
-            "retrieval_focus": getattr(request, "metadata", {}).get("retrieval_focus", {}),
+            "retrieval_focus": retrieval_metadata.get("focus") or metadata.get("retrieval_focus") or {},
             "retrieval_query_context": retrieval_query_context,
         },
         "writeback_envelope": {

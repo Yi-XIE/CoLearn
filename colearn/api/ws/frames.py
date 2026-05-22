@@ -102,4 +102,5 @@ def message_event(detail: str, *, chat_id: str | None = None) -> dict[str, Any]:
     event: dict[str, Any] = {"event": "error", "detail": detail}
     if chat_id:
         event["chat_id"] = chat_id
+        event["session_id"] = chat_id
     return event

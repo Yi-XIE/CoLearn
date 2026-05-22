@@ -343,15 +343,12 @@ export async function fetchLearningSupport(
   const retrieval = ((runtime.retrieval as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
   const promptSupport =
     (retrieval.prompt_support_bundle as LearningSupportPayload["prompt_support_bundle"] | undefined)
-    ?? (lastTurn.prompt_support_bundle as LearningSupportPayload["prompt_support_bundle"] | undefined)
     ?? [];
   const misses =
     (retrieval.retrieval_misses as LearningSupportPayload["retrieval_misses"] | undefined)
-    ?? (lastTurn.retrieval_misses as LearningSupportPayload["retrieval_misses"] | undefined)
     ?? [];
   const hits =
     (retrieval.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
-    ?? (lastTurn.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
     ?? [];
   if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0) return null;
   return {
@@ -360,15 +357,12 @@ export async function fetchLearningSupport(
     retrieval_misses: misses,
     retrieval_evidence_map:
       (retrieval.retrieval_evidence_map as LearningSupportPayload["retrieval_evidence_map"] | undefined)
-      ?? (lastTurn.retrieval_evidence_map as LearningSupportPayload["retrieval_evidence_map"] | undefined)
       ?? {},
     retrieval_query_context:
       (retrieval.retrieval_query_context as LearningSupportPayload["retrieval_query_context"] | undefined)
-      ?? (lastTurn.retrieval_query_context as LearningSupportPayload["retrieval_query_context"] | undefined)
       ?? {},
     continuation_retrieval_hint:
       (retrieval.continuation_retrieval_hint as LearningSupportPayload["continuation_retrieval_hint"] | undefined)
-      ?? (lastTurn.continuation_retrieval_hint as LearningSupportPayload["continuation_retrieval_hint"] | undefined)
       ?? {},
   };
 }

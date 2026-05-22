@@ -61,7 +61,7 @@ export interface AgentUIBlob {
   data?: unknown;
 }
 
-/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
+/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by the active session/chat id). */
 export interface GoalStateWsPayload {
   active: boolean;
   ui_summary?: string;
@@ -83,7 +83,7 @@ export interface ToolProgressEvent {
 export interface ChatSummary {
   /** Server-side session key, usually the raw ``session_id``. */
   key: string;
-  /** Local channel + chat_id parts derived from ``key`` for convenience. */
+  /** Legacy convenience fields; in CoLearn ``chatId`` usually matches the raw ``session_id``. */
   channel: string;
   chatId: string;
   createdAt: string | null;
@@ -116,7 +116,7 @@ export interface LearningSupportPayload {
 }
 
 export interface BootstrapResponse {
-  token: string;
+  token?: string;
   ws_path: string;
   expires_in: number;
   model_name?: string | null;
@@ -283,8 +283,8 @@ export type ConnectionStatus =
   | "error";
 
 export type InboundEvent =
-  | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string }
+  | { event: "ready"; chat_id: string; session_id?: string; client_id: string }
+  | { event: "attached"; chat_id: string; session_id?: string }
   | {
       event: "message";
       chat_id: string;
@@ -348,8 +348,8 @@ export type InboundEvent =
       chat_id: string;
       goal_state: GoalStateWsPayload;
     }
-  | { event: "session_updated"; chat_id: string }
-  | { event: "error"; chat_id?: string; detail?: string };
+  | { event: "session_updated"; chat_id: string; session_id?: string }
+  | { event: "error"; chat_id?: string; session_id?: string; detail?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
  *

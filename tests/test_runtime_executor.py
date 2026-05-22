@@ -271,6 +271,6 @@ def test_cancel_session_dispatches_runtime_cancel(monkeypatch):
 
     monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
     assert executor.cancel_session("s1") is True
-    assert called["key"] == "colearn:s1"
+    assert called["key"] == "s1"
     assert called["loop"] is loop
     assert called["timeout"] == 2.0

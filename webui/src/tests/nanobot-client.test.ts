@@ -269,8 +269,30 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
 
     expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "attach", chat_id: "chat-open" }),
+      JSON.stringify({ type: "attach", session_id: "chat-open", chat_id: "chat-open" }),
     );
+  });
+
+  it("uses session_id when Colearn ready and attached frames omit chat_id", () => {
+    const client = new ColearnWsClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onChat("session-a", handler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({ event: "ready", session_id: "session-a", client_id: "c1" });
+    lastSocket().fakeMessage({ event: "attached", session_id: "session-a" });
+
+    expect(client.defaultChatId).toBe("session-a");
+    expect(handler).toHaveBeenCalledWith({
+      event: "attached",
+      chat_id: "session-a",
+      session_id: "session-a",
+    });
   });
 
   it("resumes Colearn WS turns from the next sequence after reconnect", async () => {

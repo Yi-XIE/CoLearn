@@ -48,8 +48,8 @@ export async function fetchBootstrap(
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }
   const body = (await res.json()) as BootstrapResponse;
-  if (!body.token || !body.ws_path) {
-    throw new Error("bootstrap response missing token or ws_path");
+  if (!body.ws_path) {
+    throw new Error("bootstrap response missing ws_path");
   }
   return body;
 }

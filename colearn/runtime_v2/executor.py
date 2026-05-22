@@ -127,7 +127,7 @@ class NanobotTurnExecutor:
     ) -> tuple[str, list[dict[str, Any]], list[str]]:
         prompt = build_turn_prompt(request)
         bot = self._get_bot()
-        session_key = f"colearn:{request.session_id}"
+        session_key = request.session_id
         stream_events: list[dict[str, Any]] = []
         event_index = 0
         active_loop = asyncio.get_running_loop()
@@ -194,7 +194,7 @@ class NanobotTurnExecutor:
         if bot_loop is None or not hasattr(bot_loop, "_cancel_active_tasks"):
             return False
         future = asyncio.run_coroutine_threadsafe(
-            bot_loop._cancel_active_tasks(f"colearn:{session_id}"),
+            bot_loop._cancel_active_tasks(session_id),
             loop,
         )
         try:

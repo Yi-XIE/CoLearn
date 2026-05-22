@@ -13,7 +13,7 @@ from .lightrag_protocol import DEFAULT_BASE_URL, DEFAULT_TOP_K
 @dataclass(slots=True)
 class LightRAGConfig:
     enabled: bool = False
-    provider: str = "server"
+    provider: str = "local"
     api_key: str = ""
     base_url: str = DEFAULT_BASE_URL
     top_k: int = DEFAULT_TOP_K
@@ -38,7 +38,7 @@ class LightRAGConfig:
             enabled = str(env_values["LIGHTRAG_ENABLED"]).strip().lower() in {"1", "true", "yes", "on"}
         return cls(
             enabled=enabled,
-            provider=str(provider_block.get("name") or payload.get("provider_name") or "server").strip() or "server",
+            provider=str(provider_block.get("name") or payload.get("provider_name") or "local").strip() or "local",
             api_key=str(provider_block.get("api_key") or env_values.get("LIGHTRAG_API_KEY") or "").strip(),
             base_url=str(provider_block.get("base_url") or env_values.get("LIGHTRAG_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/"),
             top_k=int(payload.get("top_k") or env_values.get("LIGHTRAG_TOP_K") or DEFAULT_TOP_K),

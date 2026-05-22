@@ -81,6 +81,26 @@ describe("webui API helpers", () => {
     expect(support?.prompt_support_bundle[0]?.summary).toBe("Core idea");
   });
 
+  it("returns null when retrieval metadata only exists in deprecated top-level fields", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        session: {
+          last_turn_result: {
+            prompt_support_bundle: [
+              {
+                source_ref: "legacy.md",
+                summary: "legacy support",
+              },
+            ],
+          },
+        },
+      }),
+    } as Response);
+
+    await expect(fetchLearningSupport("tok", "session-legacy")).resolves.toBeNull();
+  });
+
   it("updates settings through the catalog apply flow", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
