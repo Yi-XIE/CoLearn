@@ -17,6 +17,7 @@ from colearn.paths import colearn_repo_root
 def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
     board = request.board_facts
     snapshot = request.state_projection
+    retrieval_metadata = dict(request.metadata.get("retrieval") or {})
     lines: list[str] = []
 
     active_label = str(
@@ -60,7 +61,11 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
     if evidence_count:
         lines.append(f"Evidence refs attached: {evidence_count}")
 
-    retrieval_focus = dict(request.metadata.get("retrieval_focus") or {})
+    retrieval_focus = dict(
+        retrieval_metadata.get("focus")
+        or request.metadata.get("retrieval_focus")
+        or {}
+    )
     if retrieval_focus:
         focus_bits: list[str] = []
         turn_mode = str(retrieval_focus.get("turn_mode") or "").strip()
@@ -75,15 +80,27 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
         if focus_bits:
             lines.append(f"Retrieval focus: {'; '.join(focus_bits)}")
 
-    prefetched = list(request.metadata.get("prefetched_references") or [])
+    prefetched = list(
+        retrieval_metadata.get("prefetched_references")
+        or request.metadata.get("prefetched_references")
+        or []
+    )
     if prefetched:
         lines.append(f"Prefetched references: {len(prefetched)}")
 
-    retrieval_reason = str(request.metadata.get("retrieval_reason") or "").strip()
+    retrieval_reason = str(
+        retrieval_metadata.get("reason")
+        or request.metadata.get("retrieval_reason")
+        or ""
+    ).strip()
     if retrieval_reason:
         lines.append(f"Retrieval reason: {retrieval_reason}")
 
-    support_bundle = list(request.metadata.get("prompt_support_bundle") or [])
+    support_bundle = list(
+        retrieval_metadata.get("prompt_support_bundle")
+        or request.metadata.get("prompt_support_bundle")
+        or []
+    )
     if support_bundle:
         support_lines = ["Prompt support bundle:"]
         for item in support_bundle[:4]:

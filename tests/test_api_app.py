@@ -115,6 +115,25 @@ def test_session_detail_contains_active_turns_field() -> None:
 
 
 async def _run_project_checks() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    app_module.session_store.create_session(
+        session_id="project-api-session",
+        project_id="project-api",
+        title="Project API Session",
+    )
+    session = app_module.session_store.get_session("project-api-session")
+    assert session is not None
+    session.updated_at = 99
+    session.board_version = 5
+    session.board_facts = {
+        "project_id": "project-api",
+        "session_id": "project-api-session",
+        "board_version": 5,
+        "updated_at": "2026-05-22T00:00:00Z",
+        "current_turn_mode": "VERIFY",
+    }
+    session.pending_review = {"summary": "session review", "status": "ready"}
+    app_module.session_store.save_session(session)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         created = await client.post(
@@ -131,10 +150,47 @@ async def _run_project_checks() -> None:
         assert project_payload["title"] == "Project API"
         assert "board_updated_at" in project_payload
         assert "latest_review_status" in project_payload
+        assert project_payload["board_facts"]["session_id"] == "project-api-session"
+        assert project_payload["board_version"] == 5
+        assert project_payload["board_updated_at"] == "2026-05-22T00:00:00Z"
+        assert project_payload["latest_review"]["summary"] == "session review"
 
 
 def test_project_endpoints() -> None:
     anyio.run(_run_project_checks)
+
+
+async def _run_knowledge_list_uses_latest_session_board_check() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    project = app_module.project_service.get_project("kb-session-board")
+    if project is None:
+        project = app_module.project_service.create_project("kb-session-board", title="KB Session Board")
+    project.board_facts = {"updated_at": "legacy-project-board"}
+    app_module.project_service.save_project(project)
+    session = app_module.session_store.create_session(
+        session_id="kb-session-board-session",
+        project_id="kb-session-board",
+        title="KB Session Board Session",
+    )
+    session.updated_at = 123
+    session.board_facts = {"updated_at": "latest-session-board"}
+    app_module.session_store.save_session(session)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        listing = await client.get("/api/v1/knowledge/list")
+        assert listing.status_code == 200
+        item = next(row for row in listing.json()["knowledge_bases"] if row["id"] == "kb-session-board")
+        assert item["updated_at"] == "latest-session-board"
+
+        graph = await client.get("/api/v1/knowledge/kb-session-board/graph")
+        assert graph.status_code == 200
+        library = next(node for node in graph.json()["nodes"] if node["id"] == "library:kb-session-board")
+        assert library["metadata"]["updated_at"] == "latest-session-board"
+
+
+def test_knowledge_list_uses_latest_session_board() -> None:
+    anyio.run(_run_knowledge_list_uses_latest_session_board_check)
 
 
 async def _run_schema_compat_checks() -> None:

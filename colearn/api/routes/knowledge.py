@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 
-from colearn.api.dependencies import knowledge_task_service, project_service, settings_service
+from colearn.api.dependencies import knowledge_task_service, project_service, session_store
 
 router = APIRouter()
 
@@ -51,6 +51,14 @@ def _json_sse(events: list[dict[str, Any]]):
             yield f"event: {event_name}\ndata: {payload}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _latest_project_board(project_id: str) -> dict[str, Any]:
+    sessions = [item for item in session_store.list_sessions() if item.project_id == project_id]
+    if not sessions:
+        return {}
+    latest = max(sessions, key=lambda item: (int(item.updated_at or 0), int(item.created_at or 0), item.session_id))
+    return dict(latest.board_facts or {})
 
 
 def _normalize_uploads(files: UploadFile | list[UploadFile] | None) -> list[UploadFile]:
@@ -145,7 +153,7 @@ def build_knowledge_graph_payload(name: str) -> dict[str, Any]:
         if project
         else "ready",
         "provider": str((project.retrieval_profile or {}).get("provider") or "lightrag") if project else "lightrag",
-        "updated_at": str((project.board_facts or {}).get("updated_at") or "") if project else "",
+        "updated_at": str(_latest_project_board(name).get("updated_at") or "") if project else "",
     }
     library_node_id = f"library:{name}"
     nodes = [
@@ -222,7 +230,7 @@ def list_knowledge_bases() -> dict[str, Any]:
             "source_count": len(project.source_refs or []),
             "status": str((project.retrieval_profile or {}).get("last_retrieval_status") or "empty"),
             "provider": str((project.retrieval_profile or {}).get("provider") or "lightrag"),
-            "updated_at": str((project.board_facts or {}).get("updated_at") or ""),
+            "updated_at": str(_latest_project_board(project.project_id).get("updated_at") or ""),
             "files": knowledge_task_service.list_files(project.project_id),
         }
         for project in projects

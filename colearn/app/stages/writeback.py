@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import time
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -109,8 +110,7 @@ class WritebackStage:
         finalizers from clobbering newer state. The dropped result still emits
         a warning in ``warnings``.
         """
-        # Session Board is the runtime source of truth; project.board_facts is
-        # a denormalized mirror for project lists and cross-session recovery.
+        # Session Board is the runtime source of truth.
         current_session = self.session_store.get_session(session.session_id)
         current_session_version = int(getattr(current_session, "board_version", session.board_version) or 1)
         base_version = int(getattr(request.board_facts, "board_version", session.board_version) or 1)
@@ -142,16 +142,12 @@ class WritebackStage:
             ]
         )
         current_project = self.project_service.get_project(project.project_id)
-        current_project_version = int(getattr(current_project, "board_version", project.board_version) or 1)
-        project_conflict = current_project_version > base_version and current_project is not project
-        if project_conflict and current_project is not None:
+        if current_project is not None:
             project = current_project
+        current_project_version = int(getattr(project, "board_version", 1) or 1)
         project.turn_mode = result.turn_mode_after
-        if project_conflict:
-            warnings.append("board_version_conflict_project_write_skipped")
-        else:
-            project.board_facts = dict(result.board_after.to_dict())
-            project.board_version = int(result.board_after.board_version or 1)
+        if not session_conflict:
+            project.board_version = max(current_project_version, int(result.board_after.board_version or 1))
         session.last_turn_result = self._build_last_turn_result(
             request=request,
             result=result,
@@ -206,6 +202,83 @@ class WritebackStage:
             session.source_refs = list(project.source_refs)
         self.session_store.save_session(session)
         self.project_service.save_project(project)
+
+    def apply_background_result(
+        self,
+        *,
+        session_id: str,
+        project_id: str,
+        base_board_version: int,
+        status: str,
+        review_summary: str,
+        continuation_prompt: str,
+        error: str,
+    ) -> None:
+        session = self.session_store.get_session(session_id)
+        project = self.project_service.get_project(project_id)
+        if session is None or project is None:
+            return
+
+        last_turn_result = dict(session.last_turn_result or {})
+        warnings = list(last_turn_result.get("warnings") or [])
+        product_status: dict[str, Any] = {
+            "status": status,
+            "started_at": None,
+            "finished_at": int(time()),
+            "error": str(error or ""),
+            "base_board_version": int(base_board_version or 1),
+        }
+        if status == "failed":
+            warning = f"product_compression_failed: {error}"
+            if warning not in warnings:
+                warnings.append(warning)
+        else:
+            stale_board = int(session.board_version or 1) > int(base_board_version or 1) + 1
+            if stale_board and "product_compression_stale_board_skipped" not in warnings:
+                warnings.append("product_compression_stale_board_skipped")
+            pending_review = {
+                "summary": review_summary,
+                "points": [],
+                "confusion_points": [],
+                "status": "ready",
+            }
+            session.continuation_prompt = continuation_prompt
+            session.pending_review = pending_review
+            project.latest_review = dict(pending_review)
+            product_status.update(
+                {
+                    "status": "completed",
+                    "stale_board": stale_board,
+                    "review_summary": review_summary,
+                    "continuation_prompt": continuation_prompt,
+                }
+            )
+        last_turn_result["warnings"] = warnings
+        last_turn_result["product_compression"] = product_status
+        session.last_turn_result = last_turn_result
+        self._save_background_session_update(session)
+        if status != "failed":
+            self._save_background_project_update(project, session_id=session.session_id)
+
+    def _save_background_session_update(self, session: LearningSession) -> None:
+        try:
+            self.session_store.save_session(session)
+        except OSError as exc:
+            logger.warning(
+                "background session save skipped for %s: %s",
+                session.session_id,
+                exc,
+            )
+
+    def _save_background_project_update(self, project: LearningProject, *, session_id: str) -> None:
+        try:
+            self.project_service.save_project(project)
+        except OSError as exc:
+            logger.warning(
+                "background project save skipped for session %s: %s",
+                session_id,
+                exc,
+            )
 
     def _persist_turn_and_schedule_auxiliary(self, ctx: TurnContext) -> None:
         self._write_back(

@@ -37,56 +37,43 @@ def normalize_learning_turn_result(
         "source_readiness_before": str(request.metadata.get("source_readiness_before") or ""),
         "policy_restrictions": list(request.metadata.get("policy_restrictions") or []),
     }
+    result_board = payload.get("board_after") or request.board_facts
+    retrieval_focus = dict(retrieval_metadata.get("focus") or {})
+    retrieval_query_context = dict(retrieval_metadata.get("query_context") or {})
+    retrieval_hits = list(retrieval_metadata.get("hits") or [])
+    retrieval_misses = list(retrieval_metadata.get("misses") or [])
+    retrieval_evidence_map = dict(retrieval_metadata.get("evidence_map") or {})
     runtime_retrieval = {
-        "prefetched_references": list(
-            retrieval_metadata.get("prefetched_references")
-            or request.metadata.get("prefetched_references")
-            or []
-        ),
-        "prompt_support_bundle": list(
-            retrieval_metadata.get("prompt_support_bundle")
-            or request.metadata.get("prompt_support_bundle")
-            or []
-        ),
-        "retrieval_focus": dict(
-            retrieval_metadata.get("focus")
-            or request.metadata.get("retrieval_focus")
-            or {}
-        ),
-        "retrieval_query_context": dict(
-            retrieval_metadata.get("query_context")
-            or request.metadata.get("retrieval_query_context")
-            or {}
-        ),
-        "retrieval_reason": str(
-            retrieval_metadata.get("reason")
-            or request.metadata.get("retrieval_reason")
-            or ""
-        ),
-        "retrieval_hits": list(
-            retrieval_metadata.get("hits")
-            or payload.get("retrieval_hits")
-            or []
-        ),
-        "retrieval_misses": list(
-            retrieval_metadata.get("misses")
-            or payload.get("retrieval_misses")
-            or []
-        ),
-        "retrieval_evidence_map": dict(
-            retrieval_metadata.get("evidence_map")
-            or payload.get("retrieval_evidence_map")
-            or {}
-        ),
-        "knowledge_support_summary": dict(payload.get("knowledge_support_summary") or {}),
-        "blocker_support_refs": dict(payload.get("blocker_support_refs") or {}),
-        "continuation_retrieval_hint": dict(payload.get("continuation_retrieval_hint") or {}),
+        "prefetched_references": list(retrieval_metadata.get("prefetched_references") or []),
+        "prompt_support_bundle": list(retrieval_metadata.get("prompt_support_bundle") or []),
+        "retrieval_focus": retrieval_focus,
+        "retrieval_query_context": retrieval_query_context,
+        "retrieval_reason": str(retrieval_metadata.get("reason") or ""),
+        "retrieval_hits": retrieval_hits,
+        "retrieval_misses": retrieval_misses,
+        "retrieval_evidence_map": retrieval_evidence_map,
+        "knowledge_support_summary": {
+            "active_node_id": result_board.current_progress.active_node_id,
+            "critical_blockers": [blocker.id for blocker in result_board.gaps_and_blockers.critical_blockers],
+            "evidence_ref_count": len(result_board.evidence_refs or []),
+            "retrieval_hit_count": len(retrieval_hits),
+        },
+        "blocker_support_refs": {
+            blocker.id: list(retrieval_evidence_map.get(blocker.id, []))
+            for blocker in result_board.gaps_and_blockers.critical_blockers
+        },
+        "continuation_retrieval_hint": {
+            "active_node_id": result_board.current_progress.active_node_id,
+            "evidence_refs": list(result_board.evidence_refs or []),
+            "retrieval_focus": retrieval_focus,
+            "retrieval_query_context": retrieval_query_context,
+        },
     }
-    payload.setdefault("runtime_v2", {})
-    if isinstance(payload["runtime_v2"], dict):
-        payload["runtime_v2"].setdefault("board_summary", board_summary)
-        payload["runtime_v2"].setdefault("turn_envelope", turn_envelope)
-        payload["runtime_v2"].setdefault("retrieval", runtime_retrieval)
+    runtime_v2 = dict(payload.get("runtime_v2") or {})
+    runtime_v2["board_summary"] = board_summary
+    runtime_v2["turn_envelope"] = turn_envelope
+    runtime_v2["retrieval"] = runtime_retrieval
+    payload["runtime_v2"] = runtime_v2
     review_to_persist = dict(payload.get("review_to_persist") or {})
     board_patch = dict(payload.get("board_patch") or {})
     memory_events = list(payload.get("memory_events") or [])
@@ -151,6 +138,15 @@ def normalize_learning_turn_result(
             "turn_mode_after": str(payload.get("turn_mode_after") or request.turn_mode),
             "base_board_version": turn_envelope["board_version_before"],
             "resolved_board_version": int((payload.get("board_after") or request.board_facts).board_version if hasattr(payload.get("board_after") or request.board_facts, "board_version") else request.board_facts.board_version),
-            "writeback_envelope": dict(payload.get("writeback_envelope") or {}),
+            "writeback_envelope": {
+                "turn_mode_before": turn_envelope["turn_mode_before"],
+                "turn_mode_after": str(payload.get("turn_mode_after") or request.turn_mode),
+                "base_board_version": turn_envelope["board_version_before"],
+                "resolved_board_version": int((payload.get("board_after") or request.board_facts).board_version if hasattr(payload.get("board_after") or request.board_facts, "board_version") else request.board_facts.board_version),
+                "event_types": [
+                    str(getattr(item, "type", "") or (item.get("type", "") if isinstance(item, dict) else ""))
+                    for item in merged_events
+                ],
+            },
         },
     )

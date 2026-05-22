@@ -10,18 +10,31 @@ from fastapi import APIRouter, HTTPException
 from colearn.api.dependencies import project_service, session_store
 from colearn.api.schemas import ProjectCreatePayload, ProjectUpdatePayload, ProjectSourcesPayload, ProjectAnchorPayload
 from colearn.projects.models import LearningProject
+from colearn.sessions.store import LearningSession
 
 router = APIRouter()
+
+
+def _project_sessions(project_id: str) -> list[LearningSession]:
+    return [item for item in session_store.list_sessions() if item.project_id == project_id]
+
+
+def _latest_project_session(project_id: str) -> LearningSession | None:
+    sessions = _project_sessions(project_id)
+    if not sessions:
+        return None
+    return max(sessions, key=lambda item: (int(item.updated_at or 0), int(item.created_at or 0), item.session_id))
 
 
 def _serialize_project(project: LearningProject) -> dict[str, Any]:
     source_refs = list(project.source_refs or [])
     memory_refs = list(project.memory_refs or [])
-    board_facts = dict(project.board_facts or {})
-    latest_review = dict(project.latest_review or {})
+    latest_session = _latest_project_session(project.project_id)
+    board_facts = dict((latest_session.board_facts if latest_session else {}) or {})
+    latest_review = dict((latest_session.pending_review if latest_session else {}) or project.latest_review or {})
     latest_review_status = str(latest_review.get("status") or ("ready" if latest_review.get("summary") else "empty"))
     source_count = len(source_refs)
-    session_count = len([item for item in session_store.list_sessions() if item.project_id == project.project_id])
+    session_count = len(_project_sessions(project.project_id))
     return {
         "project_id": project.project_id,
         "slug": project.project_id,
@@ -36,7 +49,7 @@ def _serialize_project(project: LearningProject) -> dict[str, Any]:
         "memory_ref_count": len(memory_refs),
         "turn_mode": project.turn_mode,
         "board_facts": board_facts,
-        "board_version": int(project.board_version or 1),
+        "board_version": int((latest_session.board_version if latest_session else project.board_version) or 1),
         "board_updated_at": str(board_facts.get("updated_at") or ""),
         "latest_review_status": latest_review_status,
         "latest_review": latest_review,

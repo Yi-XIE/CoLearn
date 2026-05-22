@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from colearn.learning.state_hooks import build_retrieval_evidence_map
+from colearn.runtime_v2.result_bridge import normalize_learning_turn_result
 
 from .context import TurnContext
 
@@ -24,9 +25,8 @@ class FinalizeStage:
     # ------------------------------------------------------------------
     def run(self, ctx: TurnContext) -> TurnContext:
         retrieval_context = ctx.retrieval_context()
-        normalized, retrieval_hits, retrieval_misses, retrieval_evidence_map = self._enrich_turn_result(
+        retrieval_hits, retrieval_misses, retrieval_evidence_map = self._build_retrieval_writeback_fields(
             request=ctx.compressed.request,
-            result=ctx.result,
             retrieval_context=retrieval_context,
         )
         request_with_metadata = self._attach_retrieval_metadata(
@@ -41,7 +41,11 @@ class FinalizeStage:
             retrieval_misses=retrieval_misses,
             retrieval_evidence_map=retrieval_evidence_map,
         )
-        ctx.result = normalized
+        ctx.result = normalize_learning_turn_result(
+            request=request_with_metadata,
+            final_text=ctx.result.final_text,
+            learning_result=dict(ctx.result.raw_learning_result or {}),
+        )
         ctx.retrieval_hits = retrieval_hits
         ctx.retrieval_misses = retrieval_misses
         ctx.retrieval_evidence_map = retrieval_evidence_map
@@ -51,13 +55,12 @@ class FinalizeStage:
     # ------------------------------------------------------------------
     # Internals (lifted verbatim from LearningOrchestrator)
     # ------------------------------------------------------------------
-    def _enrich_turn_result(
+    def _build_retrieval_writeback_fields(
         self,
         *,
         request,
-        result,
         retrieval_context: dict[str, Any],
-    ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
         retrieval_evidence_map = build_retrieval_evidence_map(
             board=request.board_facts,
             prefetched_references=retrieval_context["prefetched_references"],
@@ -68,66 +71,7 @@ class FinalizeStage:
             retrieval_focus=retrieval_context["retrieval_focus"],
             retrieval_evidence_map=retrieval_evidence_map,
         )
-        runtime_v2 = dict((result.raw_learning_result or {}).get("runtime_v2") or {})
-        runtime_v2["retrieval"] = self._build_runtime_retrieval_payload(
-            board=request.board_facts,
-            retrieval_context=retrieval_context,
-            retrieval_hits=retrieval_hits,
-            retrieval_misses=retrieval_misses,
-            retrieval_evidence_map=retrieval_evidence_map,
-        )
-        runtime_v2["parallel_support"] = retrieval_context["parallel_support"]
-        enriched_learning_result = {
-            **dict(result.raw_learning_result or {}),
-            "retrieval_hits": retrieval_hits,
-            "retrieval_misses": retrieval_misses,
-            "retrieval_evidence_map": retrieval_evidence_map,
-            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
-            "retrieval_query_context": retrieval_context["retrieval_query_context"],
-            "runtime_v2": runtime_v2,
-        }
-        return (
-            replace(result, raw_learning_result=enriched_learning_result),
-            retrieval_hits,
-            retrieval_misses,
-            retrieval_evidence_map,
-        )
-
-    def _build_runtime_retrieval_payload(
-        self,
-        *,
-        board,
-        retrieval_context: dict[str, Any],
-        retrieval_hits: list[dict[str, Any]],
-        retrieval_misses: list[dict[str, Any]],
-        retrieval_evidence_map: dict[str, list[dict[str, Any]]],
-    ) -> dict[str, Any]:
-        return {
-            "prefetched_references": retrieval_context["prefetched_references"],
-            "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
-            "retrieval_focus": retrieval_context["retrieval_focus"],
-            "retrieval_query_context": retrieval_context["retrieval_query_context"],
-            "retrieval_reason": retrieval_context["retrieval_reason"],
-            "retrieval_hits": retrieval_hits,
-            "retrieval_misses": retrieval_misses,
-            "retrieval_evidence_map": retrieval_evidence_map,
-            "knowledge_support_summary": {
-                "active_node_id": board.current_progress.active_node_id,
-                "critical_blockers": [blocker.id for blocker in board.gaps_and_blockers.critical_blockers],
-                "evidence_ref_count": len(board.evidence_refs or []),
-                "retrieval_hit_count": len(retrieval_hits),
-            },
-            "blocker_support_refs": {
-                blocker.id: list(retrieval_evidence_map.get(blocker.id, []))
-                for blocker in board.gaps_and_blockers.critical_blockers
-            },
-            "continuation_retrieval_hint": {
-                "active_node_id": board.current_progress.active_node_id,
-                "evidence_refs": list(board.evidence_refs or []),
-                "retrieval_focus": retrieval_context["retrieval_focus"],
-                "retrieval_query_context": retrieval_context["retrieval_query_context"],
-            },
-        }
+        return retrieval_hits, retrieval_misses, retrieval_evidence_map
 
     def _build_retrieval_writeback(
         self,
@@ -203,15 +147,6 @@ class FinalizeStage:
             metadata={
                 **dict(request.metadata or {}),
                 "retrieval": retrieval_metadata,
-                "retrieval_focus": retrieval_metadata["focus"],
-                "retrieval_query_context": retrieval_metadata["query_context"],
-                "retrieval_reason": retrieval_metadata["reason"],
-                "prefetched_references": retrieval_metadata["prefetched_references"],
-                "parallel_support": retrieval_metadata["parallel_support"],
-                "prompt_support_bundle": retrieval_metadata["prompt_support_bundle"],
-                "retrieval_hits": retrieval_metadata["hits"],
-                "retrieval_misses": retrieval_metadata["misses"],
-                "retrieval_evidence_map": retrieval_metadata["evidence_map"],
             },
         )
 

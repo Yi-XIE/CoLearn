@@ -4,22 +4,19 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from time import time
-
 from colearn.logging_config import get_logger
 
 from colearn.config.defaults import Defaults
-from colearn.compression import ProductCompressionBridge, ProductCompressionResult, RuntimeCompressionBridge
+from colearn.compression import ProductCompressionBridge, RuntimeCompressionBridge
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.board_deriver import BoardSnapshotDeriver
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.memory.store import EventMemoryStore
 from colearn.paths import colearn_nanobot_workspace
-from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
 from colearn.runtime_v2.executor import NanobotTurnExecutor
-from colearn.sessions.store import LearningSession, SessionStore
+from colearn.sessions.store import SessionStore
 from .background_finalizer import BackgroundTurnFinalizer
 from .source_preflight import SourceReadinessPreflight
 from .stages import (
@@ -71,7 +68,7 @@ class LearningOrchestrator:
         self.product_compression = product_compression or ProductCompressionBridge()
         self.background_finalizer = BackgroundTurnFinalizer(
             product_compression=self.product_compression,
-            on_result=self.apply_background_result,
+            on_result=lambda **payload: self.writeback.apply_background_result(**payload),
         )
         self.board_deriver = board_deriver
 
@@ -159,124 +156,3 @@ class LearningOrchestrator:
         ctx = self.finalize.run(ctx)
         await self.writeback.run_async(ctx)
         return ctx.result
-
-    def apply_background_result(
-        self,
-        *,
-        session_id: str,
-        project_id: str,
-        request,
-        board,
-        product_output: ProductCompressionResult | None,
-        error: BaseException | None,
-        status_payload: dict[str, Any],
-    ) -> None:
-        session = self.session_store.get_session(session_id)
-        project = self.project_service.get_project(project_id)
-        if session is None or project is None:
-            return
-
-        last_turn_result = dict(session.last_turn_result or {})
-        warnings = list(last_turn_result.get("warnings") or [])
-        if error is not None:
-            self._apply_background_failure(
-                session=session,
-                last_turn_result=last_turn_result,
-                warnings=warnings,
-                status_payload=status_payload,
-                error=error,
-            )
-            return
-
-        if product_output is None:
-            return
-        self._apply_background_success(
-            session=session,
-            project=project,
-            request=request,
-            board=board,
-            product_output=product_output,
-            last_turn_result=last_turn_result,
-            warnings=warnings,
-            status_payload=status_payload,
-        )
-
-    def _save_background_session_update(self, session: LearningSession) -> None:
-        try:
-            self.session_store.save_session(session)
-        except OSError as exc:
-            logger.warning(
-                "background session save skipped for %s: %s",
-                session.session_id,
-                exc,
-            )
-
-    def _apply_background_failure(
-        self,
-        *,
-        session: LearningSession,
-        last_turn_result: dict[str, Any],
-        warnings: list[str],
-        status_payload: dict[str, Any],
-        error: BaseException,
-    ) -> None:
-        warning = f"product_compression_failed: {error}"
-        if warning not in warnings:
-            warnings.append(warning)
-        last_turn_result["warnings"] = warnings
-        last_turn_result["product_compression"] = {
-            **status_payload,
-            "status": "failed",
-            "finished_at": int(time()),
-            "error": str(error),
-        }
-        session.last_turn_result = last_turn_result
-        self._save_background_session_update(session)
-
-    def _apply_background_success(
-        self,
-        *,
-        session: LearningSession,
-        project: LearningProject,
-        request,
-        board,
-        product_output: ProductCompressionResult,
-        last_turn_result: dict[str, Any],
-        warnings: list[str],
-        status_payload: dict[str, Any],
-    ) -> None:
-        stale_board = int(session.board_version or 1) > int(board.board_version or 1) + 1
-        if stale_board and "product_compression_stale_board_skipped" not in warnings:
-            warnings.append("product_compression_stale_board_skipped")
-        pending_review = {
-            "summary": product_output.review_summary,
-            "points": [request.policy_decision.main_goal] if request.policy_decision else [],
-            "confusion_points": list(request.policy_decision.review_focus or []) if request.policy_decision else [],
-            "status": "ready",
-        }
-        session.continuation_prompt = product_output.continuation_prompt
-        session.pending_review = pending_review
-        last_turn_result["warnings"] = warnings
-        last_turn_result["product_compression"] = {
-            **status_payload,
-            "status": "completed",
-            "finished_at": int(time()),
-            "error": "",
-            "stale_board": stale_board,
-            "review_summary": product_output.review_summary,
-            "continuation_prompt": product_output.continuation_prompt,
-        }
-        session.last_turn_result = last_turn_result
-        project.latest_review = dict(pending_review)
-        self._save_background_session_update(session)
-        self._save_background_project_update(project, session_id=session.session_id)
-
-    def _save_background_project_update(self, project: LearningProject, *, session_id: str) -> None:
-        try:
-            self.project_service.save_project(project)
-        except OSError as exc:
-            logger.warning(
-                "background project save skipped for session %s: %s",
-                session_id,
-                exc,
-            )

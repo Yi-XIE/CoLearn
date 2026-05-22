@@ -69,7 +69,7 @@ def build_learning_board(
     session: Any,
     latest_review: dict[str, Any] | None = None,
 ) -> BoardFacts:
-    raw = dict(getattr(session, "board_facts", None) or project.board_facts or {})
+    raw = dict(getattr(session, "board_facts", None) or {})
     if raw:
         return BoardFacts(
             project_id=str(raw.get("project_id") or project.project_id),

@@ -12,7 +12,6 @@ from colearn.learning.board_hooks import (
     extract_board_facts,
     resolve_model_preset,
 )
-from colearn.learning.hook_utils import dedupe_evidence_items
 from colearn.learning.state import ReplyContract, TurnPolicy
 
 
@@ -116,28 +115,9 @@ def after_turn_payload(
         source_references=list(getattr(request, "source_references", []) or []),
         tool_events=tool_events,
     )
-    retrieval_hits = dedupe_evidence_items(
-        list(retrieval_metadata.get("hits") or metadata.get("retrieval_hits") or [])
-    )
-    retrieval_misses = list(retrieval_metadata.get("misses") or metadata.get("retrieval_misses") or [])
-    prompt_support_bundle = list(
-        retrieval_metadata.get("prompt_support_bundle")
-        or metadata.get("prompt_support_bundle")
-        or []
-    )
     retrieval_query_context = dict(
-        retrieval_metadata.get("query_context")
-        or metadata.get("retrieval_query_context")
-        or {}
+        retrieval_metadata.get("query_context") or metadata.get("retrieval_query_context") or {}
     )
-    retrieval_evidence_map = {
-        key: dedupe_evidence_items(list(value or []))
-        for key, value in dict(
-            retrieval_metadata.get("evidence_map")
-            or metadata.get("retrieval_evidence_map")
-            or {}
-        ).items()
-    }
     review_summary = final_text[:240].strip()
     continuation_prompt = updated_board.continuation.next_prompt_hint or str(
         getattr(request, "continuation_prompt", "")
@@ -169,30 +149,11 @@ def after_turn_payload(
             "gaps_and_blockers": asdict(updated_board.gaps_and_blockers),
             "evidence_refs": list(updated_board.evidence_refs),
         },
-        "knowledge_support_summary": {
-            "active_node_id": updated_board.current_progress.active_node_id,
-            "critical_blockers": [blocker.id for blocker in updated_board.gaps_and_blockers.critical_blockers],
-            "evidence_ref_count": len(updated_board.evidence_refs or []),
-            "retrieval_hit_count": len(retrieval_hits),
-        },
-        "blocker_support_refs": {
-            blocker.id: dedupe_evidence_items(
-                [ref for ref in retrieval_evidence_map.get(blocker.id, []) if isinstance(ref, dict)]
-            )
-            for blocker in updated_board.gaps_and_blockers.critical_blockers
-        },
         "continuation_retrieval_hint": {
             "active_node_id": updated_board.current_progress.active_node_id,
             "evidence_refs": list(updated_board.evidence_refs or []),
             "retrieval_focus": retrieval_metadata.get("focus") or metadata.get("retrieval_focus") or {},
             "retrieval_query_context": retrieval_query_context,
-        },
-        "writeback_envelope": {
-            "turn_mode_before": turn_mode_before,
-            "turn_mode_after": updated_board.current_turn_mode,
-            "base_board_version": base_board_version,
-            "resolved_board_version": resolved_board_version,
-            "event_types": event_types,
         },
         "memory_events": [
             {

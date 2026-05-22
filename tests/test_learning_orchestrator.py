@@ -11,11 +11,10 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from colearn.app.learning_orchestrator import LearningOrchestrator
-from colearn.compression import ProductCompressionResult
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.state import BoardFacts, Blocker, GapsAndBlockers, LearningStateSnapshot, ProgressFacts, StudentSnapshot
-from colearn.learning.state_hooks import after_turn_payload, build_prompt_support_bundle
+from colearn.learning.state_hooks import after_turn_payload, build_learning_board, build_prompt_support_bundle
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.memory.store import EventMemoryStore, MemoryEvent
 from colearn.projects.models import LearningProject
@@ -163,7 +162,8 @@ async def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert "board_patch" in saved_session.last_turn_result
     assert saved_session.continuation_prompt
     assert saved_session.board_facts["current_turn_mode"] == "EXPLORE"
-    assert saved_project.board_facts["current_turn_mode"] == "EXPLORE"
+    assert saved_project.board_facts == {}
+    assert saved_project.board_version == saved_session.board_version
 
     time.sleep(0.05)
     saved_session = session_store.get_session("sess-1")
@@ -431,7 +431,8 @@ async def test_orchestrator_persists_learning_state_writeback(tmp_path):
     assert saved_project is not None
     assert saved_session.board_facts["continuation"]["next_prompt_hint"]
     assert saved_session.last_turn_result["runtime_v2"]["closure_applied"] is True
-    assert saved_project.board_facts["continuation"]["next_prompt_hint"]
+    assert saved_project.board_facts == {}
+    assert saved_project.board_version == saved_session.board_version
 
 
 async def test_product_compression_failure_keeps_main_result(tmp_path):
@@ -495,18 +496,14 @@ def test_background_result_only_patches_review_fields(tmp_path):
         user_message="background",
         board_facts=BoardFacts(project_id="proj-bg", session_id="sess-bg", board_version=1),
     )
-    orchestrator.apply_background_result(
+    orchestrator.writeback.apply_background_result(
         session_id="sess-bg",
         project_id="proj-bg",
-        request=request,
-        board=request.board_facts,
-        product_output=ProductCompressionResult(
-            review_summary="review",
-            continuation_prompt="continue",
-            board_patch={"board_version": 2},
-        ),
-        error=None,
-        status_payload={"status": "scheduled", "started_at": 1, "finished_at": None, "error": "", "base_board_version": 1},
+        base_board_version=1,
+        status="completed",
+        review_summary="review",
+        continuation_prompt="continue",
+        error="",
     )
 
     saved_session = session_store.get_session("sess-bg")
@@ -600,7 +597,38 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     assert saved_project.board_version == 3
     assert saved_project.board_facts["current_turn_mode"] == "VERIFY"
     assert "board_version_conflict_session_write_skipped" in saved_session.last_turn_result["warnings"]
-    assert "board_version_conflict_project_write_skipped" in saved_session.last_turn_result["warnings"]
+    assert "board_version_conflict_project_write_skipped" not in saved_session.last_turn_result["warnings"]
+
+
+def test_build_learning_board_ignores_legacy_project_board_facts() -> None:
+    project = LearningProject(
+        project_id="proj-board",
+        title="Board Project",
+        source_refs=["source-a.md"],
+        latest_review={"confusion_points": ["Need a proof"], "continuation_prompt": "continue from review"},
+        board_facts={
+            "project_id": "proj-board",
+            "session_id": "legacy-session",
+            "current_turn_mode": "ANCHOR",
+            "board_version": 99,
+            "updated_at": "legacy-project-board",
+        },
+    )
+    session = SessionStore().create_session(session_id="sess-board", project_id="proj-board", turn_mode="VERIFY")
+    session.board_version = 3
+
+    board = build_learning_board(
+        project=project,
+        session=session,
+        latest_review=project.latest_review,
+    )
+
+    assert board.session_id == "sess-board"
+    assert board.board_version == 3
+    assert board.current_turn_mode == "VERIFY"
+    assert board.current_progress.active_node_id == "proj-board"
+    assert board.continuation.next_prompt_hint == "continue from review"
+    assert board.evidence_refs == [{"source_ref": "source-a.md"}]
 
 
 def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
@@ -645,9 +673,10 @@ def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
     assert payload["board_after"].evidence_refs[0]["tool_name"] == "lightrag"
     assert payload["turn_mode_after"] == "CORRECTION"
     assert payload["turn_mode_before"] == "EXPLORE"
-    assert payload["writeback_envelope"]["base_board_version"] == 1
-    assert payload["writeback_envelope"]["resolved_board_version"] == payload["board_after"].board_version
-    assert "NODE_COMPLETED" in payload["writeback_envelope"]["event_types"]
+    assert "writeback_envelope" not in payload
+    assert payload["memory_events"][0]["payload"]["base_board_version"] == 1
+    assert payload["memory_events"][0]["payload"]["resolved_board_version"] == payload["board_after"].board_version
+    assert "NODE_COMPLETED" in payload["memory_events"][0]["payload"]["events"]
 
 
 def test_memory_store_search_events() -> None:

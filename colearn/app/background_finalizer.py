@@ -1,15 +1,13 @@
-"""BackgroundTurnFinalizer — daemon-thread runner for post-turn product compression.
+"""Daemon-thread runner for post-turn product compression.
 
-Extracted from LearningOrchestrator: lets the orchestrator focus on the
-synchronous 5-stage pipeline while heavyweight compression runs out-of-band.
-All dependencies are injected via the constructor.
+The finalizer owns scheduling and the compression call only. Persistence stays
+with WritebackStage through a minimal callback payload.
 """
 
 from __future__ import annotations
 
 from threading import Thread
-from time import time
-from typing import Any, Callable
+from typing import Callable
 
 from colearn.compression import ProductCompressionBridge
 from colearn.logging_config import get_logger
@@ -39,15 +37,8 @@ class BackgroundTurnFinalizer:
         request,
         result,
     ) -> None:
-        """Spawn a daemon Thread for product compression that may outlive the turn."""
+        """Spawn a daemon thread for auxiliary compression."""
         self._threads = [t for t in self._threads if t.is_alive()]
-        status_payload = {
-            "status": "scheduled",
-            "started_at": int(time()),
-            "finished_at": None,
-            "error": "",
-            "base_board_version": int(board.board_version or 1),
-        }
         worker = Thread(
             target=self._run,
             kwargs={
@@ -56,7 +47,7 @@ class BackgroundTurnFinalizer:
                 "board": board,
                 "request": request,
                 "result": result,
-                "status_payload": status_payload,
+                "base_board_version": int(board.board_version or 1),
             },
             daemon=True,
         )
@@ -76,7 +67,7 @@ class BackgroundTurnFinalizer:
         board,
         request,
         result,
-        status_payload: dict[str, Any],
+        base_board_version: int,
     ) -> None:
         try:
             product_output = self.product_compression.compress(
@@ -89,22 +80,27 @@ class BackgroundTurnFinalizer:
             self.on_result(
                 session_id=session.session_id,
                 project_id=project.project_id,
-                request=request,
-                board=board,
-                product_output=product_output,
-                error=None,
-                status_payload=status_payload,
+                base_board_version=base_board_version,
+                status="completed",
+                review_summary=product_output.review_summary,
+                continuation_prompt=product_output.continuation_prompt,
+                error="",
             )
         except Exception as exc:
+            logger.warning(
+                "background product compression failed for session %s: %s",
+                session.session_id,
+                exc,
+            )
             try:
                 self.on_result(
                     session_id=session.session_id,
                     project_id=project.project_id,
-                    request=request,
-                    board=board,
-                    product_output=None,
-                    error=exc,
-                    status_payload=status_payload,
+                    base_board_version=base_board_version,
+                    status="failed",
+                    review_summary="",
+                    continuation_prompt="",
+                    error=str(exc),
                 )
             except Exception:
                 logger.exception(
