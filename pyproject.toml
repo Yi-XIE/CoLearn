@@ -37,5 +37,4 @@ exclude = ["third_party*", "tests*", "webui*", "skills*", "scripts*", "CoLearn-d
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--basetemp=.tmp-pytest-work"
 asyncio_mode = "auto"
