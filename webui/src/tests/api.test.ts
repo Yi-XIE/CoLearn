@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteSession,
   fetchLearningSupport,
+  fetchSettings,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
+  updateMemorySettings,
   updateSessionTitle,
   updateProviderSettings,
   updateSettings,
@@ -190,6 +192,7 @@ describe("webui API helpers", () => {
             },
           },
           providers: { search: [] },
+          memory: { enabled: true },
           runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
@@ -279,6 +282,7 @@ describe("webui API helpers", () => {
             },
           },
           providers: { search: [] },
+          memory: { enabled: true },
           runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
@@ -345,6 +349,7 @@ describe("webui API helpers", () => {
           providers: {
             search: [{ value: "searxng", label: "SearXNG", credential: "base_url" }],
           },
+          memory: { enabled: false },
           runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
@@ -363,6 +368,56 @@ describe("webui API helpers", () => {
           Authorization: "Bearer tok",
           "Content-Type": "application/json",
         }),
+      }),
+    );
+  });
+
+  it("normalizes memory settings from the settings payload", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        catalog: { services: {} },
+        providers: { search: [] },
+        memory: { enabled: false },
+        runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
+      }),
+    } as Response);
+
+    await expect(fetchSettings("tok")).resolves.toMatchObject({
+      memory: { enabled: false },
+    });
+  });
+
+  it("updates memory settings through the dedicated endpoint", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ memory: { enabled: false } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: { services: {} },
+          providers: { search: [] },
+          memory: { enabled: false },
+          runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
+        }),
+      } as Response);
+
+    await expect(updateMemorySettings("tok", { enabled: false })).resolves.toMatchObject({
+      memory: { enabled: false },
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/settings/memory",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({ enabled: false }),
       }),
     );
   });

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from colearn.app.learning_orchestrator import LearningOrchestrator
+from colearn.api.state import MemoryDocStateService, SettingsStateService
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.state import BoardFacts, Blocker, GapsAndBlockers, LearningStateSnapshot, ProgressFacts, StudentSnapshot
@@ -306,6 +307,53 @@ def test_nanobot_dream_consolidation_success_and_failure(tmp_path):
     failure_orchestrator.writeback._maybe_consolidate_memory(project, session, result)
     assert failure_store.list_events()[-1].kind == "profile_consolidation_failed"
     assert "dream_consolidation_failed:RuntimeError" in session.last_turn_result["warnings"]
+
+
+def test_memory_disabled_skips_memory_events_and_doc_sync(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    state_store = JsonStateStore(root)
+    settings_service = SettingsStateService(state_store=state_store, env_path=tmp_path / ".env")
+    settings_service.update_memory_settings(enabled=False)
+    memory_docs = MemoryDocStateService(state_store=state_store)
+    project_service = LearningProjectService(state_store=state_store)
+    project = project_service.create_project("proj-memory-off", "Memory Off")
+    session_store = SessionStore(state_store=state_store)
+    session = session_store.create_session(session_id="sess-memory-off", project_id="proj-memory-off")
+    memory_store = EventMemoryStore(state_store=state_store)
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=memory_store,
+        retrieval_service=FakeRetrievalService(),
+        settings_service=settings_service,
+        memory_doc_service=memory_docs,
+    )
+
+    result = LearningTurnResult(
+        final_text="answer",
+        review_summary="新的学习回顾",
+        memory_events=[
+            {
+                "kind": "review_written",
+                "payload": {
+                    "session_id": "sess-memory-off",
+                    "project_id": "proj-memory-off",
+                    "summary": "新的学习回顾",
+                },
+            }
+        ],
+    )
+
+    orchestrator.writeback._write_back(
+        project=project,
+        session=session,
+        request=LearningTurnRequest(session_id="sess-memory-off", project_id="proj-memory-off", user_message="hi"),
+        result=result,
+    )
+
+    assert memory_store.list_events_for_session("sess-memory-off") == []
+    assert memory_docs.snapshot()["summary"] == ""
 
 
 async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
@@ -1406,4 +1454,4 @@ def test_executor_get_bot_registers_colearn_tools_once(monkeypatch) -> None:
     assert bot is fake_bot
     assert getattr(bot, "tools", None) is bot._loop.tools
     assert "memory" in bot.tools.items
-    assert "lightrag" in bot.tools.items
+    assert "lightrag" not in bot.tools.items

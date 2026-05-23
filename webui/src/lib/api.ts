@@ -46,6 +46,9 @@ type RawSettingsState = {
     theme?: string;
     language?: string;
   };
+  memory?: {
+    enabled?: boolean;
+  };
   runtime?: {
     config_path?: string;
   };
@@ -200,6 +203,9 @@ function normalizeSettingsPayload(raw: RawSettingsState): SettingsPayload {
           provider.credential,
         ),
       })),
+    },
+    memory: {
+      enabled: raw.memory?.enabled !== false,
     },
     runtime: {
       config_path: String(raw.runtime?.config_path ?? "").trim(),
@@ -557,6 +563,19 @@ export async function updateWebSearchSettings(
     if (activeProfile.id) search.active_profile_id = String(activeProfile.id);
   }
   return applySettingsCatalogState(token, catalog, base);
+}
+
+export async function updateMemorySettings(
+  token: string,
+  update: { enabled: boolean },
+  base: string = "",
+): Promise<SettingsPayload> {
+  await request<{ memory: { enabled: boolean } }>(`${base}/api/v1/settings/memory`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
+  return normalizeSettingsPayload(await fetchRawSettingsState(token, base));
 }
 
 export async function listKnowledgeBases(

@@ -149,6 +149,9 @@ export interface SettingsPayload {
       credential: "none" | "api_key" | "base_url";
     }>;
   };
+  memory: {
+    enabled: boolean;
+  };
   runtime: {
     config_path: string;
   };

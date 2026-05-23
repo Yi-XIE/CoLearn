@@ -285,6 +285,10 @@ async def _run_schema_compat_checks() -> None:
         assert ui.status_code == 200
         assert ui.json()["ui"]["theme"] == "light"
 
+        memory_settings = await client.put("/api/v1/settings/memory", json={"enabled": False, "ignored": True})
+        assert memory_settings.status_code == 200
+        assert memory_settings.json()["memory"]["enabled"] is False
+
         memory = await client.put("/api/v1/memory", json={"file": "summary", "content": "session summary"})
         assert memory.status_code == 200
         assert memory.json()["summary"] == "session summary"
@@ -313,11 +317,13 @@ def test_api_state_services_reset_without_cross_test_leakage() -> None:
     app_module = importlib.import_module("colearn.api.app")
     app_module.settings_service.update_ui(theme="light", language="en")
     app_module.memory_doc_service.update("summary", "leak")
+    app_module.settings_service.update_memory_settings(enabled=False)
 
     app_module.settings_service.reset()
     app_module.memory_doc_service.reset()
 
     assert app_module.settings_service.settings()["ui"]["theme"] == "dark"
+    assert app_module.settings_service.memory_settings()["enabled"] is True
     assert app_module.memory_doc_service.snapshot()["summary"] == ""
 
 

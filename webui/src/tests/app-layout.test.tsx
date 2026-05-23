@@ -185,6 +185,9 @@ describe("App layout", () => {
                 theme: "light",
                 language: "zh",
               },
+              memory: {
+                enabled: true,
+              },
               catalog: {
                 services: {
                   llm: {
@@ -437,6 +440,20 @@ describe("App layout", () => {
             }),
           };
         }
+        if (url.includes("/api/v1/settings")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              catalog: { services: {} },
+              providers: { search: [] },
+              memory: { enabled: false },
+              runtime: {
+                config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json",
+              },
+            }),
+          };
+        }
         if (url.includes("/api/v1/skills/list")) {
           return {
             ok: true,
@@ -462,6 +479,8 @@ describe("App layout", () => {
     expect(screen.getByDisplayValue("已沉淀的长期记忆")).toBeInTheDocument();
     expect(screen.getByText("个人画像")).toBeInTheDocument();
     expect(screen.getByText("启用记忆")).toBeInTheDocument();
+    expect(screen.getByText("自动记忆已关闭，当前仅支持手动维护。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "整理" })).toBeDisabled();
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "技能" }));
     expect(await screen.findByText("review")).toBeInTheDocument();
@@ -498,6 +517,9 @@ describe("App layout", () => {
               ui: {
                 theme: "light",
                 language: "zh",
+              },
+              memory: {
+                enabled: true,
               },
               catalog: {
                 services: {

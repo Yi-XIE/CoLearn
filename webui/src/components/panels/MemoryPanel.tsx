@@ -6,15 +6,21 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   clearMemoryDocument,
   fetchMemorySummary,
+  fetchSettings,
   refreshMemoryDocument,
   updateMemoryDocument,
+  updateMemorySettings,
 } from "@/lib/api";
 import type { MemoryDocPayload, MemoryDocumentName, MemorySummaryPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { PanelView, type PanelShellProps } from "./PanelView";
 
-type MemoryBusyKey = MemoryDocumentName | "refresh" | `clear-${MemoryDocumentName}`;
+type MemoryBusyKey =
+  | MemoryDocumentName
+  | "refresh"
+  | "toggle"
+  | `clear-${MemoryDocumentName}`;
 
 const MEMORY_DOCUMENT_COPY: Record<MemoryDocumentName, { placeholder: string }> = {
   summary: {
@@ -138,9 +144,11 @@ function MemorySettingRow({
 
 function MemorySwitch({
   active,
+  disabled,
   onClick,
 }: {
   active: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -149,8 +157,10 @@ function MemorySwitch({
       role="switch"
       aria-checked={active}
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "relative inline-flex h-7 w-12 cursor-pointer items-center rounded-full p-1 transition-[background-color,transform,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98]",
+        "relative inline-flex h-7 w-12 items-center rounded-full p-1 transition-[background-color,transform,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98]",
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
         active ? "bg-[#4a4a4a]" : "bg-[#7a7a7a]",
       )}
     >
@@ -199,18 +209,28 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
 
   const loadMemory = useCallback(async () => {
     setLoading(true);
-    try {
-      const result = await fetchMemorySummary(token);
-      setPayload(result);
+    setNotice(null);
+    const [memoryResult, settingsResult] = await Promise.allSettled([
+      fetchMemorySummary(token),
+      fetchSettings(token),
+    ]);
+    if (memoryResult.status === "fulfilled") {
+      setPayload(memoryResult.value);
       setDrafts({
-        summary: result.summary,
-        profile: result.profile,
+        summary: memoryResult.value.summary,
+        profile: memoryResult.value.profile,
       });
-    } catch (err) {
-      console.warn("Failed to load memory summary", err);
-    } finally {
-      setLoading(false);
+    } else {
+      console.warn("Failed to load memory summary", memoryResult.reason);
+      setNotice("记忆面板加载失败，请稍后重试。");
     }
+    if (settingsResult.status === "fulfilled") {
+      setMemoryEnabled(settingsResult.value.memory.enabled);
+    } else {
+      console.warn("Failed to load memory settings", settingsResult.reason);
+      setNotice((current) => current ?? "记忆开关状态加载失败，已使用默认值。");
+    }
+    setLoading(false);
   }, [token]);
 
   useEffect(() => {
@@ -220,12 +240,14 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
   const saveDocument = async (file: MemoryDocumentName) => {
     if (busy) return;
     setBusy(file);
+    setNotice(null);
     try {
       const snapshot = await updateMemoryDocument(token, file, drafts[file]);
       applyMemoryDocuments(snapshot);
       setNotice(`${memoryDocumentLabel(file)}已保存。`);
     } catch (err) {
       console.warn("Failed to save memory document", err);
+      setNotice(`${memoryDocumentLabel(file)}保存失败，请稍后重试。`);
     } finally {
       setBusy(null);
     }
@@ -234,26 +256,51 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
   const clearDocument = async (file: MemoryDocumentName) => {
     if (busy) return;
     setBusy(`clear-${file}`);
+    setNotice(null);
     try {
       const snapshot = await clearMemoryDocument(token, file);
       applyMemoryDocuments(snapshot);
       setNotice(`${memoryDocumentLabel(file)}已清空。`);
     } catch (err) {
       console.warn("Failed to clear memory document", err);
+      setNotice(`${memoryDocumentLabel(file)}清空失败，请稍后重试。`);
     } finally {
       setBusy(null);
     }
   };
 
   const refreshSummary = async () => {
-    if (busy) return;
+    if (busy || !memoryEnabled) return;
     setBusy("refresh");
+    setNotice(null);
     try {
       const snapshot = await refreshMemoryDocument(token);
       applyMemoryDocuments(snapshot);
       setNotice(snapshot.changed ? "已整理最新学习摘要。" : "没有发现新的学习回顾。");
     } catch (err) {
       console.warn("Failed to refresh memory document", err);
+      setNotice("学习摘要整理失败，请稍后重试。");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleMemoryEnabled = async () => {
+    if (busy) return;
+    setBusy("toggle");
+    setNotice(null);
+    try {
+      const nextEnabled = !memoryEnabled;
+      const settings = await updateMemorySettings(token, { enabled: nextEnabled });
+      setMemoryEnabled(settings.memory.enabled);
+      setNotice(
+        settings.memory.enabled
+          ? "自动记忆已启用，后续对话会继续沉淀。"
+          : "自动记忆已关闭，当前仅支持手动维护。",
+      );
+    } catch (err) {
+      console.warn("Failed to update memory settings", err);
+      setNotice("记忆开关更新失败，请稍后重试。");
     } finally {
       setBusy(null);
     }
@@ -261,6 +308,9 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
 
   const summaryDirty = payload ? drafts.summary !== payload.summary : false;
   const profileDirty = payload ? drafts.profile !== payload.profile : false;
+  const automaticMemoryHint = memoryEnabled
+    ? "设置 CoLearn 如何收集、保留和整合记忆。"
+    : "自动记忆已关闭，当前仅支持手动维护。";
 
   return (
     <PanelView
@@ -312,26 +362,28 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
 
         <section className="space-y-2">
           <MemorySectionTitle>记忆（实验性）</MemorySectionTitle>
-          <MemorySectionHint>
-            设置 CoLearn 如何收集、保留和整合记忆。
-          </MemorySectionHint>
+          <MemorySectionHint>{automaticMemoryHint}</MemorySectionHint>
           <MemoryGroup>
             <MemorySettingRow
               title="启用记忆"
-              description="从聊天中生成新记录，并将其带入新聊天"
+              description="从聊天中生成新记录，并将其带入新聊天。"
             >
-              <MemorySwitch active={memoryEnabled} onClick={() => setMemoryEnabled((value) => !value)} />
+              <MemorySwitch
+                active={memoryEnabled}
+                disabled={busy === "toggle"}
+                onClick={() => void toggleMemoryEnabled()}
+              />
             </MemorySettingRow>
             <MemorySettingRow
               title="整理摘要"
-              description="从最近一次学习回顾更新学习摘要"
+              description="从最近一次学习回顾更新学习摘要。"
             >
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
                 onClick={() => void refreshSummary()}
-                disabled={!!busy}
+                disabled={!!busy || !memoryEnabled}
                 className="h-8 rounded-full px-3 text-[12px] font-medium"
               >
                 {busy === "refresh" ? (
@@ -344,7 +396,7 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
             </MemorySettingRow>
             <MemorySettingRow
               title="重置记忆"
-              description="删除已保存的学习摘要或个人画像"
+              description="删除已保存的学习摘要或个人画像。"
             >
               <div className="flex flex-wrap justify-end gap-2">
                 <Button

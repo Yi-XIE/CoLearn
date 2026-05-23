@@ -1,4 +1,4 @@
-"""WritebackStage — persists turn results, runs board/dream consolidation."""
+"""WritebackStage - persists turn results, runs board/dream consolidation."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class WritebackStage:
         # Borrowed from FinalizeStage so we don't cross-import it.
         self._build_last_turn_result = build_last_turn_result
         # Back-ref to the orchestrator; lets us read mutable tunables
-        # (autocompact thresholds, board_deriver, …) at call time so tests can
+        # (autocompact thresholds, board_deriver, etc.) at call time so tests can
         # tweak them after construction.
         self._owner = owner
 
@@ -112,7 +112,7 @@ class WritebackStage:
         """Persist turn output with board-version conflict protection.
 
         Rejects writes whose ``board_before.board_version`` is older than the
-        current session board — protects concurrent turns / background
+        current session board - protects concurrent turns / background
         finalizers from clobbering newer state. The dropped result still emits
         a warning in ``warnings``.
         """
@@ -207,11 +207,11 @@ class WritebackStage:
             )
         self._append_nanobot_history(project=project, session=session, result=result)
         self._maybe_compact_session(session)
+        self._maybe_consolidate_memory(project, session, result)
         self._sync_memory_documents(
             session=session,
             review_summary=str(getattr(result, "review_summary", "") or ""),
         )
-        self._maybe_consolidate_memory(project, session, result)
         self._maybe_derive_board_snapshot(project=project, session=session, result=result)
         if not session.source_refs and project.source_refs:
             session.source_refs = list(project.source_refs)
@@ -271,6 +271,7 @@ class WritebackStage:
         last_turn_result["warnings"] = warnings
         last_turn_result["product_compression"] = product_status
         session.last_turn_result = last_turn_result
+        self._sync_memory_documents(session=session, review_summary=review_summary)
         self._save_background_session_update(session)
         if status != "failed":
             self._save_background_project_update(project, session_id=session.session_id)
@@ -392,15 +393,14 @@ class WritebackStage:
                 )
             )
 
-    def _sync_memory_documents(self, *, session: LearningSession) -> None:
+    def _sync_memory_documents(self, *, session: LearningSession, review_summary: str = "") -> None:
         if not self.settings_service.memory_settings()["enabled"]:
             return
-        memory_docs = getattr(self.settings_service, "memory_doc_service", None)
-        if not isinstance(memory_docs, MemoryDocStateService):
+        if not isinstance(self.memory_doc_service, MemoryDocStateService):
             return
-        review_summary = str((session.pending_review or {}).get("summary") or "").strip()
-        if review_summary:
-            memory_docs.refresh_summary(review_summary)
+        clean_review = str(review_summary or (session.pending_review or {}).get("summary") or "").strip()
+        if clean_review:
+            self.memory_doc_service.refresh_summary(clean_review)
         events = self.memory_store.list_events_for_session(session.session_id)
         for event in reversed(events):
             if str(getattr(event, "kind", "") or "") != MemoryEventKind.PROFILE_CONSOLIDATED:
@@ -410,7 +410,7 @@ class WritebackStage:
             source_key = str(payload.get("dream_cursor") or payload.get("event_id") or event.event_id or "").strip()
             if not excerpt or not source_key:
                 return
-            memory_docs.append_auto_entry(
+            self.memory_doc_service.append_auto_entry(
                 "profile",
                 source_key=f"dream:{source_key}",
                 title="长期画像",
@@ -428,7 +428,7 @@ class WritebackStage:
         """Q3: Periodically re-derive BoardFacts from event stream via LLM.
 
         Runs synchronously after writeback. If ``board_deriver`` is None
-        (default), no-op — preserves backward compat. On success, overwrites
+        (default), no-op - preserves backward compat. On success, overwrites
         ``session.board_facts`` and emits ``board_snapshot_derived`` for audit.
         """
         if self.board_deriver is None:
@@ -534,4 +534,5 @@ class WritebackStage:
             )
         except Exception:
             append_session_warning(session, "nanobot_history_append_failed")
+
 

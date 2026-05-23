@@ -18,6 +18,7 @@ from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
 from colearn.runtime_v2.executor import NanobotTurnExecutor
 from colearn.sessions.store import SessionStore
+from colearn.storage import JsonStateStore
 from .background_finalizer import BackgroundTurnFinalizer
 from .source_preflight import SourceReadinessPreflight
 from .stages import (
@@ -30,6 +31,19 @@ from .stages import (
 )
 
 logger = get_logger(__name__)
+
+
+def _infer_state_store(
+    *,
+    project_service: LearningProjectService | None,
+    session_store: SessionStore | None,
+    memory_store: EventMemoryStore | None,
+) -> JsonStateStore:
+    for owner in (project_service, session_store, memory_store):
+        store = getattr(owner, "_state_store", None)
+        if isinstance(store, JsonStateStore):
+            return store
+    return JsonStateStore()
 
 class LearningOrchestrator:
     SESSION_AUTOCOMPACT_MAX_MESSAGES = Defaults.SESSION_AUTOCOMPACT_MAX_MESSAGES
@@ -56,6 +70,11 @@ class LearningOrchestrator:
         self.project_service = project_service or LearningProjectService()
         self.session_store = session_store or SessionStore()
         self.memory_store = memory_store or EventMemoryStore()
+        shared_state_store = _infer_state_store(
+            project_service=self.project_service,
+            session_store=self.session_store,
+            memory_store=self.memory_store,
+        )
         self.knowledge_service = knowledge_service or KnowledgeWorkspaceService()
         self.retrieval_service = retrieval_service or RetrievalService()
         self.source_preflight = SourceReadinessPreflight(
@@ -69,8 +88,8 @@ class LearningOrchestrator:
         )
         self.runtime_compression = runtime_compression or RuntimeCompressionBridge()
         self.product_compression = product_compression or ProductCompressionBridge()
-        self.settings_service = settings_service or SettingsStateService()
-        self.memory_doc_service = memory_doc_service or MemoryDocStateService()
+        self.settings_service = settings_service or SettingsStateService(state_store=shared_state_store)
+        self.memory_doc_service = memory_doc_service or MemoryDocStateService(state_store=shared_state_store)
         self.background_finalizer = BackgroundTurnFinalizer(
             product_compression=self.product_compression,
             on_result=lambda **payload: self.writeback.apply_background_result(**payload),
