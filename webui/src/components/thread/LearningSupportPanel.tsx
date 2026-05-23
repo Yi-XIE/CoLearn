@@ -1,10 +1,19 @@
-import { AlertTriangle, BookOpenCheck, Link2, Target } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, Link2, Search, Target } from "lucide-react";
+
+import type { LucideIcon } from "lucide-react";
 
 import type { LearningSupportItem, LearningSupportPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface LearningSupportPanelProps {
   support: LearningSupportPayload | null;
+}
+
+interface LearningSupportNotice {
+  key: string;
+  title: string;
+  body: string;
+  icon: LucideIcon;
 }
 
 function itemSource(item: LearningSupportItem): string {
@@ -28,9 +37,10 @@ function supportTypeLabel(value?: string): string {
     counterexample: "反例",
     procedure: "步骤",
     reference: "依据",
-    extension: "延伸",
+    extension: "拓展",
     comparison: "对照",
   };
+
   return labels[String(value || "")] || "资料";
 }
 
@@ -40,11 +50,12 @@ function nextRetrievalHint(support: LearningSupportPayload | null): string {
   const ownQuery = support?.retrieval_query_context ?? {};
   const finalQuery = String(
     continuationQuery?.final_query
-    ?? ownQuery.final_query
-    ?? continuationQuery?.default_query
-    ?? ownQuery.default_query
-    ?? "",
+      ?? ownQuery.final_query
+      ?? continuationQuery?.default_query
+      ?? ownQuery.default_query
+      ?? "",
   ).trim();
+
   return finalQuery;
 }
 
@@ -55,13 +66,33 @@ export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
   const visibleItems = items.slice(0, 4);
   const misses = support?.retrieval_misses ?? [];
   const nextHint = nextRetrievalHint(support);
-  if (visibleItems.length === 0 && misses.length === 0) return null;
+  const notices: LearningSupportNotice[] = [];
+
+  if (misses.length > 0) {
+    notices.push({
+      key: "retrieval-miss",
+      title: "资料补证提醒",
+      body: `仍有 ${misses.length} 个资料缺口，下一轮会继续补证据。`,
+      icon: AlertTriangle,
+    });
+  }
+
+  if (nextHint) {
+    notices.push({
+      key: "next-retrieval-plan",
+      title: "下一轮计划",
+      body: `继续检索：${nextHint}`,
+      icon: Search,
+    });
+  }
+
+  if (visibleItems.length === 0 && notices.length === 0) return null;
 
   return (
     <aside
       aria-label="本轮参考依据"
       className={cn(
-        "mb-3 border-y border-border/70 bg-muted/20 px-3 py-2.5",
+        "mb-3 px-3 py-2.5",
         "text-[12px] text-muted-foreground",
       )}
     >
@@ -108,16 +139,30 @@ export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
         </div>
       ) : null}
 
-      {misses.length > 0 ? (
-        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="truncate">仍有 {misses.length} 个资料缺口，下一轮会继续补证据。</span>
-        </div>
-      ) : null}
+      {notices.length > 0 ? (
+        <div className="mt-2 space-y-2">
+          {notices.map((notice) => {
+            const Icon = notice.icon;
 
-      {nextHint ? (
-        <div className="mt-2 truncate border-t border-border/60 pt-2 text-[11px]">
-          下一轮继续查：{nextHint}
+            return (
+              <div
+                key={notice.key}
+                className="rounded-lg border border-border/60 bg-background/88 px-3 py-2.5 shadow-sm"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="mt-0.5 rounded-md border border-border/50 bg-muted/35 p-1 text-foreground/75">
+                    <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-medium text-foreground/88">{notice.title}</div>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
+                      {notice.body}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </aside>

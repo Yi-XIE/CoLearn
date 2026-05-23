@@ -9,7 +9,7 @@ describe("LearningSupportPanel", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders prompt support references and retrieval misses", () => {
+  it("renders references plus stacked notification cards", () => {
     render(
       <LearningSupportPanel
         support={{
@@ -38,7 +38,9 @@ describe("LearningSupportPanel", () => {
     expect(screen.getByText("本轮依据")).toBeInTheDocument();
     expect(screen.getByText("力会改变物体运动状态。")).toBeInTheDocument();
     expect(screen.getByText("牛顿第二定律")).toBeInTheDocument();
-    expect(screen.getByText(/资料缺口/)).toBeInTheDocument();
-    expect(screen.getByText(/继续查受力分析步骤/)).toBeInTheDocument();
+    expect(screen.getByText("资料补证提醒")).toBeInTheDocument();
+    expect(screen.getByText(/仍有 1 个资料缺口/)).toBeInTheDocument();
+    expect(screen.getByText("下一轮计划")).toBeInTheDocument();
+    expect(screen.getByText(/继续检索：继续查受力分析步骤/)).toBeInTheDocument();
   });
 });

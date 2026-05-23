@@ -299,17 +299,16 @@ export function ThreadViewport({
             aria-valuenow={Math.round(learningPanelWidth)}
             onPointerDown={handleLearningPanelResizeStart}
             className={cn(
-              "relative hidden w-4 shrink-0 cursor-col-resize border-l border-r border-transparent lg:block",
-              "before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border/80",
-              "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
-              isResizingLearningPanel && "bg-muted/50",
+              "relative hidden w-4 shrink-0 cursor-col-resize bg-transparent lg:block",
+              "hover:bg-transparent focus-visible:bg-transparent focus-visible:outline-none",
+              isResizingLearningPanel && "bg-transparent",
             )}
           >
             <span className="sr-only">Resize preview panel</span>
           </button>
 
           <aside
-            className="hidden h-full shrink-0 border-l border-border/70 bg-background/95 lg:flex lg:flex-col"
+            className="hidden h-full shrink-0 bg-background/95 lg:flex lg:flex-col"
             style={{ width: learningPanelWidth }}
           >
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">

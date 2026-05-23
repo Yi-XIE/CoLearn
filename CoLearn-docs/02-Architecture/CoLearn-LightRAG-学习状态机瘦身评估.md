@@ -1,6 +1,6 @@
 # CoLearn LightRAG 与学习状态机瘦身评估
 
-更新时间：2026-05-23
+更新时间：2026-05-24
 
 这份文档记录当前 CoLearn 主线里 `LightRAG` 和学习状态机的真实接法，说明它们为什么会显得重，以及可以如何分模式、删减或简化。这里的目标不是把学习能力砍薄，而是把它改成“计划驱动、黑板记录、按需进入”的形态。
 
@@ -42,204 +42,62 @@
 
 如果短期不想切两套模式，也至少要把当前学习模式本身继续瘦一轮，把“每轮必跑”的东西减少。
 
-## 2. 当前 LightRAG 的真实定位
+## 2. 当前现状结论
 
-当前 `LightRAG` 在主线里的定位，不是一个独立知识库页，也不是一个偶尔调用的搜索工具，而是学习回合里的背景知识支持层。
+这一段只保留会影响新版方案的结论，不继续展开旧链路细节，避免把历史实现方式重新固化成后续设计前提。
 
-相关代码：
+当前需要记住的结论只有这些：
 
-- `colearn/retrieval/service.py`
-- `colearn/runtime_v2/tooling.py`
-- `colearn/app/stages/retrieval.py`
+- `LightRAG` 的合理定位是学习过程中的背景知识支持层，不是独立页面，也不是普通聊天默认常驻工具。
+- 当前真正偏重的来源，不是某一个工具，而是学习编排主链过早、过厚地介入了所有对话。
+- 普通聊天和学习任务的边界还不够清楚，所以系统会把太多普通对话解释成学习回合。
+- 线程级长期目标和外部检索已经有 nanobot 原生能力可复用，不需要重复造轮子。
+- 学习内部的计划、黑板、节点状态、异议、证据，当前仍然需要 CoLearn 自己维护。
 
-当前已经落地的关键事实：
+## 3. 当前最重的地方
 
-- `LightRAG` 已改成按需启用，不再是默认常驻工具。
-- 默认 provider 已切到 `local`，不再依赖独立 `LightRAG server`。
-- 只有符合策略条件的回合才会把 `lightrag` 放进 `enabled_tools`。
-- 普通聊天回合已经不再显示“本轮依据”支持卡。
+现阶段最影响系统轻重的，不是功能数量，而是默认运行边界。主要问题集中在：
 
-这说明 `LightRAG` 的直接重量已经降了一部分，但学习编排主链本身仍然偏重。
+- 普通聊天仍然容易被带进学习语义。
+- retrieval planning 仍然倾向于在主链里提前发生。
+- writeback 同步路径仍然偏厚。
+- retrieval 元数据和 UI 依赖面偏宽。
+- Agent 如果没有护栏，会把新的复杂度重新带回来。
 
-## 3. 当前学习状态机的真实运行链路
+## 4. 哪些能力值得保留
 
-### 3.1 核心数据结构
+新版方案里，建议明确保留这些能力：
 
-学习状态的核心定义在 `colearn/learning/state.py`：
-
-- `BoardFacts`
-  - `current_progress`
-  - `student_snapshot`
-  - `gaps_and_blockers`
-  - `continuation`
-  - `evidence_refs`
-- `LearningPlan`
-  - `goal`
-  - `plan_nodes`
-  - `current_node_id`
-  - `pending_checks`
-  - `review_queue`
-- `TurnPolicy`
-  - `turn_mode`
-  - `model_preset`
-  - `restrictions`
-  - `allowed_tools`
-  - `enabled_tools`
-- `LearningEvent`
-  - 把回合结果转成后续可写回事件
-
-这意味着每一轮都不是简单的“用户消息 -> LLM 回复”，而是“当前学习计划 / 黑板状态 -> 回合策略 -> 回合结果 -> 黑板更新”。
-
-### 3.2 五段式主链
-
-当前主链由 `LearningOrchestrator` 串起来，见 `colearn/app/learning_orchestrator.py`。
-
-顺序如下：
-
-1. `PreflightStage`
-   - 取 `session / project`
-   - 生成 `board`
-   - 生成 `snapshot`
-   - 跑 `source_preflight`
-2. `PlanStage`
-   - 根据用户目标生成由浅到深的学习计划
-   - 识别当前知识点、后续知识点、待复习点、待检查点
-   - 把计划写入黑板
-3. `RetrievalStage`
-   - 构建 `retrieval_focus`
-   - 构建 `retrieval_reason`
-   - 构建 `retrieval_query_context`
-   - 预取 `retrieval_bundle`
-   - 按计划节点补资料
-   - 必要时触发 `web search`
-   - 生成 `prompt_support_bundle`
-4. `ExecuteStage`
-   - 根据 `board` 和 `plan` 算 `turn_policy`
-   - 组装 `LearningTurnRequest`
-   - 调用 `nanobot`
-5. `FinalizeStage`
-   - 把 retrieval 结果整理成 `hits / misses / evidence_map`
-   - 标准化 `LearningTurnResult`
-6. `WritebackStage`
-   - 持久化 `board_patch`
-   - 更新学习计划节点状态
-   - 写回“已讲 / 已检查 / 未完成 / 新异议 / 待补资料”
-   - 写入 `memory_events / learning_events`
-   - 更新 session/project
-   - 触发 compact / consolidate / derive
-
-这条链路意味着，真正进入学习模式后，系统不是单轮问答，而是围绕一个计划和一块持续更新的黑板来推进学习。
-
-### 3.3 当前 turn mode 语义
-
-当前 `turn_mode` 由 `colearn/learning/board_hooks.py` 和 `colearn/learning/turn_hooks.py` 共同驱动，主要模式包括：
-
-- `ANCHOR`
-- `CORRECTION`
-- `VERIFY`
-- `EXPLORE`
-- `PAUSED`
-
-这套模式本身没有错，但它的当前用法偏重：
-
-- 模式判断是默认存在的
-- 模式会驱动工具、preset、retrieval、writeback
-- 模式还会向 UI 和 session 结构继续外溢
-
-## 4. 当前到底重在哪里
-
-### 4.1 不是 LightRAG 单独重，而是整条学习主链都重
-
-`LightRAG` 现在已经按需启用，但 `RetrievalStage` 仍然是每轮必跑。
-
-在 `colearn/app/stages/retrieval.py` 里，即使本轮没有真正启用 `lightrag`，系统仍然会先做这些动作：
-
-- 生成 `retrieval_focus`
-- 生成 `retrieval_reason`
-- 生成 `retrieval_query_context`
-- 生成 `parallel_support` 查询列表
-- 组装 `prompt_support_bundle`
-
-也就是说，LightRAG 工具开关变轻了，但 retrieval planning 这层还在默认运行。
-
-### 4.2 每轮都要先被解释成学习回合
-
-当前系统里，用户消息不是先判断“这是普通聊天还是学习任务”，而是直接进入学习状态机，再被分到某个 `turn_mode`。
-
-这会带来两个结果：
-
-- 普通聊天也会被附加学习语义
-- 产品会越来越像“学习操作系统”，而不是“轻量聊天助手”
-
-### 4.3 状态写回链过厚
-
-`WritebackStage` 现在不只是保存对话结果，还会做：
-
-- `board_version` 冲突保护
-- `board_patch` 持久化
-- `memory_events` 写入
-- `learning_events` 写入
-- `BOARD_PATCH_APPLIED` 事件写入
-- 自动 compact
-- dream consolidation
-- board snapshot derivation
-
-这些能力单看都合理，但叠在每轮主链里就很重。
-
-### 4.4 检索元数据有重复包装
-
-当前 retrieval 信息会在多处传递：
-
-- `TurnContext.retrieval_*`
-- `request.metadata["retrieval"]`
-- 兼容字段
-  - `retrieval_focus`
-  - `retrieval_query_context`
-  - `retrieval_reason`
-  - `prefetched_references`
-  - `prompt_support_bundle`
-- `runtime_v2.retrieval`
-
-这会提高维护成本，也让“明明没查资料，系统却一直在带着检索语义”这类问题更容易出现。
-
-### 4.5 UI 会继承后端重量
-
-虽然普通聊天那张“本轮依据”卡已经修掉，但前端仍然依赖完整的学习支持结构：
-
-- `prompt_support_bundle`
-- `retrieval_hits`
-- `retrieval_misses`
-- `retrieval_evidence_map`
-- `continuation_retrieval_hint`
-
-这意味着只要后端继续默认产出这些结构，前端就会继续被学习模式牵着走。
-
-## 5. 当前哪些重量是值得保留的
-
-不是所有重量都该删。
-
-建议保留的部分：
-
-- `BoardFacts` 作为学习线程的最小长期状态
-- `turn_mode` 作为学习场景下的最小控制语义
-- `memory` 工具
+- `Chat Mode / Learning Mode` 的双模式边界
 - `LightRAG` 的按需检索能力
-- `LearningEvent` 作为学习写回的统一格式
+- nanobot 原生 `long_task / complete_goal / goal_state`
+- nanobot 原生 `web_search / web_fetch`
+- CoLearn 自己的 `LearningPlan / LearningBoard`
+- `LEARN / CHECK / PAUSED` 三状态学习状态机
+- 最小必要的 evidence、continuation 和 writeback
 
-这些是学习产品真正有差异化价值的部分。
+这些能力构成的是“轻入口 + 强学习”的骨架，不建议再回到“默认所有对话都走完整学习链”的做法。
 
-## 6. 当前哪些重量最适合先砍
+## 5. 哪些重量应该先砍
 
-最适合先砍的不是功能，而是“默认每轮都跑”的编排厚度。
+优先砍掉的是默认主链上的厚度，而不是学习能力本身：
 
-优先级从高到低如下：
+1. 普通聊天默认进入学习主链
+2. retrieval 默认每轮提前展开
+3. 重型 writeback 默认同步执行
+4. retrieval 元数据重复暴露
+5. 没有触发条件和护栏的 Agent 自主决策
 
-1. 普通聊天仍走完整学习状态机
-2. `RetrievalStage` 默认每轮必跑
-3. `WritebackStage` 默认每轮都做重型后处理
-4. retrieval metadata 重复包装
-5. 五个 `turn_mode` 的全量语义默认生效
+## 6. 文档约束
 
+为了避免旧实现细节影响后续 Agent 思考，这份文档从这里开始只保留：
+
+- 影响设计边界的结论
+- 必须复用的原生能力
+- 必须自维护的学习结构
+- 新版方案和实施顺序
+
+不再继续展开旧版链路的逐段实现说明，除非后面某个开发任务确实需要单独补专题文档。
 ## 7. 新版瘦身方案
 
 当前文档只保留一个新版方案，不再并列维护多个互相竞争的方案。这个方案由四个部分组成：
@@ -467,6 +325,277 @@ Agent 负责：
 - 限制 `PlanStage` 的触发频率
 - 限制 `CHECK` 的触发频率
 - 把重型 writeback 后移
+
+## 12. Coding Plan
+
+下面这份计划是后续施工的唯一编码清单。目标不是一次性做完所有增强，而是先把新版学习模式骨架搭稳，再逐步补齐。
+
+### 12.1 总目标
+
+完成一个新的 Learning Mode 主链，使其满足以下条件：
+
+- 普通聊天默认不进入学习主链
+- 用户可在前端一键进入 Learning Mode
+- nanobot 可在明确学习意图下自主切入 Learning Mode
+- 线程级长期目标复用 nanobot 原生 `long_task / complete_goal / goal_state`
+- 学习内部计划和黑板由 CoLearn 自己维护
+- 学习状态机收口为 `LEARN / CHECK / PAUSED`
+- `LightRAG` 保留为按需背景知识能力
+- `web_search / web_fetch` 作为外部资料补给层按需触发
+- Agent 决策必须有明确边界护栏
+
+### 12.2 交付范围
+
+本轮编码范围必须覆盖：
+
+- 前端学习模式开关与状态提示
+- 后端线程模式识别与路由
+- Learning Mode 主链的最小可运行版本
+- `LearningPlan` 与 `LearningBoard` 的最小数据结构
+- nanobot 原生 `long_task` 集成
+- `LEARN / CHECK / PAUSED` 三状态流转
+- 按需 `LightRAG` 与按需 `web_search`
+- writeback 最小化与异步后处理边界
+- 基础测试、回归测试、前端显示验证
+
+本轮不要求交付：
+
+- 原生 Gantt / timeline 面板
+- 完整的学习统计报表
+- 复杂多课程管理
+- 自动知识图谱可视化
+
+### 12.3 Phase 1：双模式入口与线程模式
+
+目标：先把 Chat Mode 和 Learning Mode 真正切开。
+
+后端任务：
+
+- 在线程或 session 级别增加 `mode` 字段，至少支持 `chat` 和 `learning`
+- 增加统一入口判断逻辑：收到请求时先判断当前线程模式
+- 补一个明确学习意图检测层，用于触发自动切入 Learning Mode
+- 保证自动切入发生时会产出可供前端消费的状态信号
+- 普通聊天线程默认不构建学习主链上下文
+
+前端任务：
+
+- 在输入卡中增加“学习模式”一键开关
+- 增加当前线程模式显示
+- Learning Mode 进入时显示清晰提示，不要隐式切换
+- 支持用户手动退出 Learning Mode 回到 Chat Mode
+- 保证切换后 UI 不残留旧的学习证据面板状态
+
+验收标准：
+
+- 普通聊天线程不进入学习主链
+- 用户手动开关 Learning Mode 生效
+- Agent 自动切换 Learning Mode 时前端可见
+- 切回 Chat Mode 后学习 UI 收起
+
+### 12.4 Phase 2：接入 nanobot 原生 Goal 能力
+
+目标：不自造线程级长期目标系统，直接复用 nanobot 原生能力。
+
+任务：
+
+- 在进入 Learning Mode 且用户目标明确时，调用 nanobot 原生 `long_task`
+- 学习结束、取消、话题切换时，正确调用 `complete_goal`
+- 把 `goal_state` 纳入 CoLearn 的线程状态读取层
+- 前端显示当前长期学习目标摘要
+- 处理已有 active goal 时的替换和收口逻辑
+- 确保 Learning Mode 不会重复注册多个冲突目标
+
+验收标准：
+
+- 一个学习线程同一时间只有一个 active goal
+- goal 能跨 turn 保持可见
+- complete/cancel/supersede 三类结束路径都能正确落盘
+
+### 12.5 Phase 3：LearningPlan 与 LearningBoard 最小模型
+
+目标：建立学习内部结构，但只保留最小必要字段。
+
+建议最小数据结构：
+
+- `LearningPlan`
+  - `goal`
+  - `plan_nodes`
+  - `current_node_id`
+  - `review_queue`
+  - `pending_checks`
+- `LearningBoard`
+  - `current_progress`
+  - `completed_nodes`
+  - `blockers`
+  - `objections`
+  - `evidence_refs`
+  - `continuation`
+
+任务：
+
+- 在 `colearn/learning/state.py` 中增加或收口以上结构
+- 定义 plan node 的最小 schema，避免后期随手塞字段
+- 明确哪些字段是 session 主事实，哪些字段是 result 衍生块
+- 定义 `board_patch` 和 `plan_patch` 的最小增量格式
+- 保证这些结构对前端是稳定可消费的
+
+验收标准：
+
+- 学习计划可以表示“要学什么、现在学到哪”
+- 黑板可以表示“讲过什么、卡住什么、下一步是什么”
+- patch 结构可单独写回，不需要整块覆盖
+
+### 12.6 Phase 4：PlanStage
+
+目标：让学习任务先产出计划，再开始讲解。
+
+任务：
+
+- 新增 `PlanStage`，位置可在 `PreflightStage` 之后
+- 只有在这些情况下运行 `PlanStage`：
+  - 首次进入 Learning Mode
+  - 学习主题明显变化
+  - 连续卡住，需要重排计划
+- 生成由浅到深的 plan node 列表
+- 标记当前节点、后续节点、待复习节点、待检查节点
+- 计划生成后立即写入 `LearningPlan` 与 `LearningBoard`
+- 计划不允许每轮全量重算，除非满足重排条件
+
+验收标准：
+
+- 用户说“我想学一个决策树”时能先得到结构化计划
+- 非必要情况下不会每轮重做计划
+- 用户提出新异议后可以局部调整计划
+
+### 12.7 Phase 5：三状态学习状态机
+
+目标：把旧五态收口为 `LEARN / CHECK / PAUSED`。
+
+任务：
+
+- 在 `board_hooks` / `turn_hooks` 中实现三态判定
+- 明确 `LEARN -> CHECK` 的触发条件：
+  - 当前节点讲完
+  - 用户提出质疑
+  - 系统判断理解不稳
+- 明确 `CHECK -> LEARN` 的回切条件：
+  - 当前检查通过
+  - 当前节点完成，切到下一个节点
+- 明确进入 `PAUSED` 的条件：
+  - 用户暂停
+  - 用户退出学习模式
+  - 线程切回普通聊天
+- 清理旧五态在新主链中的默认依赖
+
+验收标准：
+
+- 当前学习回合总能落到三态之一
+- 不再要求所有旧五态语义继续默认生效
+- 前端能够正确显示当前三态
+
+### 12.8 Phase 6：RetrievalStage 收口
+
+目标：把检索改成按需发生，而不是主链默认全开。
+
+任务：
+
+- 先判定当前状态和当前节点，再决定是否做 retrieval
+- 优先使用 `LightRAG` 提供背景材料和证据
+- 只有在这些情况下补 `web_search / web_fetch`：
+  - `LightRAG` 不足
+  - 用户明确要外部来源
+  - 当前节点需要公开资料或最新资料
+- 把 retrieval 元数据收口到单一主入口，避免多处重复镜像
+- 不需要 retrieval 的回合返回最小 context
+
+验收标准：
+
+- 普通聊天不触发 Learning retrieval
+- Learning Mode 里 retrieval 只在有需要时触发
+- `web_search` 成为兜底层而不是默认层
+
+### 12.9 Phase 7：Writeback 最小化
+
+目标：让同步主链只承担最小必要写回。
+
+任务：
+
+- 同步写回只保留：
+  - session messages
+  - final_text
+  - 最小 continuation
+  - `board_patch`
+  - `plan_patch`
+  - 最小 evidence refs
+- 把这些后处理后移或异步化：
+  - consolidation
+  - derivation
+  - compression
+  - 非关键事件归档
+- 保留 stale write 防护
+- 保证 patch 写回失败时不会把整块状态冲掉
+
+验收标准：
+
+- 学习线程同步延迟明显下降
+- patch 写回比全量覆盖更稳定
+- 后处理失败不影响主链结果可见性
+
+### 12.10 Phase 8：前端黑板与学习展示
+
+目标：让用户能看见计划、进度和当前状态，但不做过重 UI。
+
+任务：
+
+- 增加 Learning Mode 状态条
+- 增加黑板最小展示区，显示：
+  - 当前目标
+  - 当前节点
+  - 已讲节点
+  - 待检查节点
+  - blocker / 异议
+- 增加 goal_state 摘要展示
+- 区分 Chat Mode 与 Learning Mode 的面板差异
+- 不实现复杂 Gantt，避免 UI 先走太远
+
+验收标准：
+
+- 用户能一眼知道当前是不是学习模式
+- 用户能一眼知道现在学到哪
+- 用户能一眼知道下一步是讲解还是检查
+
+### 12.11 Phase 9：测试与回归
+
+后端测试：
+
+- 模式切换测试
+- `long_task / complete_goal` 集成测试
+- `LearningPlan / LearningBoard` patch 测试
+- 三状态流转测试
+- 条件 retrieval 测试
+- writeback 最小化测试
+
+前端测试：
+
+- 输入卡 Learning Mode 开关测试
+- goal_state 展示测试
+- 黑板面板展示测试
+- 模式切换后 UI 收敛测试
+
+人工验证：
+
+- “我想学一个决策树”完整走通一遍
+- 普通聊天线程不误入学习模式
+- 用户中途质疑、暂停、退出、换题都能正确收口
+
+### 12.12 实施纪律
+
+- 不额外新造线程级任务系统
+- 不把 `web_search` 做成默认常驻
+- 不把黑板做成大而全的课程系统
+- 不在本轮实现原生 Gantt 替代品
+- 每完成一个 Phase 都要补测试和文档回写
+- 如果中途发现字段膨胀，优先收口 schema 再继续功能开发
 
 ## 13. 最终判断
 
