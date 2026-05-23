@@ -4,7 +4,32 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class AttachmentSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
+    content_type: str = ""
+    data: str = ""
+    size: int = 0
+
+
+class SourceReferenceSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    source_ref: str = ""
+    source_path: str = ""
+    title: str = ""
+    source_id: str = ""
+
+
+class LLMSelectionSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    profile: str = ""
+    model: str = ""
 
 
 class SessionCreatePayload(BaseModel):
@@ -35,7 +60,7 @@ class ProjectUpdatePayload(BaseModel):
 
 class ProjectSourcesPayload(BaseModel):
     source_refs: list[str] = Field(default_factory=list)
-    source_references: list[dict[str, Any]] = Field(default_factory=list)
+    source_references: list[SourceReferenceSchema] = Field(default_factory=list)
 
 
 class ProjectAnchorPayload(BaseModel):
@@ -54,14 +79,14 @@ class StartTurnPayload(BaseModel):
     project_id: str | None = None
     project_title: str | None = None
     session_id: str | None = None
-    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: list[AttachmentSchema] = Field(default_factory=list)
     language: str = "zh"
     config: dict[str, Any] = Field(default_factory=dict)
     history_references: list[str] = Field(default_factory=list)
-    source_references: list[dict[str, Any]] = Field(default_factory=list)
+    source_references: list[SourceReferenceSchema] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     memory_references: list[str] = Field(default_factory=list)
-    llm_selection: dict[str, Any] | None = None
+    llm_selection: LLMSelectionSchema | None = None
 
 
 class RegeneratePayload(BaseModel):
@@ -85,25 +110,6 @@ class PingPayload(BaseModel):
     type: Literal["ping"] = "ping"
 
 
-class SkillPayload(BaseModel):
-    name: str
-    description: str = ""
-    content: str = ""
-    tags: list[str] = Field(default_factory=list)
-
-
-class SkillUpdatePayload(BaseModel):
-    description: str | None = None
-    content: str | None = None
-    rename_to: str | None = None
-    tags: list[str] = Field(default_factory=list)
-
-
-class SkillTagPayload(BaseModel):
-    name: str
-    rename_to: str | None = None
-
-
 class SettingsUiPayload(BaseModel):
     theme: str | None = None
     language: str | None = None
@@ -111,20 +117,6 @@ class SettingsUiPayload(BaseModel):
 
 class SettingsCatalogPayload(BaseModel):
     catalog: dict[str, Any] = Field(default_factory=dict)
-
-
-class SettingsTestStartPayload(BaseModel):
-    catalog: dict[str, Any] = Field(default_factory=dict)
-
-
-class AuthLoginPayload(BaseModel):
-    username: str
-    password: str
-
-
-class AuthRegisterPayload(BaseModel):
-    username: str
-    password: str
 
 
 class MemoryUpdatePayload(BaseModel):

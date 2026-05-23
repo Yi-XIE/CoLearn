@@ -54,10 +54,17 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value != null &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
 interface ThreadComposerProps {
-  onSend: (content: string, images?: SendImage[], options?: SendOptions) => void;
+  onSend: (content: string, images?: SendImage[], options?: SendOptions) => void | Promise<void>;
   disabled?: boolean;
-  placeholder?: string;
+  placeholder?: string | string[];
   isStreaming?: boolean;
   modelLabel?: string | null;
   variant?: "thread" | "hero";
@@ -385,6 +392,7 @@ export function ThreadComposer({
   const [uncontrolledImageMode, setUncontrolledImageMode] = useState(false);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>("auto");
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
+  const [heroPlaceholderIndex, setHeroPlaceholderIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -401,11 +409,23 @@ export function ThreadComposer({
     },
     [controlledImageMode, onImageModeChange],
   );
-  const resolvedPlaceholder = isStreaming
-    ? t("thread.composer.placeholderStreaming")
-    : imageMode
+  const placeholderItems = Array.isArray(placeholder) ? placeholder.filter(Boolean) : [];
+
+  useEffect(() => {
+    if (!isHero || placeholderItems.length <= 1 || value.trim() || isStreaming || imageMode) return;
+    const id = window.setInterval(() => {
+      setHeroPlaceholderIndex((index) => (index + 1) % placeholderItems.length);
+    }, 2800);
+    return () => window.clearInterval(id);
+  }, [imageMode, isHero, isStreaming, placeholderItems, value]);
+
+  useEffect(() => {
+    setHeroPlaceholderIndex(0);
+  }, [placeholderItems]);
+
+  const resolvedPlaceholder = imageMode
       ? t("thread.composer.imageMode.placeholder")
-      : placeholder ?? t("thread.composer.placeholderThread");
+      : placeholderItems[heroPlaceholderIndex] ?? (typeof placeholder === "string" ? placeholder : t("thread.composer.placeholderThread"));
 
   const { images, enqueue, remove, clear, encoding, full } =
     useAttachedImages();
@@ -633,14 +653,28 @@ export function ThreadComposer({
           },
         }
       : undefined;
-    onSend(trimmed, payload, options);
-    setValue("");
-    setInlineError(null);
-    // Bubble owns the data URL copy; safe to revoke every staged blob
-    // preview here without affecting the rendered message.
-    clear();
-    setSlashMenuDismissed(false);
-    resizeTextarea();
+    const clearComposer = () => {
+      setValue("");
+      setInlineError(null);
+      // Bubble owns the data URL copy; safe to revoke every staged blob
+      // preview here without affecting the rendered message.
+      clear();
+      setSlashMenuDismissed(false);
+      resizeTextarea();
+    };
+
+    try {
+      const result = onSend(trimmed, payload, options);
+      if (isPromiseLike(result)) {
+        void result.then(clearComposer).catch((error) => {
+          console.error("Failed to send message", error);
+        });
+        return;
+      }
+      clearComposer();
+    } catch (error) {
+      console.error("Failed to send message", error);
+    }
   }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {

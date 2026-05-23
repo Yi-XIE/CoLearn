@@ -6,11 +6,13 @@ import type {
   OutboundMedia,
   GoalStateWsPayload,
 } from "./types";
+export { ColearnWsClient } from "./colearn-ws-client";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
 const WS_OPEN = 1;
 const WS_CLOSING = 2;
+const MAX_PENDING_INBOUND = 2000;
 
 /** Inbound WebSocket ``console.log`` / parse-failure ``console.warn``.
  *
@@ -50,11 +52,11 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   return row;
 }
 
-type Unsubscribe = () => void;
-type EventHandler = (ev: InboundEvent) => void;
-type StatusHandler = (status: ConnectionStatus) => void;
-type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
-type SessionUpdateHandler = (chatId: string) => void;
+export type Unsubscribe = () => void;
+export type EventHandler = (ev: InboundEvent) => void;
+export type StatusHandler = (status: ConnectionStatus) => void;
+export type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
+export type SessionUpdateHandler = (chatId: string) => void;
 
 /** Structured connection-level errors surfaced to the UI.
  *
@@ -70,12 +72,35 @@ export type StreamError =
    * ``maxMessageBytes`` on the server. */
   | { kind: "message_too_big" };
 
-type ErrorHandler = (error: StreamError) => void;
+export type ErrorHandler = (error: StreamError) => void;
 
 interface PendingNewChat {
   resolve: (chatId: string) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+}
+
+export interface NanobotClientLike {
+  readonly status: ConnectionStatus;
+  readonly defaultChatId: string | null;
+  updateUrl(url: string): void;
+  onStatus(handler: StatusHandler): Unsubscribe;
+  onRuntimeModelUpdate(handler: RuntimeModelHandler): Unsubscribe;
+  onSessionUpdate(handler: SessionUpdateHandler): Unsubscribe;
+  onError(handler: ErrorHandler): Unsubscribe;
+  getRunStartedAt(chatId: string): number | null;
+  getGoalState(chatId: string): GoalStateWsPayload | undefined;
+  onChat(chatId: string, handler: EventHandler): Unsubscribe;
+  connect(): void;
+  close(): void;
+  newChat(timeoutMs?: number): Promise<string>;
+  attach(chatId: string): void;
+  sendMessage(
+    chatId: string,
+    content: string,
+    media?: OutboundMedia[],
+    options?: { imageGeneration?: OutboundImageGeneration },
+  ): void;
 }
 
 export interface NanobotClientOptions {
@@ -96,7 +121,7 @@ export interface NanobotClientOptions {
  * ``chat_id``, and this class fans those events out to handlers registered
  * per chat. Reconnects are transparent and re-attach every known chat_id.
  */
-export class NanobotClient {
+export class NanobotClient implements NanobotClientLike {
   private socket: WebSocket | null = null;
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
@@ -106,7 +131,6 @@ export class NanobotClient {
   private chatHandlers = new Map<string, Set<EventHandler>>();
   /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
-  private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
@@ -402,7 +426,7 @@ export class NanobotClient {
       this.pendingInboundByChat.set(chatId, q);
     }
     q.push(ev);
-    const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
+    const over = q.length - MAX_PENDING_INBOUND;
     if (over > 0) {
       q.splice(0, over);
     }
@@ -478,5 +502,89 @@ export class NanobotClient {
       // Send failure will materialize as a close; queue the frame for retry.
       this.sendQueue.push(frame);
     }
+  }
+}
+
+export class OfflineNanobotClient implements NanobotClientLike {
+  private status_: ConnectionStatus = "closed";
+  private statusHandlers = new Set<StatusHandler>();
+  private runtimeModelHandlers = new Set<RuntimeModelHandler>();
+  private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
+  private errorHandlers = new Set<ErrorHandler>();
+
+  get status(): ConnectionStatus {
+    return this.status_;
+  }
+
+  get defaultChatId(): string | null {
+    return null;
+  }
+
+  updateUrl(_url: string): void {}
+
+  onStatus(handler: StatusHandler): Unsubscribe {
+    this.statusHandlers.add(handler);
+    handler(this.status_);
+    return () => {
+      this.statusHandlers.delete(handler);
+    };
+  }
+
+  onRuntimeModelUpdate(handler: RuntimeModelHandler): Unsubscribe {
+    this.runtimeModelHandlers.add(handler);
+    return () => {
+      this.runtimeModelHandlers.delete(handler);
+    };
+  }
+
+  onSessionUpdate(handler: SessionUpdateHandler): Unsubscribe {
+    this.sessionUpdateHandlers.add(handler);
+    return () => {
+      this.sessionUpdateHandlers.delete(handler);
+    };
+  }
+
+  onError(handler: ErrorHandler): Unsubscribe {
+    this.errorHandlers.add(handler);
+    return () => {
+      this.errorHandlers.delete(handler);
+    };
+  }
+
+  getRunStartedAt(_chatId: string): number | null {
+    return null;
+  }
+
+  getGoalState(_chatId: string): GoalStateWsPayload | undefined {
+    return undefined;
+  }
+
+  onChat(_chatId: string, _handler: EventHandler): Unsubscribe {
+    return () => {};
+  }
+
+  connect(): void {}
+
+  close(): void {
+    this.setStatus("closed");
+  }
+
+  async newChat(): Promise<string> {
+    throw new Error("Chat is unavailable while the CoLearn server is offline");
+  }
+
+  attach(_chatId: string): void {}
+
+  sendMessage(
+    _chatId: string,
+    _content: string,
+    _media?: OutboundMedia[],
+    _options?: { imageGeneration?: OutboundImageGeneration },
+  ): void {}
+
+  private setStatus(status: ConnectionStatus): void {
+    if (this.status_ === status) return;
+    this.status_ = status;
+    for (const handler of this.statusHandlers) handler(status);
   }
 }

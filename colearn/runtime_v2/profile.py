@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from colearn.paths import colearn_slim_config
 
 
-COLEARN_NANOBOT_SLIM_CONFIG = Path(".colearn") / "nanobot-v0.2-slim.config.json"
+COLEARN_NANOBOT_SLIM_CONFIG = colearn_slim_config()
 
 # First-wave tools to keep in the mainline once CoLearn starts wiring into
 # nanobot v0.2 directly. The important bit is that LightRAG stays in the core

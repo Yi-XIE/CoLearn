@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from colearn.storage import JsonStateStore
+from colearn.paths import colearn_slim_config
 
 
 def _env(name: str) -> str:
@@ -32,7 +33,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                     {
                         "id": "deepseek-llm-profile",
                         "name": "DeepSeek LLM",
-                        "binding": "openai",
+                        "binding": "deepseek",
                         "base_url": "https://api.deepseek.com",
                         "api_key": _env("DEEPSEEK_API_KEY"),
                         "api_version": "",
@@ -51,7 +52,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                     {
                         "id": "siliconflow-vl-profile",
                         "name": "SiliconFlow Vision",
-                        "binding": "openai",
+                        "binding": "siliconflow",
                         "base_url": "https://api.siliconflow.cn/v1/chat/completions",
                         "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
                         "api_version": "",
@@ -76,7 +77,7 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
                     {
                         "id": "siliconflow-embedding-profile",
                         "name": "SiliconFlow Embedding",
-                        "binding": "openai",
+                        "binding": "siliconflow",
                         "base_url": "https://api.siliconflow.cn/v1/embeddings",
                         "api_key": os.environ.get("EMBEDDING_API_KEY", ""),
                         "api_version": "",
@@ -116,20 +117,21 @@ DEFAULT_SETTINGS_STATE: dict[str, Any] = {
     },
     "providers": {
         "llm": [
-            {"value": "openai", "label": "DeepSeek", "base_url": "https://api.deepseek.com"},
+            {"value": "deepseek", "label": "DeepSeek", "base_url": "https://api.deepseek.com"},
         ],
         "embedding": [
             {
-                "value": "openai",
-                "label": "OpenAI",
+                "value": "siliconflow",
+                "label": "SiliconFlow",
                 "base_url": "https://api.siliconflow.cn/v1/embeddings",
                 "default_dim": "",
             },
         ],
         "search": [
-            {"value": "brave", "label": "Brave Search"},
-            {"value": "tavily", "label": "Tavily"},
-            {"value": "perplexity", "label": "Perplexity"},
+            {"value": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
+            {"value": "brave", "label": "Brave Search", "credential": "api_key"},
+            {"value": "tavily", "label": "Tavily", "credential": "api_key"},
+            {"value": "searxng", "label": "SearXNG", "credential": "base_url"},
         ],
     },
 }
@@ -152,6 +154,30 @@ class SettingsStateService:
             self._state = deepcopy(raw)
         else:
             self._state = deepcopy(DEFAULT_SETTINGS_STATE)
+        self._migrate_provider_bindings()
+
+    def _migrate_provider_bindings(self) -> None:
+        services = dict((self._state.get("catalog") or {}).get("services") or {})
+        llm = dict(services.get("llm") or {})
+        for profile in list(llm.get("profiles") or []):
+            if (
+                str(profile.get("id") or "") == "deepseek-llm-profile"
+                and str(profile.get("binding") or "") == "openai"
+            ):
+                profile["binding"] = "deepseek"
+        providers = self._state.get("providers") or {}
+        for item in list((providers.get("llm") or [])):
+            if str(item.get("label") or "").lower() == "deepseek" and str(item.get("value") or "") == "openai":
+                item["value"] = "deepseek"
+        for service_name in ("llm", "embedding"):
+            service = dict(services.get(service_name) or {})
+            for profile in list(service.get("profiles") or []):
+                if str(profile.get("id") or "").startswith("siliconflow-") and str(profile.get("binding") or "") == "openai":
+                    profile["binding"] = "siliconflow"
+        for item in list((providers.get("embedding") or [])):
+            if str(item.get("label") or "").lower() in {"openai", "siliconflow"} and str(item.get("value") or "") == "openai":
+                item["value"] = "siliconflow"
+                item["label"] = "SiliconFlow"
 
     def _dump(self) -> None:
         self.state_store.write_json(SETTINGS_STATE_FILE, self._state)
@@ -161,7 +187,10 @@ class SettingsStateService:
         self._dump()
 
     def settings(self) -> dict[str, Any]:
-        return deepcopy(self._state)
+        payload = deepcopy(self._state)
+        payload.setdefault("runtime", {})
+        payload["runtime"]["config_path"] = str(colearn_slim_config())
+        return payload
 
     def catalog(self) -> dict[str, Any]:
         return deepcopy(self._state["catalog"])
@@ -193,9 +222,10 @@ class SettingsStateService:
         services = dict(catalog.get("services") or {})
         llm_env = self._service_env_block(services.get("llm"), include_embedding=False)
         embedding_env = self._service_env_block(services.get("embedding"), include_embedding=True)
+        search_env = self._search_env_block(services.get("search"))
         lines = [
             f"{key}={self._quote_env_value(value)}"
-            for key, value in {**llm_env, **embedding_env}.items()
+            for key, value in {**llm_env, **embedding_env, **search_env}.items()
             if value is not None
         ]
         payload = "\n".join(lines).rstrip() + "\n"
@@ -240,6 +270,22 @@ class SettingsStateService:
         model = next((item for item in models if str(item.get("id")) == active_model_id), models[0] if models else {})
         return dict(profile or {}), dict(model or {})
 
+    def _search_env_block(self, service: dict[str, Any] | None) -> dict[str, str | None]:
+        active_profile, _ = self._resolve_active_selection(service)
+        provider = str(active_profile.get("provider") or "").strip().lower()
+        block: dict[str, str | None] = {
+            "BRAVE_API_KEY": None,
+            "TAVILY_API_KEY": None,
+            "SEARXNG_BASE_URL": None,
+        }
+        if provider == "brave":
+            block["BRAVE_API_KEY"] = self._string_or_none(active_profile.get("api_key"))
+        elif provider == "tavily":
+            block["TAVILY_API_KEY"] = self._string_or_none(active_profile.get("api_key"))
+        elif provider == "searxng":
+            block["SEARXNG_BASE_URL"] = self._string_or_none(active_profile.get("base_url"))
+        return block
+
     def _string_or_none(self, value: Any) -> str | None:
         text = str(value or "").strip()
         return text or None
@@ -282,145 +328,6 @@ class MemoryDocStateService:
 
 
 @dataclass
-class SkillStateService:
-    _skills: dict[str, dict[str, Any]] = field(default_factory=dict)
-    _tags: dict[str, str] = field(default_factory=dict)
-
-    def reset(self) -> None:
-        self._skills = {}
-        self._tags = {}
-
-    def list_skills(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "name": name,
-                "description": str(record.get("description") or ""),
-                "tags": list(record.get("tags") or []),
-            }
-            for name, record in self._skills.items()
-        ]
-
-    def get_skill(self, name: str) -> dict[str, Any]:
-        return dict(self._skills.get(name) or {})
-
-    def save_skill(self, name: str, record: dict[str, Any]) -> None:
-        self._skills[name] = dict(record)
-
-    def delete_skill(self, name: str) -> None:
-        self._skills.pop(name, None)
-
-    def list_tags(self) -> list[str]:
-        return sorted(self._tags.keys())
-
-    def save_tag(self, name: str) -> None:
-        self._tags[name] = name
-
-    def rename_tag(self, old_name: str, new_name: str) -> None:
-        self._tags.pop(old_name, None)
-        self._tags[new_name] = new_name
-
-    def delete_tag(self, name: str) -> None:
-        self._tags.pop(name, None)
-
-
-@dataclass
-class AuthStateService:
-    state_store: JsonStateStore = field(default_factory=JsonStateStore)
-    _users: dict[str, dict[str, Any]] = field(default_factory=dict)
-    _sessions: dict[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self._users = {}
-        self._sessions = {}
-        self._load()
-
-    def _load(self) -> None:
-        raw = self.state_store.read_json("auth_state.json", {"users": [], "sessions": {}})
-        users = raw.get("users") if isinstance(raw, dict) else []
-        sessions = raw.get("sessions") if isinstance(raw, dict) else {}
-        if isinstance(users, list):
-            for item in users:
-                if not isinstance(item, dict):
-                    continue
-                username = str(item.get("username") or "").strip()
-                if not username:
-                    continue
-                self._users[username] = {
-                    "user_id": str(item.get("user_id") or username),
-                    "username": username,
-                    "password": str(item.get("password") or ""),
-                    "role": str(item.get("role") or "user"),
-                    "is_admin": bool(item.get("is_admin")),
-                }
-        if isinstance(sessions, dict):
-            self._sessions = {
-                str(token): str(username)
-                for token, username in sessions.items()
-                if str(token).strip() and str(username).strip()
-            }
-
-    def _dump(self) -> None:
-        self.state_store.write_json(
-            "auth_state.json",
-            {
-                "users": list(self._users.values()),
-                "sessions": dict(self._sessions),
-            },
-        )
-
-    def reset(self) -> None:
-        self._users = {}
-        self._sessions = {}
-        self._dump()
-
-    def is_first_user(self) -> bool:
-        return len(self._users) == 0
-
-    def register(self, username: str, password: str) -> dict[str, Any]:
-        normalized = username.strip()
-        if not normalized or not password:
-            raise ValueError("Username and password are required")
-        if normalized in self._users:
-            raise FileExistsError("Username already exists")
-        is_first = self.is_first_user()
-        record = {
-            "user_id": normalized,
-            "username": normalized,
-            "password": password,
-            "role": "admin" if is_first else "user",
-            "is_admin": is_first,
-        }
-        self._users[normalized] = record
-        self._dump()
-        return {**record, "is_first_user": is_first}
-
-    def authenticate(self, username: str, password: str) -> dict[str, Any] | None:
-        record = self._users.get(username.strip())
-        if not record or record.get("password") != password:
-            return None
-        return dict(record)
-
-    def create_session(self, username: str) -> str:
-        token = secrets.token_urlsafe(24)
-        self._sessions[token] = username
-        self._dump()
-        return token
-
-    def delete_session(self, token: str) -> None:
-        if token in self._sessions:
-            self._sessions.pop(token, None)
-            self._dump()
-
-    def user_for_session(self, token: str | None) -> dict[str, Any] | None:
-        if not token:
-            return None
-        username = self._sessions.get(token)
-        if not username:
-            return None
-        record = self._users.get(username)
-        return dict(record) if record else None
-
-
 @dataclass
 class KnowledgeTaskService:
     state_root: Path
@@ -557,46 +464,3 @@ class KnowledgeTaskService:
             {"event": "progress", "data": progress},
             {"event": "failed" if task.get("status") == "failed" else "complete", "data": {"detail": task.get("detail") or "Task failed"}},
         ]
-
-
-@dataclass
-class SettingsTestRunService:
-    _runs: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    def reset(self) -> None:
-        self._runs = {}
-
-    def create_run(self, service: str, catalog: dict[str, Any]) -> dict[str, Any]:
-        run_id = f"{service}-{secrets.token_hex(6)}"
-        now = time.time()
-        events = [
-            {
-                "type": "running",
-                "message": f"{service} diagnostics started.",
-                "timestamp": now,
-            },
-            {
-                "type": "info",
-                "message": f"{service} catalog accepted.",
-                "timestamp": now + 0.01,
-            },
-            {
-                "type": "completed",
-                "message": f"{service} diagnostics completed.",
-                "timestamp": now + 0.02,
-                "catalog": deepcopy(catalog),
-            },
-        ]
-        run = {
-            "run_id": run_id,
-            "service": service,
-            "status": "completed",
-            "accepted": True,
-            "events": events,
-        }
-        self._runs[run_id] = run
-        return dict(run)
-
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
-        run = self._runs.get(run_id)
-        return dict(run) if run else None

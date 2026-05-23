@@ -2,10 +2,11 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { LearningSupportPanel } from "@/components/thread/LearningSupportPanel";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { UIMessage } from "@/lib/types";
+import type { LearningSupportPayload, UIMessage } from "@/lib/types";
 
 interface ThreadViewportProps {
   messages: UIMessage[];
@@ -14,6 +15,7 @@ interface ThreadViewportProps {
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
   conversationKey?: string | null;
+  learningSupport?: LearningSupportPayload | null;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -25,6 +27,7 @@ export function ThreadViewport({
   emptyState,
   scrollToBottomSignal = 0,
   conversationKey = null,
+  learningSupport = null,
 }: ThreadViewportProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -144,11 +147,7 @@ export function ThreadViewport({
       <div
         ref={scrollRef}
         className={cn(
-          "absolute inset-0 overflow-y-auto scroll-auto scrollbar-thin",
-          "[&::-webkit-scrollbar]:w-1.5",
-          "[&::-webkit-scrollbar-thumb]:rounded-full",
-          "[&::-webkit-scrollbar-thumb]:bg-muted-foreground/30",
-          "[&::-webkit-scrollbar-track]:bg-transparent",
+          "absolute inset-0 overflow-y-auto scroll-auto scrollbar-none",
         )}
       >
         {hasMessages ? (
@@ -160,6 +159,9 @@ export function ThreadViewport({
             </div>
 
             <div className="sticky bottom-0 z-10 mt-auto bg-background">
+              <div className="mx-auto w-full max-w-[49.5rem] px-4">
+                <LearningSupportPanel support={learningSupport} />
+              </div>
               <div className="px-4 pb-3">
                 {composer}
               </div>

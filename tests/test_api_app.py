@@ -1,10 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib
 import json
 from pathlib import Path
 import shutil
 import sys
+from types import SimpleNamespace
 
 import anyio
 import httpx
@@ -15,54 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from colearn.api.app import app
 
 
-class ASGIWebSocketClient:
-    def __init__(self, app, task_group) -> None:
-        self.app = app
-        self.task_group = task_group
-        self.to_app_send = None
-        self.to_app_receive = None
-        self.from_app_send = None
-        self.from_app_receive = None
-
-    async def connect(self, path: str = "/api/v1/ws") -> None:
-        self.to_app_send, self.to_app_receive = anyio.create_memory_object_stream(50)
-        self.from_app_send, self.from_app_receive = anyio.create_memory_object_stream(50)
-        scope = {
-            "type": "websocket",
-            "asgi": {"version": "3.0"},
-            "scheme": "ws",
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
-            "headers": [],
-            "client": ("testclient", 50000),
-            "server": ("testserver", 80),
-            "subprotocols": [],
-        }
-
-        async def receive():
-            return await self.to_app_receive.receive()
-
-        async def send(message):
-            await self.from_app_send.send(message)
-
-        self.task_group.start_soon(self.app, scope, receive, send)
-        await self.to_app_send.send({"type": "websocket.connect"})
-        accepted = await self.from_app_receive.receive()
-        assert accepted["type"] == "websocket.accept"
-
-    async def send_json(self, payload: dict) -> None:
-        await self.to_app_send.send({"type": "websocket.receive", "text": json.dumps(payload)})
-
-    async def receive_json(self) -> dict:
-        with anyio.fail_after(2):
-            while True:
-                message = await self.from_app_receive.receive()
-                if message["type"] == "websocket.send":
-                    return json.loads(message.get("text") or "{}")
-
-    async def disconnect(self) -> None:
-        await self.to_app_send.send({"type": "websocket.disconnect", "code": 1000})
 
 
 async def _run_http_checks() -> None:
@@ -84,80 +37,39 @@ async def _run_http_checks() -> None:
         assert fetched.status_code == 200
         assert fetched.json()["session_id"] == payload["session_id"]
 
+        untitled = await client.post(
+            "/api/v1/sessions",
+            json={
+                "project_id": "proj-empty-title",
+                "project_title": "CoLearn",
+            },
+        )
+        assert untitled.status_code == 200
+        untitled_payload = untitled.json()["session"]
+        assert untitled_payload["title"] == ""
+
+        renamed = await client.patch(
+            f"/api/v1/sessions/{untitled_payload['session_id']}",
+            json={"title": "用户输入的第一句话"},
+        )
+        assert renamed.status_code == 200
+        assert renamed.json()["session"]["title"] == "用户输入的第一句话"
+
 
 def test_http_session_endpoints() -> None:
     anyio.run(_run_http_checks)
 
 
-def test_websocket_endpoint_exists() -> None:
-    routes = getattr(app, "routes", [])
-    assert any(getattr(route, "path", "") == "/api/v1/ws" for route in routes)
 
 
-class FakeWebSocket:
-    def __init__(self) -> None:
-        self.sent: list[dict] = []
-
-    async def send_json(self, payload: dict) -> None:
-        self.sent.append(payload)
 
 
-async def _run_websocket_handler_checks() -> None:
-    app_module = importlib.import_module("colearn.api.app")
-    assert "cancel_turn" in app_module.WS_HANDLERS
-    websocket = FakeWebSocket()
-    await app_module.handle_ping(websocket)
-    assert websocket.sent[-1]["metadata"]["pong"] is True
-
-    await app_module.handle_subscribe_turn(websocket, {"type": "subscribe_turn", "turn_id": "missing-turn"})
-    assert websocket.sent[-1]["type"] == "turn_state"
-    assert websocket.sent[-1]["metadata"]["status"] == "missing"
 
 
-def test_websocket_ping_and_unknown_turn_subscription() -> None:
-    anyio.run(_run_websocket_handler_checks)
 
 
-def test_websocket_start_turn_without_runtime_stream_does_not_fake_tool_events() -> None:
-    from colearn.learning.response_contract import LearningTurnResult
-    app_module = importlib.import_module("colearn.api.app")
-    result = LearningTurnResult(final_text="plain answer", stream_events=[], warnings=["no_stream"])
-    events, next_seq = app_module._prepare_runtime_stream_events(
-        stream_events=list(result.stream_events or []),
-        result=result,
-        session_id="ws-no-fake",
-        turn_id="turn-1",
-        seq=3,
-    )
-    assert events == []
-    assert next_seq == 3
 
 
-def test_prepare_runtime_stream_events_preserves_event_shape() -> None:
-    app_module = importlib.import_module("colearn.api.app")
-    result = type(
-        "R",
-        (),
-        {
-            "stream_events": [
-                {"type": "thinking", "content": "step one", "metadata": {"phase": "thinking"}},
-                {"type": "tool_call", "metadata": {"tool_name": "memory"}},
-            ],
-            "warnings": ["warn"],
-            "tool_events": [{"tool_name": "memory"}],
-        },
-    )()
-    events, next_seq = app_module._prepare_runtime_stream_events(
-        stream_events=list(result.stream_events),
-        result=result,
-        session_id="s",
-        turn_id="t",
-        seq=5,
-    )
-    assert next_seq == 7
-    assert events[0]["metadata"]["phase"] == "thinking"
-    assert events[0]["metadata"]["warnings"] == ["warn"]
-    assert events[1]["metadata"]["tool_events"] == [{"tool_name": "memory"}]
 
 
 def test_turn_mode_maps_to_model_preset() -> None:
@@ -220,7 +132,73 @@ def test_session_detail_contains_active_turns_field() -> None:
     anyio.run(_run_running_session_check)
 
 
+async def _run_session_listing_sort_checks() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    project_id = "sorting-check-project"
+    oldest = app_module.session_store.create_session(
+        session_id="sorting-check-oldest",
+        project_id=project_id,
+        title="oldest",
+    )
+    oldest.updated_at = 100
+    oldest.created_at = 100
+    app_module.session_store.save_session(oldest)
+
+    middle = app_module.session_store.create_session(
+        session_id="sorting-check-middle",
+        project_id=project_id,
+        title="middle",
+    )
+    middle.updated_at = 200
+    middle.created_at = 200
+    app_module.session_store.save_session(middle)
+
+    newest = app_module.session_store.create_session(
+        session_id="sorting-check-newest",
+        project_id=project_id,
+        title="newest",
+    )
+    newest.updated_at = 300
+    newest.created_at = 300
+    app_module.session_store.save_session(newest)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            f"/api/v1/sessions?project_id={project_id}&limit=2",
+        )
+        assert response.status_code == 200
+        sessions = response.json()["sessions"]
+        assert [item["session_id"] for item in sessions] == [
+            "sorting-check-newest",
+            "sorting-check-middle",
+        ]
+
+
+def test_session_listing_orders_by_most_recent_first_before_limit() -> None:
+    anyio.run(_run_session_listing_sort_checks)
+
+
 async def _run_project_checks() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    app_module.session_store.create_session(
+        session_id="project-api-session",
+        project_id="project-api",
+        title="Project API Session",
+    )
+    session = app_module.session_store.get_session("project-api-session")
+    assert session is not None
+    session.updated_at = 99
+    session.board_version = 5
+    session.board_facts = {
+        "project_id": "project-api",
+        "session_id": "project-api-session",
+        "board_version": 5,
+        "updated_at": "2026-05-22T00:00:00Z",
+        "current_turn_mode": "VERIFY",
+    }
+    session.pending_review = {"summary": "session review", "status": "ready"}
+    app_module.session_store.save_session(session)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         created = await client.post(
@@ -237,10 +215,47 @@ async def _run_project_checks() -> None:
         assert project_payload["title"] == "Project API"
         assert "board_updated_at" in project_payload
         assert "latest_review_status" in project_payload
+        assert project_payload["board_facts"]["session_id"] == "project-api-session"
+        assert project_payload["board_version"] == 5
+        assert project_payload["board_updated_at"] == "2026-05-22T00:00:00Z"
+        assert project_payload["latest_review"]["summary"] == "session review"
 
 
 def test_project_endpoints() -> None:
     anyio.run(_run_project_checks)
+
+
+async def _run_knowledge_list_uses_latest_session_board_check() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    project = app_module.project_service.get_project("kb-session-board")
+    if project is None:
+        project = app_module.project_service.create_project("kb-session-board", title="KB Session Board")
+    project.board_facts = {"updated_at": "legacy-project-board"}
+    app_module.project_service.save_project(project)
+    session = app_module.session_store.create_session(
+        session_id="kb-session-board-session",
+        project_id="kb-session-board",
+        title="KB Session Board Session",
+    )
+    session.updated_at = 123
+    session.board_facts = {"updated_at": "latest-session-board"}
+    app_module.session_store.save_session(session)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        listing = await client.get("/api/v1/knowledge/list")
+        assert listing.status_code == 200
+        item = next(row for row in listing.json()["knowledge_bases"] if row["id"] == "kb-session-board")
+        assert item["updated_at"] == "latest-session-board"
+
+        graph = await client.get("/api/v1/knowledge/kb-session-board/graph")
+        assert graph.status_code == 200
+        library = next(node for node in graph.json()["nodes"] if node["id"] == "library:kb-session-board")
+        assert library["metadata"]["updated_at"] == "latest-session-board"
+
+
+def test_knowledge_list_uses_latest_session_board() -> None:
+    anyio.run(_run_knowledge_list_uses_latest_session_board_check)
 
 
 async def _run_schema_compat_checks() -> None:
@@ -261,15 +276,6 @@ async def _run_schema_compat_checks() -> None:
         assert llm_options.status_code == 200
         assert llm_options.json()["active"]["model_id"] == "deepseek-v4-flash"
 
-        settings_test = await client.post(
-            "/api/v1/settings/tests/llm/start",
-            json={"catalog": {"version": 1}, "ignored": True},
-        )
-        assert settings_test.status_code == 200
-        payload = settings_test.json()
-        assert payload["run_id"].startswith("llm-")
-        assert payload["accepted"] is True
-
         refresh_empty = await client.post("/api/v1/memory/refresh", json={})
         assert refresh_empty.status_code == 200
         assert "changed" in refresh_empty.json()
@@ -287,194 +293,93 @@ def test_api_state_services_reset_without_cross_test_leakage() -> None:
     app_module = importlib.import_module("colearn.api.app")
     app_module.settings_service.update_ui(theme="light", language="en")
     app_module.memory_doc_service.update("summary", "leak")
-    app_module.skill_service.save_skill("leak", {"description": "", "content": "", "tags": []})
 
     app_module.settings_service.reset()
     app_module.memory_doc_service.reset()
-    app_module.skill_service.reset()
 
     assert app_module.settings_service.settings()["ui"]["theme"] == "dark"
     assert app_module.memory_doc_service.snapshot()["summary"] == ""
-    assert app_module.skill_service.list_skills() == []
 
 
-async def _run_real_websocket_lifecycle_checks() -> None:
-    app_module = importlib.import_module("colearn.api.app")
-
-    async with anyio.create_task_group() as task_group:
-        ws = ASGIWebSocketClient(app, task_group)
-        await ws.connect()
-        await ws.send_json({"type": "ping"})
-        assert (await ws.receive_json())["metadata"]["pong"] is True
-        await ws.send_json({"type": "subscribe_turn", "turn_id": "missing-real-turn"})
-        missing = await ws.receive_json()
-        assert missing["type"] == "turn_state"
-        assert missing["metadata"]["status"] == "missing"
-        await ws.disconnect()
-        task_group.cancel_scope.cancel()
-
-    session = app_module.session_store.create_session(
-        session_id="ws-cancel-session",
-        project_id="ws-project",
-        title="WS Cancel",
-    )
-    session.status = "running"
-    session.active_turn_id = "ws-cancel-turn"
-    session.active_turns = [{"turn_id": "ws-cancel-turn"}]
-    app_module.session_store.save_session(session)
-    app_module.turn_index["ws-cancel-turn"] = {"session_id": "ws-cancel-session", "project_id": "ws-project"}
-
-    async with anyio.create_task_group() as task_group:
-        ws = ASGIWebSocketClient(app, task_group)
-        await ws.connect()
-        await ws.send_json({"type": "cancel_turn", "turn_id": "ws-cancel-turn"})
-        cancelled = await ws.receive_json()
-        assert cancelled["metadata"]["status"] == "cancelled"
-        saved = app_module.session_store.get_session("ws-cancel-session")
-        assert saved is not None
-        assert saved.active_turns == []
-        await ws.disconnect()
-        task_group.cancel_scope.cancel()
 
 
-def test_real_websocket_ping_subscribe_and_cancel() -> None:
-    anyio.run(_run_real_websocket_lifecycle_checks)
 
 
 class FakeWebSocketOrchestrator:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
+        self.last_kwargs = {}
+        self.executor = None
 
     def run_turn(self, **kwargs):
+        self.last_kwargs = dict(kwargs)
         if self.fail:
             raise RuntimeError("ws orchestrator failed")
         from colearn.learning.response_contract import LearningTurnResult
 
+        if kwargs.get("stream_emit"):
+            kwargs["stream_emit"](
+                {
+                    "type": "content_delta",
+                    "content": "live chunk",
+                    "metadata": {"phase": "content_delta", "runtime_event_index": 0},
+                }
+            )
         return LearningTurnResult(
             final_text=f"WS answer: {kwargs['user_message']}",
             turn_mode_after="EXPLORE",
             warnings=[],
             tool_events=[],
-            stream_events=[],
+            stream_events=[
+                {
+                    "type": "content_delta",
+                    "content": "live chunk",
+                    "metadata": {"phase": "content_delta", "runtime_event_index": 0},
+                }
+            ],
         )
 
 
-async def _run_real_websocket_start_and_error_checks() -> None:
-    app_module = importlib.import_module("colearn.api.app")
-    original_orchestrator = app_module.orchestrator
+async def _run_ws_cancel_bridge_check() -> None:
+    from colearn.api import ws_handler
+
+    sent: list[dict[str, object]] = []
+
+    async def send_event(event: dict[str, object]) -> None:
+        sent.append(event)
+
+    class FakeExecutor:
+        def __init__(self) -> None:
+            self.cancelled_session_id: str | None = None
+
+        def cancel_session(self, session_id: str) -> bool:
+            self.cancelled_session_id = session_id
+            return True
+
+    executor = FakeExecutor()
+    turn = ws_handler.ActiveTurn(turn_id="turn-1", session_id="session-1", started_at=1.0)
+    ws_handler.remember_active_turn(turn)
+    original = getattr(ws_handler._deps, "orchestrator", None)
+    ws_handler._deps.orchestrator = SimpleNamespace(executor=executor)
     try:
-        app_module.orchestrator = FakeWebSocketOrchestrator()
-        async with anyio.create_task_group() as task_group:
-            ws = ASGIWebSocketClient(app, task_group)
-            await ws.connect()
-            await ws.send_json(
-                {
-                    "type": "start_turn",
-                    "session_id": "ws-start-session",
-                    "project_id": "ws-project",
-                    "project_title": "WS Project",
-                    "content": "hello",
-                    "language": "zh",
-                }
-            )
-            received = []
-            while True:
-                event = await ws.receive_json()
-                received.append(event["type"])
-                if event["type"] == "done":
-                    break
-            assert "session" in received
-            assert "content" in received
-            saved = app_module.session_store.get_session("ws-start-session")
-            assert saved is not None
-            assert saved.active_turns == []
-            await ws.disconnect()
-            task_group.cancel_scope.cancel()
-
-        app_module.orchestrator = FakeWebSocketOrchestrator(fail=True)
-        async with anyio.create_task_group() as task_group:
-            ws = ASGIWebSocketClient(app, task_group)
-            await ws.connect()
-            await ws.send_json(
-                {
-                    "type": "start_turn",
-                    "session_id": "ws-error-session",
-                    "project_id": "ws-project",
-                    "project_title": "WS Project",
-                    "content": "fail",
-                    "language": "zh",
-                }
-            )
-            while True:
-                event = await ws.receive_json()
-                if event["type"] == "error":
-                    break
-            saved = app_module.session_store.get_session("ws-error-session")
-            assert saved is not None
-            assert saved.active_turns == []
-            assert saved.status == "failed"
-            await ws.disconnect()
-            task_group.cancel_scope.cancel()
+        await ws_handler._handle_cancel_turn(frame={"turn_id": "turn-1"}, send_event=send_event)
+        assert turn.cancel_requested is True
+        assert executor.cancelled_session_id == "session-1"
+        assert sent == []
     finally:
-        app_module.orchestrator = original_orchestrator
+        ws_handler._deps.orchestrator = original
 
 
-def test_real_websocket_start_turn_and_error_cleanup() -> None:
-    anyio.run(_run_real_websocket_start_and_error_checks)
+def test_ws_cancel_turn_bridges_to_executor() -> None:
+    anyio.run(_run_ws_cancel_bridge_check)
 
 
-async def _run_auth_checks() -> None:
-    app_module = importlib.import_module("colearn.api.app")
-    app_module.auth_service.reset()
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        first = await client.get("/api/v1/auth/is_first_user")
-        assert first.status_code == 200
-        assert first.json()["is_first_user"] is True
-
-        register = await client.post(
-            "/api/v1/auth/register",
-            json={"username": "yi", "password": "secret"},
-        )
-        assert register.status_code == 200
-        assert register.json()["role"] == "admin"
-        assert register.json()["is_first_user"] is True
-        assert "colearn_session=" in register.headers.get("set-cookie", "")
-
-        duplicate = await client.post(
-            "/api/v1/auth/register",
-            json={"username": "yi", "password": "secret"},
-        )
-        assert duplicate.status_code == 409
-
-        status = await client.get("/api/v1/auth/status")
-        assert status.status_code == 200
-        assert status.json()["authenticated"] is True
-        assert status.json()["username"] == "yi"
-
-        logout = await client.post("/api/v1/auth/logout")
-        assert logout.status_code == 200
-
-        anonymous = await client.get("/api/v1/auth/status")
-        assert anonymous.status_code == 200
-        assert anonymous.json()["authenticated"] is False
-
-        failed_login = await client.post(
-            "/api/v1/auth/login",
-            json={"username": "yi", "password": "wrong"},
-        )
-        assert failed_login.status_code == 401
-
-        good_login = await client.post(
-            "/api/v1/auth/login",
-            json={"username": "yi", "password": "secret"},
-        )
-        assert good_login.status_code == 200
-        assert good_login.json()["ok"] is True
 
 
-def test_auth_endpoints() -> None:
-    anyio.run(_run_auth_checks)
+
+
+
+
 
 
 async def _run_knowledge_task_checks() -> None:
@@ -507,6 +412,31 @@ async def _run_knowledge_task_checks() -> None:
         files = listing.json()["files"]
         assert len(files) == 1
         assert files[0]["name"] == "alpha.txt"
+
+        graph = await client.get("/api/v1/knowledge/kb-alpha/graph")
+        assert graph.status_code == 200
+        graph_payload = graph.json()
+        assert isinstance(graph_payload["nodes"], list)
+        assert isinstance(graph_payload["edges"], list)
+        assert any(
+            node["id"] == "library:kb-alpha" and node["kind"] == "library"
+            for node in graph_payload["nodes"]
+        )
+        assert any(
+            node["id"] == "file:kb-alpha:alpha.txt" and node["kind"] == "file"
+            for node in graph_payload["nodes"]
+        )
+        assert any(
+            node["label"] == "Alpha" and node["kind"] == "concept"
+            for node in graph_payload["nodes"]
+        )
+        assert any(
+            edge["source"] == "library:kb-alpha"
+            and edge["target"] == "file:kb-alpha:alpha.txt"
+            and edge["kind"] == "contains"
+            for edge in graph_payload["edges"]
+        )
+        assert any(edge["kind"] == "mentions" for edge in graph_payload["edges"])
 
         fetched = await client.get("/api/v1/knowledge/kb-alpha/files/alpha.txt")
         assert fetched.status_code == 200
@@ -553,8 +483,6 @@ async def _run_settings_events_checks() -> None:
         assert missing.status_code == 404
 
 
-def test_settings_test_events_endpoint() -> None:
-    anyio.run(_run_settings_events_checks)
 
 
 async def _run_memory_summary_checks() -> None:

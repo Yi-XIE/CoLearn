@@ -13,6 +13,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     listSessions: vi.fn(),
     deleteSession: vi.fn(),
     fetchWebuiThread: vi.fn(),
+    updateSessionTitle: vi.fn(),
   };
 });
 
@@ -59,21 +60,22 @@ describe("useSessions", () => {
     vi.mocked(api.listSessions).mockReset();
     vi.mocked(api.deleteSession).mockReset();
     vi.mocked(api.fetchWebuiThread).mockReset();
+    vi.mocked(api.updateSessionTitle).mockReset();
   });
 
   it("removes a session from the local list after delete succeeds", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
         preview: "Alpha",
       },
       {
-        key: "websocket:chat-b",
-        channel: "websocket",
+        key: "chat-b",
+        channel: "",
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
@@ -89,19 +91,19 @@ describe("useSessions", () => {
     await waitFor(() => expect(result.current.sessions).toHaveLength(2));
 
     await act(async () => {
-      await result.current.deleteChat("websocket:chat-a");
+      await result.current.deleteChat("chat-a");
     });
 
-    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a");
-    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
+    expect(api.deleteSession).toHaveBeenCalledWith("tok", "chat-a");
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["chat-b"]);
   });
 
   it("refreshes sessions when the websocket reports a session update", async () => {
     vi.mocked(api.listSessions)
       .mockResolvedValueOnce([
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
@@ -110,8 +112,8 @@ describe("useSessions", () => {
       ])
       .mockResolvedValueOnce([
         {
-          key: "websocket:chat-a",
-          channel: "websocket",
+          key: "chat-a",
+          channel: "",
           chatId: "chat-a",
           createdAt: "2026-04-16T10:00:00Z",
           updatedAt: "2026-04-16T10:01:00Z",
@@ -133,6 +135,85 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.sessions[0]?.title).toBe("生成的小标题"));
     expect(api.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an optimistic new session visible until the server persists it", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          key: "chat-new",
+          channel: "",
+          chatId: "chat-new",
+          createdAt: "2026-04-16T10:00:00Z",
+          updatedAt: "2026-04-16T10:00:00Z",
+          title: "latest session",
+          preview: "first message",
+        },
+      ]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-new");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.createChat();
+    });
+
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["chat-new"]);
+    expect(result.current.sessions[0]?.title).toBe("");
+
+    act(() => {
+      client.emitSessionUpdate("chat-new");
+    });
+
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["chat-new"]);
+    expect(result.current.sessions[0]?.title).toBe("");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    await waitFor(() => expect(result.current.sessions[0]?.title).toBe("latest session"));
+  });
+
+  it("keeps the newest persisted session at the top even if the backend returns insertion order", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        key: "chat-old",
+        channel: "",
+        chatId: "chat-old",
+        createdAt: "2026-05-22T10:00:00.000Z",
+        updatedAt: "2026-05-22T10:01:00.000Z",
+        title: "older",
+        preview: "",
+      },
+      {
+        key: "chat-new",
+        channel: "",
+        chatId: "chat-new",
+        createdAt: "2026-05-22T10:20:00.000Z",
+        updatedAt: "2026-05-22T10:21:00.000Z",
+        title: "newer",
+        preview: "",
+      },
+    ]);
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions.map((session) => session.key)).toEqual([
+      "chat-new",
+      "chat-old",
+    ]);
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {
@@ -158,7 +239,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-media"), {
+    const { result } = renderHook(() => useSessionHistory("chat-media"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -193,7 +274,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-video"), {
+    const { result } = renderHook(() => useSessionHistory("chat-video"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -220,7 +301,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-reasoning"), {
+    const { result } = renderHook(() => useSessionHistory("chat-reasoning"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -249,7 +330,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-tools"), {
+    const { result } = renderHook(() => useSessionHistory("chat-tools"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -280,7 +361,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-pending"), {
+    const { result } = renderHook(() => useSessionHistory("chat-pending"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -297,7 +378,7 @@ describe("useSessions", () => {
       ],
     });
 
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-done"), {
+    const { result } = renderHook(() => useSessionHistory("chat-done"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -309,7 +390,7 @@ describe("useSessions", () => {
   it("treats missing transcript (404) as empty history", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue(null);
 
-    const { result } = renderHook(() => useSessionHistory("websocket:new-chat"), {
+    const { result } = renderHook(() => useSessionHistory("new-chat"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -322,8 +403,8 @@ describe("useSessions", () => {
   it("keeps the session in the list when delete fails", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
@@ -340,10 +421,46 @@ describe("useSessions", () => {
 
     await expect(
       act(async () => {
-        await result.current.deleteChat("websocket:chat-a");
+        await result.current.deleteChat("chat-a");
       }),
     ).rejects.toThrow("boom");
 
-    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["chat-a"]);
+  });
+
+  it("renames a session in place after the server accepts the update", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        key: "chat-a",
+        channel: "",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "",
+        preview: "This is the first user sentence that should become the default title",
+      },
+    ]);
+    vi.mocked(api.updateSessionTitle).mockResolvedValue({
+      key: "chat-a",
+      channel: "",
+      chatId: "chat-a",
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:05:00Z",
+      title: "Custom name",
+      preview: "This is the first user sentence that should become the default title",
+    });
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.renameChat("chat-a", "Custom name");
+    });
+
+    expect(api.updateSessionTitle).toHaveBeenCalledWith("tok", "chat-a", "Custom name");
+    expect(result.current.sessions[0]?.title).toBe("Custom name");
   });
 });

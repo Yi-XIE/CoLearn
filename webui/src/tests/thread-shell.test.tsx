@@ -74,8 +74,8 @@ function wrap(client: ReturnType<typeof makeClient>, children: ReactNode) {
 
 function session(chatId: string) {
   return {
-    key: `websocket:${chatId}`,
-    channel: "websocket" as const,
+    key: chatId,
+    channel: "" as const,
     chatId,
     createdAt: null,
     updatedAt: null,
@@ -250,7 +250,7 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByText("delete me cleanly")).not.toBeInTheDocument();
     });
-    expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("先告诉我你想从哪里开始")).toBeInTheDocument();
   });
 
   it("creates a chat only when the blank landing sends a first message", async () => {
@@ -346,7 +346,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return httpJson(
             transcriptFromSimpleMessages([
               { role: "user", content: "old question" },
@@ -394,9 +394,9 @@ describe("ThreadShell", () => {
 
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument(),
+      expect(screen.getByPlaceholderText("先告诉我你想从哪里开始")).toBeInTheDocument(),
     );
-    const input = screen.getByPlaceholderText("Ask anything...");
+    const input = screen.getByPlaceholderText("先告诉我你想从哪里开始");
     expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
@@ -494,7 +494,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return httpJson(transcriptFromSimpleMessages([{ role: "user", content: "hello" }]));
         }
         return {
@@ -568,7 +568,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           historyCalls += 1;
           return httpJson(
             transcriptFromSimpleMessages(
@@ -616,7 +616,74 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("live half-parsed | markdown")).toBeInTheDocument());
     expect(screen.queryByText("canonical markdown answer")).not.toBeInTheDocument();
-    expect(historyCalls).toBe(1);
+  });
+
+  it("keeps a just-sent user message when canonical history refresh lags behind", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/v1/sessions/chat-a")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [
+                    { role: "user", content: "older question" },
+                    { role: "assistant", content: "older answer" },
+                  ]
+                : [
+                    { role: "user", content: "older question" },
+                    { role: "assistant", content: "older answer" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("older answer")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "do not disappear" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        "chat-a",
+        "do not disappear",
+        undefined,
+      ),
+    );
+    expect(screen.getByText("do not disappear")).toBeInTheDocument();
+
+    await act(async () => {
+      client._emitSessionUpdate("chat-a");
+    });
+
+    await waitFor(() => expect(historyCalls).toBeGreaterThan(1));
+    expect(screen.getByText("do not disappear")).toBeInTheDocument();
+    expect(screen.getByText("older answer")).toBeInTheDocument();
   });
 
   it("scrolls to the bottom after loading a session from the blank new-chat page", async () => {
@@ -628,7 +695,7 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return httpJson(
             transcriptFromSimpleMessages([
               { role: "user", content: "question" },
@@ -686,32 +753,9 @@ describe("ThreadShell", () => {
     }
   });
 
-  it("opens slash commands on the blank welcome page", async () => {
+  it("keeps the blank welcome page free of remote slash-command fetches", async () => {
     const client = makeClient();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/api/commands")) {
-          return httpJson({
-            commands: [
-              {
-                command: "/history",
-                title: "Show conversation history",
-                description: "Print the last N persisted messages.",
-                icon: "history",
-                arg_hint: "[n]",
-              },
-            ],
-          });
-        }
-        return {
-          ok: false,
-          status: 404,
-          json: async () => ({}),
-        };
-      }),
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     render(
       wrap(
@@ -725,19 +769,17 @@ describe("ThreadShell", () => {
       ),
     );
 
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+    await waitFor(() => expect(screen.getByText("What can I do for you?")).toBeInTheDocument());
+    expect(fetchSpy).not.toHaveBeenCalledWith(
       "/api/commands",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
-    ));
+      expect.anything(),
+    );
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "/" },
     });
 
-    expect(screen.getByRole("listbox", { name: "Slash commands" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
   it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
@@ -826,21 +868,22 @@ describe("ThreadShell", () => {
     let resolveChatB:
       | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
       | null = null;
+    const pendingChatB = new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve) => {
+      resolveChatB = resolve;
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/webui-thread")) {
+        if (url.includes("/api/v1/sessions/chat-a")) {
           return Promise.resolve(
             httpJson(
               transcriptFromSimpleMessages([{ role: "assistant", content: "from chat a" }]),
             ),
           );
         }
-        if (url.includes("websocket%3Achat-b/webui-thread")) {
-          return new Promise((resolve) => {
-            resolveChatB = resolve;
-          });
+        if (url.includes("/api/v1/sessions/chat-b")) {
+          return pendingChatB;
         }
         return Promise.resolve({
           ok: false,

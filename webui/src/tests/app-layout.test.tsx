@@ -1,6 +1,7 @@
 ﻿import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 import type { ChatSummary } from "@/lib/types";
 
 const connectSpy = vi.fn();
@@ -67,7 +68,7 @@ vi.mock("@/lib/nanobot-client", () => {
     updateUrl = vi.fn();
   }
 
-  return { NanobotClient: MockClient };
+  return { NanobotClient: MockClient, ColearnWsClient: MockClient };
 });
 
 import App from "@/App";
@@ -80,6 +81,8 @@ describe("App layout", () => {
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
     toggleThemeSpy.mockReset();
+    vi.mocked(fetchBootstrap).mockClear();
+    vi.mocked(deriveWsUrl).mockClear();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -93,6 +96,9 @@ describe("App layout", () => {
     const { container } = render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(fetchBootstrap).toHaveBeenCalledWith("", "");
+    expect(deriveWsUrl).toHaveBeenCalledWith("/", "tok");
+    expect(connectSpy).toHaveBeenCalledTimes(1);
 
     const main = container.querySelector("main");
     expect(main).toBeInTheDocument();
@@ -107,16 +113,16 @@ describe("App layout", () => {
   it("switches to the next session when deleting the active chat", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
         preview: "First chat",
       },
       {
-        key: "websocket:chat-b",
-        channel: "websocket",
+        key: "chat-b",
+        channel: "",
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
@@ -145,7 +151,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() =>
-      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a"),
+      expect(deleteChatSpy).toHaveBeenCalledWith("chat-a"),
     );
     await waitFor(() =>
       expect(
@@ -159,8 +165,8 @@ describe("App layout", () => {
   it("opens the settings view from the sidebar footer", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
@@ -170,44 +176,119 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        if (String(input).includes("/api/v1/settings")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "auto",
-                resolved_provider: "openai",
-                has_api_key: true,
+              ui: {
+                theme: "light",
+                language: "zh",
               },
-              providers: [
-                {
-                  name: "openai",
-                  label: "OpenAI",
-                  configured: true,
-                  api_key_hint: "open-key",
+              catalog: {
+                services: {
+                  llm: {
+                    active_profile_id: "openai",
+                    active_model_id: "gpt-4o",
+                    profiles: [
+                      {
+                        id: "openai",
+                        name: "OpenAI",
+                        binding: "openai",
+                        provider: "openai",
+                        api_key: "open-key",
+                        models: [
+                          {
+                            id: "gpt-4o",
+                            name: "openai/gpt-4o",
+                            model: "openai/gpt-4o",
+                          },
+                        ],
+                      },
+                      {
+                        id: "openrouter",
+                        name: "OpenRouter",
+                        binding: "openrouter",
+                        provider: "openrouter",
+                        base_url: "https://openrouter.ai/api/v1",
+                        models: [
+                          {
+                            id: "openrouter-auto",
+                            name: "openrouter/auto",
+                            model: "openrouter/auto",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  search: {
+                    active_profile_id: "brave",
+                    profiles: [
+                      {
+                        id: "brave",
+                        name: "Brave Search",
+                        provider: "brave",
+                        api_key: "brave-key",
+                      },
+                    ],
+                  },
                 },
-                {
-                  name: "openrouter",
-                  label: "OpenRouter",
-                  configured: false,
-                  default_api_base: "https://openrouter.ai/api/v1",
-                },
-              ],
-              web_search: {
-                provider: "brave",
-                api_key_hint: "brave-key",
-                base_url: null,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
+              },
+              providers: {
+                search: [
+                  { value: "duckduckgo", label: "DuckDuckGo", credential: "none" },
+                  { value: "brave", label: "Brave Search", credential: "api_key" },
                 ],
               },
               runtime: {
-                config_path: "/tmp/config.json",
+                config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json",
               },
-              requires_restart: false,
+            }),
+          };
+        }
+        if (String(input).includes("/api/v1/settings/catalog")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              catalog: {
+                services: {
+                  llm: {
+                    active_profile_id: "openai",
+                    active_model_id: "gpt-4o",
+                    profiles: [
+                      {
+                        id: "openai",
+                        name: "OpenAI",
+                        binding: "openai",
+                        provider: "openai",
+                        api_key: "open-key",
+                        models: [
+                          {
+                            id: "gpt-4o",
+                            name: "openai/gpt-4o",
+                            model: "openai/gpt-4o",
+                          },
+                        ],
+                      },
+                      {
+                        id: "openrouter",
+                        name: "OpenRouter",
+                        binding: "openrouter",
+                        provider: "openrouter",
+                        base_url: "https://openrouter.ai/api/v1",
+                        models: [
+                          {
+                            id: "openrouter-auto",
+                            name: "openrouter/auto",
+                            model: "openrouter/auto",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
             }),
           };
         }
@@ -223,19 +304,23 @@ describe("App layout", () => {
 
     expect(await screen.findByText("设置")).toBeInTheDocument();
     expect(document.title).toBe("设置 - CoLearn");
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-    expect(screen.getByText("CoLearn mode")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Web Search")).toBeInTheDocument();
+    expect(
+      screen.getByText("D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json"),
+    ).toBeInTheDocument();
     expect(screen.getByText("连接")).toBeInTheDocument();
-    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("OpenAI"));
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(await screen.findByText("OpenRouter")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("OpenAI")[1]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]!);
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-openai-key" },
     });
     fireEvent.click(screen.getByText("OpenRouter"));
-    fireEvent.click(screen.getByText("OpenAI"));
-    expect(screen.getByRole("button", { name: "重启运行时" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("OpenAI")[1]!);
+    expect(screen.getAllByRole("button", { name: "Save" }).length).toBeGreaterThan(0);
   });
 
   it("renders real knowledge garden data from the API", async () => {
@@ -271,6 +356,50 @@ describe("App layout", () => {
             }),
           };
         }
+        if (url.includes("/api/v1/knowledge/kb-math/graph")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              nodes: [
+                {
+                  id: "library:kb-math",
+                  label: "线性代数资料库",
+                  kind: "library",
+                  metadata: { library_id: "kb-math" },
+                },
+                {
+                  id: "file:kb-math:api-graph.md",
+                  label: "api-graph.md",
+                  kind: "file",
+                  metadata: { library_id: "kb-math", path: "/tmp/api-graph.md" },
+                },
+                {
+                  id: "concept:matrix",
+                  label: "矩阵概念",
+                  kind: "concept",
+                  metadata: { source: "test" },
+                },
+              ],
+              edges: [
+                {
+                  id: "edge:contains:library:kb-math:file:kb-math:api-graph.md",
+                  source: "library:kb-math",
+                  target: "file:kb-math:api-graph.md",
+                  kind: "contains",
+                  metadata: {},
+                },
+                {
+                  id: "edge:mentions:file:kb-math:api-graph.md:concept:matrix",
+                  source: "file:kb-math:api-graph.md",
+                  target: "concept:matrix",
+                  kind: "mentions",
+                  metadata: {},
+                },
+              ],
+            }),
+          };
+        }
         return { ok: false, status: 404, json: async () => ({}) };
       }),
     );
@@ -282,6 +411,7 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "知识花园" }));
 
     expect(await screen.findAllByText("线性代数资料库")).not.toHaveLength(0);
+    expect(await screen.findByText("矩阵概念")).toBeInTheDocument();
     expect(await screen.findByText("notes.md")).toBeInTheDocument();
   });
 
@@ -327,8 +457,10 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "记忆" }));
-    expect(await screen.findByText("继续验证关键结论。")).toBeInTheDocument();
-    expect(await screen.findByText("缺少证据支持")).toBeInTheDocument();
+    expect(await screen.findByText("学习摘要")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("已沉淀的长期记忆")).toBeInTheDocument();
+    expect(screen.getByText("个人画像")).toBeInTheDocument();
+    expect(screen.getByText("启用记忆")).toBeInTheDocument();
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "技能" }));
     expect(await screen.findByText("review")).toBeInTheDocument();
@@ -338,16 +470,16 @@ describe("App layout", () => {
   it("returns from settings to the blank start page when no session was active", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",
         preview: "First chat",
       },
       {
-        key: "websocket:chat-b",
-        channel: "websocket",
+        key: "chat-b",
+        channel: "",
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
@@ -357,31 +489,58 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        if (String(input).includes("/api/v1/settings")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "openai",
-                resolved_provider: "openai",
-                has_api_key: true,
+              ui: {
+                theme: "light",
+                language: "zh",
               },
-              providers: [{ name: "openai", label: "OpenAI", configured: true }],
-              web_search: {
-                provider: "duckduckgo",
-                api_key_hint: null,
-                base_url: null,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
+              catalog: {
+                services: {
+                  llm: {
+                    active_profile_id: "openai",
+                    active_model_id: "gpt-4o",
+                    profiles: [
+                      {
+                        id: "openai",
+                        name: "OpenAI",
+                        binding: "openai",
+                        provider: "openai",
+                        api_key: "open-key",
+                        models: [
+                          {
+                            id: "gpt-4o",
+                            name: "openai/gpt-4o",
+                            model: "openai/gpt-4o",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  search: {
+                    active_profile_id: "duckduckgo",
+                    profiles: [
+                      {
+                        id: "duckduckgo",
+                        name: "DuckDuckGo",
+                        provider: "duckduckgo",
+                      },
+                    ],
+                  },
+                },
+              },
+              providers: {
+                search: [
+                  { value: "duckduckgo", label: "DuckDuckGo", credential: "none" },
+                  { value: "brave", label: "Brave Search", credential: "api_key" },
                 ],
               },
               runtime: {
-                config_path: "/tmp/config.json",
+                config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json",
               },
-              requires_restart: false,
             }),
           };
         }
@@ -407,8 +566,8 @@ describe("App layout", () => {
   it("filters sidebar sessions through the lightweight search row", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-alpha",
-        channel: "websocket",
+        key: "chat-alpha",
+        channel: "",
         chatId: "chat-alpha",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -416,8 +575,8 @@ describe("App layout", () => {
         preview: "Project planning notes",
       },
       {
-        key: "websocket:chat-beta",
-        channel: "websocket",
+        key: "chat-beta",
+        channel: "",
         chatId: "chat-beta",
         createdAt: "2026-04-15T10:00:00Z",
         updatedAt: "2026-04-15T10:00:00Z",
@@ -450,8 +609,8 @@ describe("App layout", () => {
   it("opens a blank start page without creating an empty chat", async () => {
     mockSessions = [
       {
-        key: "websocket:chat-a",
-        channel: "websocket",
+        key: "chat-a",
+        channel: "",
         chatId: "chat-a",
         createdAt: "2026-04-16T10:00:00Z",
         updatedAt: "2026-04-16T10:00:00Z",

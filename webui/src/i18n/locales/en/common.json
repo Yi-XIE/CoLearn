@@ -1,41 +1,41 @@
 {
   "app": {
-    "brand": "nanobot",
+    "brand": "CoLearn",
     "loading": {
-      "connecting": "Connecting to nanobot…",
-      "boot": "Loading nanobot…"
+      "connecting": "Connecting to CoLearn…",
+      "boot": "Loading CoLearn…"
     },
     "error": {
-      "title": "Couldn't reach nanobot",
-      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
+      "title": "Couldn't reach CoLearn",
+      "gatewayHint": "Make sure the CoLearn server is running and that this page is open on the same machine."
     },
     "auth": {
-      "title": "Authentication required",
-      "hint": "Enter the secret configured as tokenIssueSecret in your gateway config.",
-      "placeholder": "Password",
+      "title": "Local connection",
+      "hint": "This local CoLearn server does not require a password on the same machine.",
+      "placeholder": "No password required",
       "submit": "Connect",
-      "invalid": "Invalid password. Try again."
+      "invalid": "Connection failed. Try again."
     },
     "account": {
       "section": "Account",
-      "logoutHint": "Disconnect this browser from the gateway.",
+      "logoutHint": "Disconnect this browser from the current CoLearn session.",
       "logout": "Sign out"
     },
     "system": {
       "section": "System",
-      "restartHint": "Restart nanobot to apply runtime changes.",
-      "restart": "Restart nanobot",
+      "restartHint": "Restart the CoLearn server to apply runtime changes.",
+      "restart": "Restart CoLearn",
       "restarting": "Restarting..."
     },
     "restart": {
       "completed": "Restart completed in {{seconds}}s."
     },
     "documentTitle": {
-      "base": "nanobot",
-      "chat": "{{title}} · nanobot"
+      "base": "CoLearn",
+      "chat": "{{title}} · CoLearn"
     },
     "meta": {
-      "description": "nanobot web UI — chat with your nanobot workspace."
+      "description": "CoLearn web UI — chat with your local learning workspace."
     }
   },
   "sidebar": {
@@ -77,15 +77,15 @@
       "language": "Language",
       "provider": "Provider",
       "model": "Model",
-      "restart": "Restart nanobot",
+      "restart": "Restart CoLearn",
       "configPath": "Config path"
     },
     "help": {
       "theme": "Switch between light and dark appearance.",
       "language": "Choose the language used by the WebUI.",
       "provider": "Select the provider that should serve new model requests.",
-      "model": "Set the default model name used by nanobot.",
-      "configPath": "The gateway configuration file currently in use."
+      "model": "Set the default model name used by CoLearn.",
+      "configPath": "The CoLearn server configuration file currently in use."
     },
     "values": {
       "light": "Light",
@@ -96,7 +96,7 @@
       "loading": "Loading settings...",
       "loadError": "Could not load settings",
       "unsaved": "Unsaved changes.",
-      "savedRestart": "Saved. Restart nanobot to apply."
+      "savedRestart": "Saved. Restart CoLearn to apply."
     },
     "actions": {
       "save": "Save",
@@ -105,7 +105,7 @@
       "cancel": "Cancel"
     },
     "byok": {
-      "description": "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be selected in General.",
+      "description": "Bring your own provider keys. CoLearn reads these values from the current config, and only configured providers can be selected in General.",
       "configured": "Configured",
       "notConfigured": "Not configured",
       "configuredSection": "Configured",
@@ -152,6 +152,8 @@
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
     "actions": "Chat actions for {{title}}",
+    "rename": "Rename",
+    "renamePrompt": "Rename this chat",
     "delete": "Delete",
     "newChat": "New chat",
     "groups": {
@@ -207,7 +209,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "Design an app icon",
-          "prompt": "Generate a clean 1:1 app icon for nanobot: friendly robot, simple vector style, soft blue and white palette, no text."
+          "prompt": "Generate a clean 1:1 app icon for CoLearn: friendly robot, simple vector style, soft blue and white palette, no text."
         },
         "sticker": {
           "title": "Make a sticker",
@@ -290,8 +292,8 @@
             "description": "Cancel the active agent turn for this chat."
           },
           "restart": {
-            "title": "Restart nanobot",
-            "description": "Restart the bot process in place."
+            "title": "Restart CoLearn",
+            "description": "Restart the local CoLearn server in place."
           },
           "status": {
             "title": "Show status",

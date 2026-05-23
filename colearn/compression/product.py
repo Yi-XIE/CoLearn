@@ -19,12 +19,15 @@ class ProductCompressionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+from colearn.config.defaults import Defaults
+
+
 class ProductCompressionBridge:
     def __init__(
         self,
         *,
-        max_summary_chars: int = 240,
-        max_continuation_chars: int = 180,
+        max_summary_chars: int = Defaults.PRODUCT_MAX_SUMMARY_CHARS,
+        max_continuation_chars: int = Defaults.PRODUCT_MAX_CONTINUATION_CHARS,
     ) -> None:
         self.max_summary_chars = max_summary_chars
         self.max_continuation_chars = max_continuation_chars

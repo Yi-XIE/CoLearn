@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from colearn.nanobot_bootstrap import ensure_nanobot_on_path
+
+ensure_nanobot_on_path()
+
 from nanobot.agent.context import ContextBuilder
 
 from colearn.learning.turn_contract import LearningTurnRequest
+from colearn.paths import colearn_repo_root
 
 
 def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
     board = request.board_facts
     snapshot = request.state_projection
+    retrieval_metadata = dict(request.metadata.get("retrieval") or {})
     lines: list[str] = []
 
     active_label = str(
@@ -55,16 +61,84 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
     if evidence_count:
         lines.append(f"Evidence refs attached: {evidence_count}")
 
+    retrieval_focus = dict(
+        retrieval_metadata.get("focus")
+        or request.metadata.get("retrieval_focus")
+        or {}
+    )
+    if retrieval_focus:
+        focus_bits: list[str] = []
+        turn_mode = str(retrieval_focus.get("turn_mode") or "").strip()
+        if turn_mode:
+            focus_bits.append(f"mode={turn_mode}")
+        active_node_id = str(retrieval_focus.get("active_node_id") or "").strip()
+        if active_node_id:
+            focus_bits.append(f"node={active_node_id}")
+        default_query = str(retrieval_focus.get("default_query") or "").strip()
+        if default_query:
+            focus_bits.append(f"query={default_query}")
+        if focus_bits:
+            lines.append(f"Retrieval focus: {'; '.join(focus_bits)}")
+
+    prefetched = list(
+        retrieval_metadata.get("prefetched_references")
+        or request.metadata.get("prefetched_references")
+        or []
+    )
+    if prefetched:
+        lines.append(f"Prefetched references: {len(prefetched)}")
+
+    retrieval_reason = str(
+        retrieval_metadata.get("reason")
+        or request.metadata.get("retrieval_reason")
+        or ""
+    ).strip()
+    if retrieval_reason:
+        lines.append(f"Retrieval reason: {retrieval_reason}")
+
+    support_bundle = list(
+        retrieval_metadata.get("prompt_support_bundle")
+        or request.metadata.get("prompt_support_bundle")
+        or []
+    )
+    if support_bundle:
+        support_lines = ["Prompt support bundle:"]
+        for item in support_bundle[:4]:
+            support_type = str(item.get("support_type") or "reference").strip()
+            summary = str(item.get("summary") or "").strip()
+            source = str(item.get("source_ref") or item.get("source_path") or "").strip()
+            chunk_id = str(item.get("chunk_id") or "").strip()
+            target_type = str(item.get("target_type") or (item.get("support_target") or {}).get("type") or "").strip()
+            target_label = str(
+                item.get("target_label")
+                or (item.get("support_target") or {}).get("label")
+                or (item.get("support_target") or {}).get("id")
+                or ""
+            ).strip()
+            source_bits = "#".join(part for part in [source, chunk_id] if part)
+            target_bits = " ".join(part for part in [target_type, target_label] if part)
+            support_lines.append(
+                f"- [{support_type}] {summary} (source: {source_bits}; target: {target_bits})"
+            )
+        lines.append("\n".join(support_lines))
+
     return lines
 
 
 def build_turn_prompt(request: LearningTurnRequest) -> str:
     workspace = Path(str(request.metadata.get("workspace") or ".")).resolve()
-    base_prompt = ContextBuilder(workspace).build_system_prompt()
-    colearn_doc = workspace / "COLEARN.md"
+    # skill_names is passed but currently unused by nanobot's ContextBuilder —
+    # always-skills auto-activate via frontmatter `always: true`, and non-always
+    # skills appear as summaries for the agent to read_file on demand.
+    base_prompt = ContextBuilder(workspace).build_system_prompt(
+        skill_names=request.requested_skills or None,
+        channel="colearn",
+    )
     colearn_context = ""
-    if colearn_doc.exists():
-        colearn_context = colearn_doc.read_text(encoding="utf-8").strip()
+    for colearn_doc in (workspace / "COLEARN.md", colearn_repo_root() / "COLEARN.md"):
+        if colearn_doc.exists():
+            colearn_context = colearn_doc.read_text(encoding="utf-8").strip()
+            break
     lines = [
         base_prompt,
         f"## COLEARN.md\n\n{colearn_context}" if colearn_context else "",

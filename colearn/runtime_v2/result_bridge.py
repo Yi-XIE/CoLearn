@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from colearn.learning.response_contract import LearningTurnResult
+from colearn.learning.signal_extractor import extract_learning_signals
 from colearn.learning.turn_contract import LearningTurnRequest
 
 
@@ -15,6 +16,7 @@ def normalize_learning_turn_result(
     learning_result: dict[str, Any] | None = None,
 ) -> LearningTurnResult:
     payload = dict(learning_result or {})
+    retrieval_metadata = dict(request.metadata.get("retrieval") or {})
     board_summary = {
         "turn_mode": request.turn_mode,
         "active_node_id": request.board_facts.current_progress.active_node_id,
@@ -35,23 +37,83 @@ def normalize_learning_turn_result(
         "source_readiness_before": str(request.metadata.get("source_readiness_before") or ""),
         "policy_restrictions": list(request.metadata.get("policy_restrictions") or []),
     }
-    payload.setdefault("runtime_v2", {})
-    if isinstance(payload["runtime_v2"], dict):
-        payload["runtime_v2"].setdefault("board_summary", board_summary)
-        payload["runtime_v2"].setdefault("turn_envelope", turn_envelope)
+    result_board = payload.get("board_after") or request.board_facts
+    retrieval_focus = dict(retrieval_metadata.get("focus") or {})
+    retrieval_query_context = dict(retrieval_metadata.get("query_context") or {})
+    retrieval_hits = list(retrieval_metadata.get("hits") or [])
+    retrieval_misses = list(retrieval_metadata.get("misses") or [])
+    retrieval_evidence_map = dict(retrieval_metadata.get("evidence_map") or {})
+    runtime_retrieval = {
+        "prefetched_references": list(retrieval_metadata.get("prefetched_references") or []),
+        "prompt_support_bundle": list(retrieval_metadata.get("prompt_support_bundle") or []),
+        "retrieval_focus": retrieval_focus,
+        "retrieval_query_context": retrieval_query_context,
+        "retrieval_reason": str(retrieval_metadata.get("reason") or ""),
+        "retrieval_hits": retrieval_hits,
+        "retrieval_misses": retrieval_misses,
+        "retrieval_evidence_map": retrieval_evidence_map,
+        "knowledge_support_summary": {
+            "active_node_id": result_board.current_progress.active_node_id,
+            "critical_blockers": [blocker.id for blocker in result_board.gaps_and_blockers.critical_blockers],
+            "evidence_ref_count": len(result_board.evidence_refs or []),
+            "retrieval_hit_count": len(retrieval_hits),
+        },
+        "blocker_support_refs": {
+            blocker.id: list(retrieval_evidence_map.get(blocker.id, []))
+            for blocker in result_board.gaps_and_blockers.critical_blockers
+        },
+        "continuation_retrieval_hint": {
+            "active_node_id": result_board.current_progress.active_node_id,
+            "evidence_refs": list(result_board.evidence_refs or []),
+            "retrieval_focus": retrieval_focus,
+            "retrieval_query_context": retrieval_query_context,
+        },
+    }
+    runtime_v2 = dict(payload.get("runtime_v2") or {})
+    runtime_v2["board_summary"] = board_summary
+    runtime_v2["turn_envelope"] = turn_envelope
+    runtime_v2["retrieval"] = runtime_retrieval
+    payload["runtime_v2"] = runtime_v2
     review_to_persist = dict(payload.get("review_to_persist") or {})
     board_patch = dict(payload.get("board_patch") or {})
     memory_events = list(payload.get("memory_events") or [])
     tool_events = list(payload.get("tool_events") or [])
     stream_events = list(payload.get("stream_events") or [])
     warnings = list(payload.get("warnings") or [])
+
+    # LLM-emitted learning_events take precedence; harness extracts heuristic
+    # signals from final_text as a fallback so the state machine never goes
+    # blind even if the LLM doesn't emit structured events. Dedupe by (kind,
+    # concept) — extracted ones are dropped if LLM already covered them.
+    payload_events = list(payload.get("learning_events") or [])
+
+    def _event_signature(event: Any) -> tuple[str, str]:
+        # LearningEvent dataclass uses .type/.payload; harness-extracted dicts
+        # use .kind/.payload — accept both.
+        if hasattr(event, "type"):
+            kind = str(getattr(event, "type", "") or "")
+            payload_ = getattr(event, "payload", {}) or {}
+        else:
+            kind = str(event.get("kind") or event.get("type") or "")
+            payload_ = event.get("payload") or {}
+        concept = str((payload_ or {}).get("concept") or "").lower()
+        return (kind, concept)
+
+    seen_signatures = {_event_signature(e) for e in payload_events}
+    merged_events = list(payload_events)
+    for event in extract_learning_signals(final_text):
+        signature = _event_signature(event)
+        if signature in seen_signatures or not signature[1]:
+            continue
+        merged_events.append(event)
+        seen_signatures.add(signature)
     return LearningTurnResult(
         final_text=final_text,
         next_explanation=str(payload.get("next_explanation") or ""),
         next_practice=list(payload.get("next_practice") or []),
         board_before=request.board_facts,
         board_after=payload.get("board_after") or request.board_facts,
-        learning_events=list(payload.get("learning_events") or []),
+        learning_events=merged_events,
         review_summary=str(payload.get("review_summary") or ""),
         turn_mode_before=str(request.metadata.get("turn_mode_before") or request.turn_mode),
         turn_mode_after=str(payload.get("turn_mode_after") or request.turn_mode),
@@ -71,10 +133,20 @@ def normalize_learning_turn_result(
             "enabled_tools": request.enabled_tools,
             "runtime_v2_board_summary": board_summary,
             "runtime_v2_turn_envelope": turn_envelope,
+            "runtime_v2_retrieval": runtime_retrieval,
             "turn_mode_before": turn_envelope["turn_mode_before"],
             "turn_mode_after": str(payload.get("turn_mode_after") or request.turn_mode),
             "base_board_version": turn_envelope["board_version_before"],
             "resolved_board_version": int((payload.get("board_after") or request.board_facts).board_version if hasattr(payload.get("board_after") or request.board_facts, "board_version") else request.board_facts.board_version),
-            "writeback_envelope": dict(payload.get("writeback_envelope") or {}),
+            "writeback_envelope": {
+                "turn_mode_before": turn_envelope["turn_mode_before"],
+                "turn_mode_after": str(payload.get("turn_mode_after") or request.turn_mode),
+                "base_board_version": turn_envelope["board_version_before"],
+                "resolved_board_version": int((payload.get("board_after") or request.board_facts).board_version if hasattr(payload.get("board_after") or request.board_facts, "board_version") else request.board_facts.board_version),
+                "event_types": [
+                    str(getattr(item, "type", "") or (item.get("type", "") if isinstance(item, dict) else ""))
+                    for item in merged_events
+                ],
+            },
         },
     )

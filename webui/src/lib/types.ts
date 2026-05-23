@@ -61,7 +61,7 @@ export interface AgentUIBlob {
   data?: unknown;
 }
 
-/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
+/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by the active session/chat id). */
 export interface GoalStateWsPayload {
   active: boolean;
   ui_summary?: string;
@@ -81,9 +81,9 @@ export interface ToolProgressEvent {
 }
 
 export interface ChatSummary {
-  /** Server-side session key, e.g. ``websocket:abcd-...``. */
+  /** Server-side session key, usually the raw ``session_id``. */
   key: string;
-  /** Local channel + chat_id parts derived from ``key`` for convenience. */
+  /** Legacy convenience fields; in CoLearn ``chatId`` usually matches the raw ``session_id``. */
   channel: string;
   chatId: string;
   createdAt: string | null;
@@ -92,8 +92,31 @@ export interface ChatSummary {
   preview: string;
 }
 
+export interface LearningSupportItem {
+  source_ref?: string;
+  source_path?: string;
+  title?: string;
+  chunk_id?: string;
+  support_type?: string;
+  summary?: string;
+  target_type?: string;
+  target_id?: string;
+  target_label?: string;
+  support_reason?: string;
+  confidence?: number;
+}
+
+export interface LearningSupportPayload {
+  prompt_support_bundle: LearningSupportItem[];
+  retrieval_hits: LearningSupportItem[];
+  retrieval_misses: Array<Record<string, unknown>>;
+  retrieval_evidence_map: Record<string, LearningSupportItem[]>;
+  retrieval_query_context: Record<string, unknown>;
+  continuation_retrieval_hint: Record<string, unknown>;
+}
+
 export interface BootstrapResponse {
-  token: string;
+  token?: string;
   ws_path: string;
   expires_in: number;
   model_name?: string | null;
@@ -164,6 +187,41 @@ export interface KnowledgeTaskResult {
   message: string;
 }
 
+export type KnowledgeGraphNodeKind =
+  | "library"
+  | "file"
+  | "concept"
+  | "lesson"
+  | "exercise"
+  | "evidence";
+
+export type KnowledgeGraphEdgeKind =
+  | "contains"
+  | "mentions"
+  | "covers"
+  | "practices"
+  | "supports";
+
+export interface KnowledgeGraphNode {
+  id: string;
+  label: string;
+  kind: KnowledgeGraphNodeKind;
+  metadata: Record<string, unknown>;
+}
+
+export interface KnowledgeGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: KnowledgeGraphEdgeKind;
+  metadata: Record<string, unknown>;
+}
+
+export interface KnowledgeGraphPayload {
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+}
+
 export interface MemorySummaryItem {
   label: string;
   detail: string;
@@ -176,11 +234,20 @@ export interface MemoryEventSummary {
   recorded_at: string;
 }
 
-export interface MemorySummaryPayload {
+export type MemoryDocumentName = "summary" | "profile";
+
+export interface MemoryDocPayload {
   summary: string;
   profile: string;
   summary_updated_at: string | null;
   profile_updated_at: string | null;
+}
+
+export interface MemoryRefreshPayload extends MemoryDocPayload {
+  changed: boolean;
+}
+
+export interface MemorySummaryPayload extends MemoryDocPayload {
   current_continuity: string;
   long_term_facts: MemorySummaryItem[];
   blockers: MemorySummaryItem[];
@@ -216,8 +283,8 @@ export type ConnectionStatus =
   | "error";
 
 export type InboundEvent =
-  | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string }
+  | { event: "ready"; chat_id: string; session_id?: string; client_id: string }
+  | { event: "attached"; chat_id: string; session_id?: string }
   | {
       event: "message";
       chat_id: string;
@@ -281,8 +348,8 @@ export type InboundEvent =
       chat_id: string;
       goal_state: GoalStateWsPayload;
     }
-  | { event: "session_updated"; chat_id: string }
-  | { event: "error"; chat_id?: string; detail?: string };
+  | { event: "session_updated"; chat_id: string; session_id?: string }
+  | { event: "error"; chat_id?: string; session_id?: string; detail?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
  *

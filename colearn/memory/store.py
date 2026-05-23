@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
+from colearn.config.defaults import Defaults
+from colearn.learning.events import MemoryEventKind
 from colearn.storage import JsonStateStore
 from colearn.storage.records import memory_event_from_record, memory_event_to_record
 
@@ -18,9 +20,15 @@ class MemoryEvent:
 
 
 class EventMemoryStore:
-    def __init__(self, state_store: JsonStateStore | None = None) -> None:
+    def __init__(
+        self,
+        state_store: JsonStateStore | None = None,
+        *,
+        max_events: int | None = None,
+    ) -> None:
         self._events: list[MemoryEvent] = []
         self._state_store = state_store or JsonStateStore()
+        self._max_events = max_events or Defaults.MEMORY_STORE_MAX_EVENTS
         self._load()
 
     def _load(self) -> None:
@@ -33,6 +41,8 @@ class EventMemoryStore:
             event = memory_event_from_record(item)
             if event.event_id:
                 self._events.append(event)
+        if len(self._events) > self._max_events:
+            self._events = self._events[-self._max_events:]
 
     def _dump(self) -> None:
         self._state_store.write_json(
@@ -42,6 +52,8 @@ class EventMemoryStore:
 
     def append(self, event: MemoryEvent) -> None:
         self._events.append(event)
+        if len(self._events) > self._max_events:
+            self._events = self._events[-self._max_events:]
         self._dump()
 
     def list_events(self) -> list[MemoryEvent]:
@@ -84,7 +96,7 @@ class EventMemoryStore:
             haystack = f"{event.kind} {json.dumps(event.payload, ensure_ascii=False)}".lower()
             score = sum(1 for term in terms if term in haystack)
             if score > 0:
-                kind_bonus = 1 if event.kind == "review_written" else 0
+                kind_bonus = 1 if event.kind == MemoryEventKind.REVIEW_WRITTEN else 0
                 scored.append((score, kind_bonus, event))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
 

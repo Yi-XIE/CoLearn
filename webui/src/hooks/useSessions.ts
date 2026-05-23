@@ -7,11 +7,48 @@ import {
   deleteSession as apiDeleteSession,
   fetchWebuiThread,
   listSessions,
+  updateSessionTitle as apiUpdateSessionTitle,
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
+const OPTIMISTIC_SESSION_TTL_MS = 60_000;
+
+function sessionRecencyTimestamp(session: ChatSummary): number {
+  const value = session.updatedAt ?? session.createdAt ?? "";
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortSessionsByRecency(sessions: ChatSummary[]): ChatSummary[] {
+  return [...sessions].sort((left, right) => {
+    const recencyDelta = sessionRecencyTimestamp(right) - sessionRecencyTimestamp(left);
+    if (recencyDelta !== 0) return recencyDelta;
+    return right.key.localeCompare(left.key);
+  });
+}
+
+function mergeSessionsWithOptimistic(
+  fetched: ChatSummary[],
+  previous: ChatSummary[],
+): ChatSummary[] {
+  const fetchedByKey = new Map(fetched.map((session) => [session.key, session]));
+  const merged = [...fetched];
+  const now = Date.now();
+
+  for (const session of previous) {
+    if (fetchedByKey.has(session.key)) continue;
+    const updatedAt = sessionRecencyTimestamp(session);
+    const isRecent = Number.isFinite(updatedAt) && now - updatedAt <= OPTIMISTIC_SESSION_TTL_MS;
+    const looksOptimistic = !session.title && !session.preview;
+    if (looksOptimistic && isRecent) {
+      merged.unshift(session);
+    }
+  }
+
+  return sortSessionsByRecency(merged);
+}
 
 /** Sidebar state: fetches the full session list and exposes create / delete actions. */
 export function useSessions(): {
@@ -21,6 +58,7 @@ export function useSessions(): {
   refresh: () => Promise<void>;
   createChat: () => Promise<string>;
   deleteChat: (key: string) => Promise<void>;
+  renameChat: (key: string, title: string) => Promise<void>;
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>([]);
@@ -33,7 +71,7 @@ export function useSessions(): {
     try {
       setLoading(true);
       const rows = await listSessions(tokenRef.current);
-      setSessions(rows);
+      setSessions((prev) => mergeSessionsWithOptimistic(rows, prev));
       setError(null);
     } catch (e) {
       const msg =
@@ -56,20 +94,22 @@ export function useSessions(): {
 
   const createChat = useCallback(async (): Promise<string> => {
     const chatId = await client.newChat();
-    const key = `websocket:${chatId}`;
+    const key = chatId;
     // Optimistic insert; a subsequent refresh will replace it with the
     // authoritative row once the server persists the session.
     setSessions((prev) => [
-      {
-        key,
-        channel: "websocket",
-        chatId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        title: "",
-        preview: "",
-      },
-      ...prev.filter((s) => s.key !== key),
+      ...sortSessionsByRecency([
+        {
+          key,
+          channel: "",
+          chatId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          title: "",
+          preview: "",
+        },
+        ...prev.filter((s) => s.key !== key),
+      ]),
     ]);
     return chatId;
   }, [client]);
@@ -82,7 +122,26 @@ export function useSessions(): {
     [],
   );
 
-  return { sessions, loading, error, refresh, createChat, deleteChat };
+  const renameChat = useCallback(
+    async (key: string, title: string) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      const updated = await apiUpdateSessionTitle(tokenRef.current, key, trimmed);
+      setSessions((prev) => sortSessionsByRecency(prev.map((session) =>
+        session.key === key
+          ? {
+              ...session,
+              ...updated,
+              key: session.key,
+              channel: session.channel,
+              chatId: session.chatId,
+            }
+          : session)));
+    },
+    [],
+  );
+
+  return { sessions, loading, error, refresh, createChat, deleteChat, renameChat };
 }
 
 /** Lazy-load a session's on-disk messages the first time the UI displays it. */

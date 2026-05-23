@@ -74,10 +74,10 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family:
-      "Source Han Serif SC", "Source Han Serif CN", "Noto Serif CJK SC",
-      "Noto Serif SC", "Songti SC", "STSong", "SimSun",
-      "Source Serif 4", "Iowan Old Style", "Palatino Linotype",
-      "Times New Roman", serif;
+      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+      system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
+      "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+      sans-serif;
   }
 
   button,
@@ -222,6 +222,15 @@
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;

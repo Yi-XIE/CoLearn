@@ -50,8 +50,34 @@ function buildDisplayUnits(messages: UIMessage[]): DisplayUnit[] {
   return out;
 }
 
+function shouldShowThinkingPlaceholder(messages: UIMessage[], isStreaming: boolean): boolean {
+  if (!isStreaming) return false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user") break;
+    if (message.kind === "trace") return false;
+    if (message.role !== "assistant") continue;
+    if (message.reasoningStreaming || message.reasoning?.trim()) return false;
+    if (message.content.trim().length > 0) return false;
+    if (message.isStreaming) return false;
+  }
+  return true;
+}
+
+function thinkingPlaceholderAnchorIndex(units: DisplayUnit[]): number {
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    const unit = units[i];
+    if (unit.type === "single" && unit.message.role === "user") return i;
+  }
+  return -1;
+}
+
 export function ThreadMessages({ messages, isStreaming = false }: ThreadMessagesProps) {
   const units = buildDisplayUnits(messages);
+  const showThinkingPlaceholder = shouldShowThinkingPlaceholder(messages, isStreaming);
+  const placeholderAfterIndex = showThinkingPlaceholder
+    ? thinkingPlaceholderAnchorIndex(units)
+    : -1;
 
   return (
     <div className="flex w-full flex-col">
@@ -85,6 +111,19 @@ export function ThreadMessages({ messages, isStreaming = false }: ThreadMessages
                 }
               />
             )}
+            {placeholderAfterIndex === index ? (
+              <div className="mt-3">
+                <MessageBubble
+                  message={{
+                    id: "assistant-thinking-placeholder",
+                    role: "assistant",
+                    content: "",
+                    isStreaming: true,
+                    createdAt: Date.now(),
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         );
       })}

@@ -30,10 +30,7 @@ export function clearSavedSecret(): void {
   }
 }
 
-/**
- * Fetch a short-lived token + the WebSocket path from the gateway's
- * ``/webui/bootstrap`` endpoint.
- */
+/** Fetch a short-lived token + the WebSocket path from CoLearn's bootstrap endpoint. */
 export async function fetchBootstrap(
   baseUrl: string = "",
   secret: string = "",
@@ -51,8 +48,8 @@ export async function fetchBootstrap(
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }
   const body = (await res.json()) as BootstrapResponse;
-  if (!body.token || !body.ws_path) {
-    throw new Error("bootstrap response missing token or ws_path");
+  if (!body.ws_path) {
+    throw new Error("bootstrap response missing ws_path");
   }
   return body;
 }
@@ -68,7 +65,7 @@ export function deriveWsUrl(wsPath: string, token: string): string {
   const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
   const query = `?token=${encodeURIComponent(token)}`;
   if (typeof window === "undefined") {
-    return `ws://127.0.0.1:8765${path}${query}`;
+    return `ws://127.0.0.1:8001${path}${query}`;
   }
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "教学法方法库"
+  short_description: "为课程设计选择组合常见教学法，并转化为可落地产品能力。"
+  default_prompt: "根据学习目标、学生画像、学科内容和课堂约束，选择合适教学法并生成可执行的教学设计。"

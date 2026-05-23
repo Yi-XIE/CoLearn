@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bot,
   ChevronDown,
@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,12 +26,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { fetchSettings, updateProviderSettings, updateSettings } from "@/lib/api";
-import type { SettingsPayload } from "@/lib/types";
+import {
+  fetchSettings,
+  updateProviderSettings,
+  updateSettings,
+  updateWebSearchSettings,
+} from "@/lib/api";
+import type { SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-const CORE_PROVIDER_NAMES = new Set(["openai", "openrouter", "custom"]);
+const CORE_PROVIDER_NAMES = new Set(["openai", "openrouter", "custom", "deepseek", "siliconflow"]);
 
 function isCoreProvider(
   provider: { name: string; configured: boolean },
@@ -56,8 +60,8 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
-  theme,
-  onToggleTheme,
+  theme: _theme,
+  onToggleTheme: _onToggleTheme,
   onBackToChat,
   onModelNameChange,
   onLogout,
@@ -70,11 +74,19 @@ export function SettingsView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
+  const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, { apiKey: string; apiBase: string }>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
+  const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
+  const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
+  const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>({
+    provider: "duckduckgo",
+    apiKey: "",
+    baseUrl: "",
+  });
   const [form, setForm] = useState({ model: "", provider: "" });
 
   const applyPayload = useCallback((payload: SettingsPayload) => {
@@ -83,6 +95,11 @@ export function SettingsView({
       model: payload.agent.model,
       provider: payload.agent.provider,
     });
+    setWebSearchForm((prev) => ({
+      provider: payload.web_search.provider || prev.provider || "duckduckgo",
+      apiKey: prev.provider === payload.web_search.provider ? prev.apiKey ?? "" : "",
+      baseUrl: payload.web_search.base_url ?? "",
+    }));
   }, []);
 
   useEffect(() => {
@@ -185,6 +202,48 @@ export function SettingsView({
     }
   };
 
+  const saveWebSearch = async () => {
+    if (!settings || webSearchSaving) return;
+    const provider = settings.web_search.providers.find((item) => item.name === webSearchForm.provider);
+    if (!provider) return;
+    const apiKey = webSearchForm.apiKey?.trim() ?? "";
+    const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
+    const hasExistingSecret =
+      provider.credential === "api_key" &&
+      webSearchForm.provider === settings.web_search.provider &&
+      !!settings.web_search.api_key_hint;
+
+    if (provider.credential === "api_key" && !apiKey && !hasExistingSecret) {
+      setError(t("settings.byok.webSearch.apiKeyRequired"));
+      return;
+    }
+    if (provider.credential === "base_url" && !baseUrl) {
+      setError(t("settings.byok.webSearch.baseUrlRequired"));
+      return;
+    }
+
+    setWebSearchSaving(true);
+    try {
+      const update: WebSearchSettingsUpdate = { provider: webSearchForm.provider };
+      if (provider.credential === "api_key" && apiKey) update.apiKey = apiKey;
+      if (provider.credential === "base_url") update.baseUrl = baseUrl;
+      const payload = await updateWebSearchSettings(token, update);
+      applyPayload(payload);
+      setWebSearchForm({
+        provider: payload.web_search.provider || webSearchForm.provider,
+        apiKey: "",
+        baseUrl: payload.web_search.base_url ?? "",
+      });
+      setWebSearchKeyVisible(false);
+      setWebSearchKeyEditing(false);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setWebSearchSaving(false);
+    }
+  };
+
   const preferredProviders = useMemo(
     () =>
       settings?.providers.filter((provider) =>
@@ -234,102 +293,24 @@ export function SettingsView({
               ) : null}
 
               <section className="space-y-2">
-                <SettingsSectionTitle>工作台</SettingsSectionTitle>
-                <SettingsGroup>
-                  <SettingsRow title="外观" description="切换浅色与深色工作台主题。">
-                    <button
-                      type="button"
-                      onClick={onToggleTheme}
-                      className="inline-flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
-                    >
-                      <span
-                        className={cn(
-                          "rounded-full px-3 py-1 transition-colors",
-                          theme === "light" && "bg-background text-foreground shadow-sm",
-                        )}
-                      >
-                        Light
-                      </span>
-                      <span
-                        className={cn(
-                          "rounded-full px-3 py-1 transition-colors",
-                          theme === "dark" && "bg-background text-foreground shadow-sm",
-                        )}
-                      >
-                        Dark
-                      </span>
-                    </button>
-                  </SettingsRow>
-                  <SettingsRow title="语言" description="选择工作台界面的显示语言。">
-                    <LanguageSwitcher />
-                  </SettingsRow>
-                  <SettingsRow
-                    title="工作模式"
-                    description="当前工作台针对学习会话、资料检索和持续目标做了收口。"
-                  >
-                    <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
-                      CoLearn mode
-                    </span>
-                  </SettingsRow>
-                  {onRestart ? (
-                    <SettingsRow
-                      title="运行时"
-                      description="修改模型或连接配置后，可以在这里重启本地运行时。"
-                    >
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={onRestart}
-                        disabled={isRestarting}
-                        className="rounded-full"
-                      >
-                        {isRestarting ? (
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                        ) : (
-                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                        )}
-                        {isRestarting ? "正在重启..." : "重启运行时"}
-                      </Button>
-                    </SettingsRow>
-                  ) : null}
-                  {onLogout ? (
-                    <SettingsRow
-                      title="账户"
-                      description="将当前浏览器与正在使用的 gateway 会话断开。"
-                    >
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={onLogout}
-                        className="h-9 rounded-full px-3 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
-                      >
-                        <LogOut className="mr-1.5 h-4 w-4" aria-hidden />
-                        {t("app.account.logout")}
-                      </Button>
-                    </SettingsRow>
-                  ) : null}
-                </SettingsGroup>
-              </section>
-
-              <section className="space-y-2">
-                <SettingsSectionTitle>模型</SettingsSectionTitle>
+                <SettingsSectionTitle>{t("settings.sections.ai")}</SettingsSectionTitle>
                 <SettingsGroup>
                   <SettingsRow
-                    title="推理提供方"
-                    description="选择新学习回合默认使用的推理提供方。"
+                    title={t("settings.rows.provider")}
+                    description={t("settings.help.provider")}
                   >
-                    <ProviderPicker
+                  <ProviderPicker
                       providers={preferredProviders}
                       value={preferredProviders.some((p) => p.name === form.provider) ? form.provider : ""}
-                      emptyLabel="暂无可用提供方"
+                      emptyLabel={t("settings.values.notAvailable")}
                       onChange={(provider) =>
                         setForm((prev) => ({ ...prev, provider }))
                       }
                     />
                   </SettingsRow>
                   <SettingsRow
-                    title="模型名称"
-                    description="设置学习工作台默认使用的模型。"
+                    title={t("settings.rows.model")}
+                    description={t("settings.help.model")}
                   >
                     <Input
                       value={form.model}
@@ -348,6 +329,33 @@ export function SettingsView({
                     />
                   ) : null}
                 </SettingsGroup>
+              </section>
+
+              <section className="space-y-3">
+                <SettingsSectionTitle>{t("settings.byok.tabs.webSearch")}</SettingsSectionTitle>
+                <WebSearchSettingsPanel
+                  settings={settings}
+                  form={webSearchForm}
+                  keyVisible={webSearchKeyVisible}
+                  keyEditing={webSearchKeyEditing}
+                  saving={webSearchSaving}
+                  onChangeProvider={(provider) =>
+                    setWebSearchForm(() => ({
+                      provider,
+                      apiKey: "",
+                      baseUrl: provider === settings.web_search.provider ? settings.web_search.base_url ?? "" : "",
+                    }))
+                  }
+                  onChangeApiKey={(apiKey) =>
+                    setWebSearchForm((prev) => ({ ...prev, apiKey }))
+                  }
+                  onChangeBaseUrl={(baseUrl) =>
+                    setWebSearchForm((prev) => ({ ...prev, baseUrl }))
+                  }
+                  onToggleKey={() => setWebSearchKeyVisible((prev) => !prev)}
+                  onToggleKeyEditing={() => setWebSearchKeyEditing((prev) => !prev)}
+                  onSave={saveWebSearch}
+                />
               </section>
 
               <section className="space-y-3">
@@ -392,6 +400,63 @@ export function SettingsView({
                   onSaveProvider={saveProvider}
                 />
               </section>
+
+              <section className="space-y-2">
+                <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
+                <SettingsGroup>
+                  <SettingsRow
+                    title={t("settings.rows.configPath")}
+                    description={t("settings.help.configPath")}
+                  >
+                    <code className="max-w-[320px] overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-muted px-3 py-1.5 text-[12px] text-muted-foreground">
+                      {settings.runtime.config_path || t("settings.values.notAvailable")}
+                    </code>
+                  </SettingsRow>
+                  {onRestart ? (
+                    <SettingsRow
+                      title={t("app.system.restart")}
+                      description={t("app.system.restartHint")}
+                    >
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onRestart}
+                        disabled={isRestarting}
+                        className="rounded-full"
+                      >
+                        {isRestarting ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                        ) : (
+                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                        )}
+                        {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+                      </Button>
+                    </SettingsRow>
+                  ) : null}
+                </SettingsGroup>
+              </section>
+
+              {onLogout ? (
+                <section className="space-y-2">
+                  <SettingsSectionTitle>账户</SettingsSectionTitle>
+                  <SettingsGroup>
+                    <SettingsRow
+                      title={t("app.account.logout")}
+                      description="将当前浏览器与当前 CoLearn 会话断开。"
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={onLogout}
+                        className="h-9 rounded-full px-3 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
+                      >
+                        <LogOut className="mr-1.5 h-4 w-4" aria-hidden />
+                        {t("app.account.logout")}
+                      </Button>
+                    </SettingsRow>
+                  </SettingsGroup>
+                </section>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -635,6 +700,170 @@ function ProviderConnectionsPanel({
         </section>
       ) : null}
     </div>
+  );
+}
+
+function WebSearchSettingsPanel({
+  settings,
+  form,
+  keyVisible,
+  keyEditing,
+  saving,
+  onChangeProvider,
+  onChangeApiKey,
+  onChangeBaseUrl,
+  onToggleKey,
+  onToggleKeyEditing,
+  onSave,
+}: {
+  settings: SettingsPayload;
+  form: WebSearchSettingsUpdate;
+  keyVisible: boolean;
+  keyEditing: boolean;
+  saving: boolean;
+  onChangeProvider: (provider: string) => void;
+  onChangeApiKey: (apiKey: string) => void;
+  onChangeBaseUrl: (baseUrl: string) => void;
+  onToggleKey: () => void;
+  onToggleKeyEditing: () => void;
+  onSave: () => void;
+}) {
+  const { t } = useTranslation();
+  const selectedProvider =
+    settings.web_search.providers.find((provider) => provider.name === form.provider)
+    ?? settings.web_search.providers[0]
+    ?? null;
+  const hasExistingSecret =
+    selectedProvider?.credential === "api_key"
+    && form.provider === settings.web_search.provider
+    && !!settings.web_search.api_key_hint;
+  const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
+  const apiKey = form.apiKey?.trim() ?? "";
+  const baseUrl = form.baseUrl?.trim() ?? "";
+  const dirty =
+    form.provider !== settings.web_search.provider
+    || apiKey.length > 0
+    || baseUrl !== (settings.web_search.base_url ?? "");
+  const missingCredential =
+    selectedProvider?.credential === "api_key"
+      ? !apiKey && !hasExistingSecret
+      : selectedProvider?.credential === "base_url"
+        ? !baseUrl
+        : false;
+
+  return (
+    <SettingsGroup>
+      <SettingsRow
+        title={t("settings.byok.webSearch.provider")}
+        description={t("settings.byok.webSearch.providerHelp")}
+      >
+        <ProviderPicker
+          providers={settings.web_search.providers}
+          value={form.provider}
+          emptyLabel={t("settings.byok.webSearch.selectProvider")}
+          onChange={onChangeProvider}
+        />
+      </SettingsRow>
+
+      {selectedProvider?.credential === "none" ? (
+        <SettingsRow
+          title={t("settings.byok.webSearch.credentials")}
+          description={t("settings.byok.webSearch.noCredentialHelp")}
+        >
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
+            {t("settings.byok.webSearch.noCredentialRequired")}
+          </span>
+        </SettingsRow>
+      ) : null}
+
+      {selectedProvider?.credential === "api_key" ? (
+        <SettingsRow
+          title={t("settings.byok.apiKey")}
+          description={t("settings.byok.webSearch.apiKeyHelp")}
+        >
+          <div className="relative w-[280px] max-w-full">
+            {showKeyInput ? (
+              <>
+                <Input
+                  type={keyVisible ? "text" : "password"}
+                  value={form.apiKey ?? ""}
+                  onChange={(event) => onChangeApiKey(event.target.value)}
+                  placeholder={
+                    hasExistingSecret
+                      ? t("settings.byok.apiKeyConfiguredPlaceholder")
+                      : t("settings.byok.apiKeyPlaceholder")
+                  }
+                  className="h-9 rounded-full pr-11 text-[13px]"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={onToggleKey}
+                  aria-label={
+                    keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
+                  }
+                  className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  {keyVisible ? (
+                    <EyeOff className="h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
+                  {settings.web_search.api_key_hint ?? t("settings.byok.configuredKeyHint")}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={onToggleKeyEditing}
+                  aria-label={t("settings.actions.edit")}
+                  className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                </Button>
+              </>
+            )}
+          </div>
+        </SettingsRow>
+      ) : null}
+
+      {selectedProvider?.credential === "base_url" ? (
+        <SettingsRow
+          title={t("settings.byok.webSearch.baseUrl")}
+          description={t("settings.byok.webSearch.baseUrlHelp")}
+        >
+          <Input
+            value={form.baseUrl ?? ""}
+            onChange={(event) => onChangeBaseUrl(event.target.value)}
+            placeholder={t("settings.byok.webSearch.baseUrlPlaceholder")}
+            className="h-9 w-[280px] rounded-full text-[13px]"
+          />
+        </SettingsRow>
+      ) : null}
+
+      <div className="flex min-h-[58px] items-center justify-between gap-4 px-4 py-3 sm:px-5">
+        <div className="text-[13px] text-muted-foreground">
+          {missingCredential
+            ? t("settings.byok.webSearch.missingCredential")
+            : t("settings.byok.webSearch.saveHint")}
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onSave}
+          disabled={!dirty || missingCredential || saving}
+          className="rounded-full"
+        >
+          {saving ? t("settings.actions.saving") : t("settings.actions.save")}
+        </Button>
+      </div>
+    </SettingsGroup>
   );
 }
 

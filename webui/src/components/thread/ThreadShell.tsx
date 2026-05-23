@@ -7,14 +7,37 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { listSlashCommands } from "@/lib/api";
-import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
+import { fetchLearningSupport } from "@/lib/api";
+import type { ChatSummary, LearningSupportPayload, UIMessage } from "@/lib/types";
 import { projectThreadMessages } from "@/lib/thread-display";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   return scrubSubagentUiMessages(projectThreadMessages(messages));
+}
+
+function comparableThreadMessages(messages: UIMessage[]): UIMessage[] {
+  return messages.filter((message) => message.kind !== "trace");
+}
+
+function sameComparableMessage(left: UIMessage | undefined, right: UIMessage | undefined): boolean {
+  if (!left || !right) return false;
+  return (
+    left.role === right.role
+    && left.content === right.content
+    && (left.reasoning ?? "") === (right.reasoning ?? "")
+    && (left.images?.length ?? 0) === (right.images?.length ?? 0)
+    && (left.media?.length ?? 0) === (right.media?.length ?? 0)
+  );
+}
+
+function canonicalHistoryIsBehind(canonical: UIMessage[], local: UIMessage[]): boolean {
+  const canonicalComparable = comparableThreadMessages(canonical);
+  const localComparable = comparableThreadMessages(local);
+  if (canonicalComparable.length >= localComparable.length) return false;
+  return canonicalComparable.every((message, index) =>
+    sameComparableMessage(message, localComparable[index]));
 }
 
 interface ThreadShellProps {
@@ -38,7 +61,9 @@ function toModelBadgeLabel(modelName: string | null): string | null {
   return leaf || trimmed;
 }
 
-function toLearningGoalLabel(goalState: { active?: boolean; ui_summary?: string | null; objective?: string | null } | undefined): string | null {
+function toLearningGoalLabel(
+  goalState: { active?: boolean; ui_summary?: string | null; objective?: string | null } | undefined,
+): string | null {
   if (!goalState?.active) return null;
   const summary = goalState.ui_summary?.trim();
   if (summary) return `Learning goal: ${summary}`;
@@ -51,6 +76,15 @@ interface PendingFirstMessage {
   content: string;
   images?: SendImage[];
 }
+
+const HERO_PLACEHOLDERS = [
+  "\u5148\u544a\u8bc9\u6211\u4f60\u60f3\u4ece\u54ea\u91cc\u5f00\u59cb",
+  "\u628a\u4f60\u7684\u5b66\u4e60\u76ee\u6807\u53d1\u7ed9\u6211",
+  "\u8f93\u5165\u4e00\u53e5\u8bdd\uff0c\u6211\u6765\u5e2e\u4f60\u5c55\u5f00",
+  "\u8bf4\u8bf4\u4f60\u73b0\u5728\u6700\u60f3\u5f04\u61c2\u4ec0\u4e48",
+  "\u5148\u5199\u4e0b\u4f60\u60f3\u5b66\u7684\u65b9\u5411",
+  "\u544a\u8bc9\u6211\u4eca\u5929\u60f3\u63a8\u8fdb\u4ec0\u4e48",
+];
 
 export function ThreadShell({
   session,
@@ -74,13 +108,11 @@ export function ThreadShell({
   } = useSessionHistory(historyKey);
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
-  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [learningSupport, setLearningSupport] = useState<LearningSupportPayload | null>(null);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
-  /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
-  /** Skip one message-cache write right after chatId changes (messages may not match yet). */
   const skipLayoutCacheRef = useRef(false);
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
@@ -90,9 +122,25 @@ export function ThreadShell({
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
+
+  const refreshLearningSupport = useCallback(async () => {
+    if (!chatId) {
+      setLearningSupport(null);
+      return;
+    }
+    try {
+      const support = await fetchLearningSupport(token, chatId);
+      setLearningSupport(support);
+    } catch {
+      setLearningSupport(null);
+    }
+  }, [chatId, token]);
+
   const handleTurnEnd = useCallback(() => {
     onTurnEnd?.();
-  }, [onTurnEnd]);
+    void refreshLearningSupport();
+  }, [onTurnEnd, refreshLearningSupport]);
+
   const {
     messages,
     isStreaming,
@@ -109,9 +157,12 @@ export function ThreadShell({
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
   }, [chatId, historyKey]);
 
+  useEffect(() => {
+    void refreshLearningSupport();
+  }, [refreshLearningSupport, historyVersion]);
+
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const goalHeaderLabel = useMemo(() => toLearningGoalLabel(goalState), [goalState]);
-
   const showHeroComposer = messages.length === 0 && !loading;
 
   useEffect(() => {
@@ -120,28 +171,29 @@ export function ThreadShell({
     const appliedVersion = appliedHistoryVersionRef.current.get(chatId) ?? 0;
     const hasPendingCanonicalHydrate = pendingCanonicalHydrateRef.current.has(chatId);
     const hasNewCanonicalHistory = hasPendingCanonicalHydrate && historyVersion > appliedVersion;
-    // When the user switches away and back, keep the local in-memory thread
-    // state (including not-yet-persisted messages) instead of replacing it with
-    // whatever the history endpoint currently knows about. Once a fresh
-    // canonical replay arrives (e.g. after ``session_updated`` refresh), prefer it
-    // so rendering converges to the same shape as a manual refresh.
+    const normalizedHistory = projectWebuiThreadMessages(historical);
     setMessages((prev) => {
+      const normalizedPrev = projectWebuiThreadMessages(prev);
+      const normalizedCached = cached ? projectWebuiThreadMessages(cached) : null;
+      const localBaseline = normalizedCached && normalizedCached.length > normalizedPrev.length
+        ? normalizedCached
+        : normalizedPrev;
       if (hasNewCanonicalHistory && historical.length > 0) {
+        if (canonicalHistoryIsBehind(normalizedHistory, localBaseline)) {
+          return localBaseline;
+        }
         pendingCanonicalHydrateRef.current.delete(chatId);
         appliedHistoryVersionRef.current.set(chatId, historyVersion);
-        const normalized = projectWebuiThreadMessages(historical);
-        messageCacheRef.current.set(chatId, normalized);
-        return normalized;
+        messageCacheRef.current.set(chatId, normalizedHistory);
+        return normalizedHistory;
       }
-      if (cached && cached.length > 0) return projectWebuiThreadMessages(cached);
-      if (historical.length === 0 && prev.length > 0) return projectWebuiThreadMessages(prev);
+      if (cached && cached.length > 0) return normalizedCached ?? normalizedPrev;
+      if (historical.length === 0 && prev.length > 0) return normalizedPrev;
       appliedHistoryVersionRef.current.set(chatId, historyVersion);
-      const next = projectWebuiThreadMessages(historical);
-      if (historical.length > 0) messageCacheRef.current.set(chatId, next);
-      return next;
+      if (historical.length > 0) messageCacheRef.current.set(chatId, normalizedHistory);
+      return normalizedHistory;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, chatId, historical, historyVersion]);
+  }, [chatId, historical, historyVersion, loading, setMessages]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -149,8 +201,9 @@ export function ThreadShell({
       if (updatedChatId !== chatId) return;
       pendingCanonicalHydrateRef.current.add(chatId);
       refreshHistory();
+      void refreshLearningSupport();
     });
-  }, [chatId, client, refreshHistory]);
+  }, [chatId, client, refreshHistory, refreshLearningSupport]);
 
   useEffect(() => {
     if (!chatId || loading) return;
@@ -170,32 +223,25 @@ export function ThreadShell({
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = chatId;
-    } else {
-      if (prevChatIdForCacheRef.current) {
-        messageCacheRef.current.set(
-          prevChatIdForCacheRef.current,
-          projectWebuiThreadMessages(messages),
-        );
-        skipLayoutCacheRef.current = true;
-      }
-      prevChatIdForCacheRef.current = null;
-    }
-  }, [chatId, messages]);
-
-  // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
-  // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
-  // sees the *previous* chat's ``messages`` (avoids stale rows leaking across sessions).
-  useEffect(() => {
-    if (!chatId) {
       return;
     }
+    if (prevChatIdForCacheRef.current) {
+      messageCacheRef.current.set(
+        prevChatIdForCacheRef.current,
+        projectWebuiThreadMessages(messages),
+      );
+      skipLayoutCacheRef.current = true;
+    }
+    prevChatIdForCacheRef.current = null;
+  }, [chatId, messages]);
+
+  useEffect(() => {
+    if (!chatId) return;
     if (skipLayoutCacheRef.current) {
       skipLayoutCacheRef.current = false;
       return;
     }
-    if (loading) {
-      return;
-    }
+    if (loading) return;
     messageCacheRef.current.set(chatId, projectWebuiThreadMessages(messages));
   }, [chatId, loading, messages]);
 
@@ -209,20 +255,7 @@ export function ThreadShell({
     setBooting(false);
   }, [chatId, send]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const commands = await listSlashCommands(token);
-        if (!cancelled) setSlashCommands(commands);
-      } catch {
-        if (!cancelled) setSlashCommands([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  const slashCommands = useMemo(() => [], []);
 
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendImage[]) => {
@@ -239,9 +272,10 @@ export function ThreadShell({
   );
 
   const handleThreadSend = useCallback(
-    (content: string, images?: SendImage[]) => {
+    async (content: string, images?: SendImage[]) => {
       setScrollToBottomSignal((value) => value + 1);
       send(content, images);
+      await Promise.resolve();
     },
     [send],
   );
@@ -249,21 +283,14 @@ export function ThreadShell({
   const composer = (
     <>
       {streamError ? (
-        <StreamErrorNotice
-          error={streamError}
-          onDismiss={dismissStreamError}
-        />
+        <StreamErrorNotice error={streamError} onDismiss={dismissStreamError} />
       ) : null}
       {session ? (
         <ThreadComposer
           onSend={handleThreadSend}
           disabled={!chatId}
           isStreaming={isStreaming}
-          placeholder={
-            showHeroComposer
-              ? t("thread.composer.placeholderHero")
-              : t("thread.composer.placeholderThread")
-          }
+          placeholder={showHeroComposer ? HERO_PLACEHOLDERS : t("thread.composer.placeholderThread")}
           modelLabel={toModelBadgeLabel(modelName)}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
@@ -276,11 +303,7 @@ export function ThreadShell({
           onSend={handleWelcomeSend}
           disabled={booting}
           isStreaming={isStreaming}
-          placeholder={
-            booting
-              ? t("thread.composer.placeholderOpening")
-              : t("thread.composer.placeholderHero")
-          }
+          placeholder={booting ? t("thread.composer.placeholderOpening") : HERO_PLACEHOLDERS}
           modelLabel={toModelBadgeLabel(modelName)}
           variant="hero"
           slashCommands={slashCommands}
@@ -297,7 +320,14 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <h1 className="text-balance text-[30px] font-normal leading-tight tracking-[-0.035em] text-foreground sm:text-[36px]">
+      <h1 className="flex items-center justify-center gap-2 text-balance text-[30px] font-normal leading-tight tracking-[0.04em] text-foreground sm:text-[36px]">
+        <img
+          src="/brand/colearn_penguin_question_transparent.png"
+          alt=""
+          className="h-[1.45em] w-[1.45em] shrink-0 translate-y-[0.08em] object-contain"
+          aria-hidden
+          draggable={false}
+        />
         {t("thread.empty.greeting")}
       </h1>
     </div>
@@ -322,6 +352,7 @@ export function ThreadShell({
         composer={composer}
         scrollToBottomSignal={scrollToBottomSignal}
         conversationKey={historyKey}
+        learningSupport={learningSupport}
       />
     </section>
   );

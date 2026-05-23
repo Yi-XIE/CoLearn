@@ -16,6 +16,7 @@ htmlcov/
 .colearn/tmp/
 .colearn/nanobot-workspace/
 .colearn/webui/
+.colearn/knowledge-base/
 .colearn/*.jsonl
 .tmp-pytest/
 .tmp-pytest-*/
@@ -29,6 +30,14 @@ web/out/
 web/coverage/
 web/playwright-report/
 web/test-results/
+webui/node_modules/
+webui/dist/
+webui/coverage/
+webui/playwright-report/
+webui/test-results/
+
+# Packaging artifacts
+*.egg-info/
 
 # Virtual environments
 .venv/

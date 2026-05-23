@@ -240,6 +240,7 @@ export function useNanobotStream(
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
+  const stopRequestedRef = useRef(false);
   /** Timer that defers ``isStreaming = false`` after ``stream_end``.
    *
    * When the model finishes a text segment and calls a tool, the server
@@ -270,6 +271,7 @@ export function useNanobotStream(
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     buffer.current = null;
     suppressStreamUntilTurnEndRef.current = false;
+    stopRequestedRef.current = false;
     if (streamEndTimerRef.current !== null) {
       clearTimeout(streamEndTimerRef.current);
       streamEndTimerRef.current = null;
@@ -396,6 +398,7 @@ export function useNanobotStream(
           return finalized;
         });
         suppressStreamUntilTurnEndRef.current = false;
+        stopRequestedRef.current = false;
         onTurnEnd?.();
         return;
       }
@@ -518,6 +521,7 @@ export function useNanobotStream(
       // Mark streaming immediately so the UI shows the loading indicator
       // right away, before the first delta arrives from the server.
       setIsStreaming(true);
+      stopRequestedRef.current = false;
       const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
       if (options) {
         client.sendMessage(chatId, content, wireMedia, options);
@@ -530,7 +534,8 @@ export function useNanobotStream(
 
   const stop = useCallback(() => {
     if (!chatId) return;
-    setIsStreaming(false);
+    stopRequestedRef.current = true;
+    setIsStreaming(true);
     setMessages((prev) =>
       prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
     );

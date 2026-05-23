@@ -69,6 +69,22 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.className).toContain("max-w-[58rem]");
   });
 
+  it("uses the first hero placeholder when an array is provided", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder={[
+          "先告诉我你想从哪开始",
+          "把你的学习目标发给我",
+          "输入一句话，我来帮你展开",
+        ]}
+        variant="hero"
+      />,
+    );
+
+    expect(screen.getByPlaceholderText("先告诉我你想从哪开始")).toBeInTheDocument();
+  });
+
   it("keeps the thread composer compact while matching the hero style", () => {
     render(
       <ThreadComposer

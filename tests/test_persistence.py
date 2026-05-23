@@ -28,6 +28,13 @@ def test_json_state_store_roundtrip(tmp_path: Path) -> None:
     assert not (tmp_path / ".sample.json.tmp").exists()
 
 
+def test_json_state_store_default_uses_env_state_root(monkeypatch, tmp_path: Path) -> None:
+    state_root = tmp_path / ".colearn" / "state"
+    monkeypatch.setenv("COLEARN_STATE_ROOT", str(state_root))
+    store = JsonStateStore()
+    assert store.root == state_root.resolve()
+
+
 def test_project_session_memory_persist(tmp_path: Path) -> None:
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
@@ -123,3 +130,18 @@ def test_reset_state_include_env_and_workspace_boundary(tmp_path: Path) -> None:
             raise AssertionError("Expected workspace boundary validation to reject outside path usage")
     finally:
         devtools.DEFAULT_RESET_PATHS[:] = original_paths
+
+
+def test_json_store_corrupted_file_returns_default(tmp_path: Path) -> None:
+    store = JsonStateStore(tmp_path)
+    path = tmp_path / "bad.json"
+    path.write_text("{invalid json", encoding="utf-8")
+    result = store.read_json("bad.json", {"fallback": True})
+    assert result == {"fallback": True}
+
+
+def test_json_store_write_atomic_no_leftover_tmp(tmp_path: Path) -> None:
+    store = JsonStateStore(tmp_path)
+    store.write_json("data.json", [1, 2, 3])
+    assert store.read_json("data.json", []) == [1, 2, 3]
+    assert not (tmp_path / ".data.json.tmp").exists()

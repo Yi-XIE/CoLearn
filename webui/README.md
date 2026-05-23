@@ -13,7 +13,7 @@ This is the active CoLearn front-end mainline.
 ## Notes
 
 - The UI is wired to CoLearn backend data and `runtime_v2`.
-- The production bundle is built from this directory and consumed by the gateway.
+- The production bundle is built from this directory and served by the CoLearn backend.
 - Old packaging paths are frozen and no longer receive product work.
 
 ## Development

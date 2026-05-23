@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "無法連線到 nanobot",
-      "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
+      "gatewayHint": "請確認 CoLearn 服務已啟動，並且目前頁面與服務在同一台機器上開啟。"
     },
     "system": {
       "section": "系統",
@@ -66,7 +66,7 @@
       "language": "選擇 WebUI 使用的語言。",
       "provider": "選擇新模型請求使用的服務提供者。",
       "model": "設定 nanobot 預設使用的模型名稱。",
-      "configPath": "目前閘道正在使用的設定檔。"
+        "configPath": "目前 CoLearn 服務正在使用的設定檔。"
     },
     "values": {
       "light": "淺色",

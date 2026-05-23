@@ -3,6 +3,31 @@ import { beforeEach } from "vitest";
 
 import i18n from "@/i18n";
 
+const consoleWarn = console.warn.bind(console);
+const consoleError = console.error.bind(console);
+const ignoredWarningFragments = [
+  "KaTeX doesn't work in quirks mode",
+  "A suspended resource finished loading inside a test",
+];
+
+function shouldIgnoreTestWarning(args: unknown[]): boolean {
+  return args.some(
+    (arg) =>
+      typeof arg === "string" &&
+      ignoredWarningFragments.some((fragment) => arg.includes(fragment)),
+  );
+}
+
+console.warn = (...args: unknown[]) => {
+  if (shouldIgnoreTestWarning(args)) return;
+  consoleWarn(...args);
+};
+
+console.error = (...args: unknown[]) => {
+  if (shouldIgnoreTestWarning(args)) return;
+  consoleError(...args);
+};
+
 // happy-dom doesn't ship with ``crypto.randomUUID``; shim a tiny v4-ish helper.
 if (!("randomUUID" in globalThis.crypto)) {
   Object.defineProperty(globalThis.crypto, "randomUUID", {

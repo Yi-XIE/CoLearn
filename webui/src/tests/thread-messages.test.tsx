@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
@@ -88,5 +88,31 @@ describe("ThreadMessages", () => {
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.getAllByRole("button", { name: "Copy reply" })).toHaveLength(1);
+  });
+
+  it("shows a thinking placeholder in the message area before the assistant starts responding", () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "hi", createdAt: 1 },
+    ];
+
+    const { container } = render(<ThreadMessages messages={messages} isStreaming />);
+
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    const thread = container.firstElementChild as HTMLElement;
+    expect(within(thread).getByText("hi")).toBeInTheDocument();
+    expect(thread.textContent?.indexOf("hi")).toBeLessThan(
+      thread.textContent?.indexOf("Thinking...") ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("does not add a synthetic thinking placeholder once an assistant streaming row exists", () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "hi", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "", isStreaming: true, createdAt: 2 },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming />);
+
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 });

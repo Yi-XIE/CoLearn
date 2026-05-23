@@ -23,7 +23,7 @@ def serialize_session_summary(
     return {
         "id": session.session_id,
         "session_id": session.session_id,
-        "title": session.title or session.session_id,
+        "title": session.title or "",
         "project_id": session.project_id,
         "project_title": project.title if project else session.project_id,
         "turn_mode": session.turn_mode,
@@ -69,6 +69,7 @@ def serialize_session_detail(
         for index, item in enumerate(session.messages)
     ]
     summary["active_turns"] = list(session.active_turns)
+    summary["last_turn_result"] = dict(session.last_turn_result or {})
     return summary
 
 

@@ -8,14 +8,20 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from colearn.logging_config import get_logger
+from colearn.paths import colearn_state_root
+
+logger = get_logger(__name__)
+
 
 _PATH_LOCKS: dict[str, RLock] = {}
 _PATH_LOCKS_GUARD = RLock()
+_PATH_LOCKS_MAX = 256
 
 
 class JsonStateStore:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = (root or Path.cwd() / ".colearn" / "state").resolve()
+        self.root = (root or colearn_state_root()).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path_lock(self, path: Path) -> RLock:
@@ -23,6 +29,9 @@ class JsonStateStore:
         with _PATH_LOCKS_GUARD:
             lock = _PATH_LOCKS.get(key)
             if lock is None:
+                if len(_PATH_LOCKS) >= _PATH_LOCKS_MAX:
+                    oldest_key = next(iter(_PATH_LOCKS))
+                    del _PATH_LOCKS[oldest_key]
                 lock = RLock()
                 _PATH_LOCKS[key] = lock
             return lock
@@ -33,7 +42,8 @@ class JsonStateStore:
             return default
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("read_json failed for %s: %s", path, exc)
             return default
 
     def write_json(self, name: str, value: Any) -> None:

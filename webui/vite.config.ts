@@ -4,8 +4,7 @@ import path from "node:path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const target = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
-  const wsTarget = target.replace(/^http/, "ws");
+  const apiTarget = env.COLEARN_API_URL ?? "http://127.0.0.1:8001";
 
   return {
     plugins: [react()],
@@ -25,30 +24,44 @@ export default defineConfig(({ mode }) => {
       outDir: path.resolve(__dirname, "../.colearn/webui/dist"),
       emptyOutDir: true,
       sourcemap: false,
+      chunkSizeWarningLimit: 600,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return undefined;
+            if (id.includes("react-syntax-highlighter")) return "syntax";
+            if (
+              id.includes("react-markdown") ||
+              id.includes("remark-") ||
+              id.includes("rehype-") ||
+              id.includes("micromark") ||
+              id.includes("mdast") ||
+              id.includes("hast") ||
+              id.includes("unified") ||
+              id.includes("katex")
+            ) {
+              return "markdown";
+            }
+            return undefined;
+          },
+        },
+      },
     },
     server: {
       host: "127.0.0.1",
-      port: 5173,
+      port: 5191,
       strictPort: true,
-      // Move Vite's HMR socket to a dedicated port so it doesn't collide with
-      // the ``/`` proxy below (Vite HMR and the nanobot ws upgrade both sit on
-      // the root path, which triggers spurious write-after-end errors as each
-      // side tries to close the other's socket).
       hmr: {
         host: "127.0.0.1",
-        port: 5174,
+        port: 5192,
       },
       proxy: {
-        "/webui": { target, changeOrigin: true },
-        "/api": { target, changeOrigin: true },
-        "/auth": { target, changeOrigin: true },
-        // Forward only WebSocket upgrades on ``/`` to the nanobot gateway;
-        // plain HTTP GETs on ``/`` must stay with Vite so it can serve the SPA.
-        // ``bypass`` returning the original URL skips the proxy for that
-        // request; returning undefined lets the proxy (and ws upgrade handler)
-        // take it.
+        // Single backend entry: all dev traffic goes to CoLearn FastAPI.
+        "/webui": { target: apiTarget, changeOrigin: true },
+        "/auth": { target: apiTarget, changeOrigin: true },
+        "/api": { target: apiTarget, changeOrigin: true },
         "/": {
-          target: wsTarget,
+          target: apiTarget.replace(/^http/, "ws"),
           ws: true,
           changeOrigin: true,
           bypass: (req) =>

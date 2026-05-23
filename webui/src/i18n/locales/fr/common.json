@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Impossible de joindre nanobot",
-      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
+      "gatewayHint": "Assurez-vous que le serveur CoLearn est en cours d’exécution et que cette page est ouverte sur la même machine."
     },
     "system": {
       "section": "Système",
@@ -66,7 +66,7 @@
       "language": "Choisissez la langue utilisée par le WebUI.",
       "provider": "Sélectionnez le fournisseur des nouvelles requêtes de modèle.",
       "model": "Définissez le nom du modèle par défaut utilisé par nanobot.",
-      "configPath": "Le fichier de configuration actuellement utilisé par la passerelle."
+        "configPath": "Le fichier de configuration actuellement utilisé par le serveur CoLearn."
     },
     "values": {
       "light": "Clair",
