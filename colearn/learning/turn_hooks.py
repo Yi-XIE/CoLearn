@@ -15,10 +15,52 @@ from colearn.learning.board_hooks import (
 from colearn.learning.state import ReplyContract, TurnPolicy
 
 
+LIGHTRAG_HINT_KEYWORDS: tuple[str, ...] = (
+    "来源",
+    "依据",
+    "证据",
+    "参考",
+    "资料",
+    "文献",
+    "出处",
+    "例子",
+    "反例",
+    "证明",
+    "why",
+    "source",
+    "sources",
+    "reference",
+    "references",
+    "evidence",
+    "example",
+    "examples",
+    "counterexample",
+    "proof",
+)
+
+
+def _needs_lightrag(*, board, user_message: str, turn_mode: str) -> bool:
+    if turn_mode == "EXPLORE":
+        return True
+    if turn_mode == "VERIFY" and bool(board.gaps_and_blockers.unverified_gaps):
+        return True
+    lowered = str(user_message or "").strip().lower()
+    if lowered and any(keyword in lowered for keyword in LIGHTRAG_HINT_KEYWORDS):
+        return True
+    if turn_mode == "CORRECTION":
+        blockers = list(board.gaps_and_blockers.critical_blockers or [])
+        if blockers:
+            blocker_text = " ".join(str(blocker.desc or "") for blocker in blockers).lower()
+            if any(keyword in blocker_text for keyword in LIGHTRAG_HINT_KEYWORDS):
+                return True
+    return False
+
+
 def policy(
     *,
     board,
     user_message: str,
+    memory_enabled: bool = True,
     **_: Any,
 ) -> TurnPolicy:
     turn_mode = determine_turn_mode(board, user_message)
@@ -31,8 +73,8 @@ def policy(
     elif turn_mode == "VERIFY":
         restrictions.append("do_not_give_direct_answer")
 
-    allowed_tools: list[str] = ["memory"]
-    if turn_mode == "EXPLORE":
+    allowed_tools: list[str] = ["memory"] if memory_enabled else []
+    if _needs_lightrag(board=board, user_message=user_message, turn_mode=turn_mode):
         allowed_tools.append("lightrag")
 
     return TurnPolicy(
@@ -56,6 +98,7 @@ def policy(
         metadata={
             "board_version": board.board_version,
             "blocker_count": len(board.gaps_and_blockers.critical_blockers),
+            "lightrag_enabled": "lightrag" in allowed_tools,
         },
     )
 

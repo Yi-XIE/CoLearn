@@ -44,6 +44,14 @@ def _load_repo_env(repo_root: Path) -> None:
             os.environ.setdefault(key, value)
 
 
+def _hydrate_provider_env_aliases() -> None:
+    """Promote legacy provider keys into the names the current runtime expects."""
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        legacy_openai_key = str(os.environ.get("OPENAI_API_KEY") or "").strip()
+        if legacy_openai_key:
+            os.environ["DEEPSEEK_API_KEY"] = legacy_openai_key
+
+
 def main():
     parser = argparse.ArgumentParser(description="CoLearn unified server")
     parser.add_argument("--port", type=int, default=8001)
@@ -57,6 +65,7 @@ def main():
     workspace = args.workspace or str(repo_root / ".colearn" / "nanobot-workspace")
 
     _load_repo_env(repo_root)
+    _hydrate_provider_env_aliases()
     os.environ.setdefault("COLEARN_NANOBOT_TOKEN_ISSUE_SECRET", "")
     os.environ.setdefault("COLEARN_REPO_ROOT", str(repo_root))
     os.environ.setdefault("COLEARN_NANOBOT_WORKSPACE", str(workspace))

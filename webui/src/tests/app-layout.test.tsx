@@ -412,7 +412,8 @@ describe("App layout", () => {
 
     expect(await screen.findAllByText("线性代数资料库")).not.toHaveLength(0);
     expect(await screen.findByText("矩阵概念")).toBeInTheDocument();
-    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "展开 线性代数资料库" }));
+    expect((await screen.findAllByText("notes.md")).length).toBeGreaterThan(0);
   });
 
   it("renders memory and skills pages with API-backed content", async () => {
@@ -572,6 +573,7 @@ describe("App layout", () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         title: "Q2 roadmap",
+        titleIsCustom: true,
         preview: "Project planning notes",
       },
       {
@@ -604,6 +606,42 @@ describe("App layout", () => {
 
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
+  });
+
+  it("uses the first user message as the default chat title unless the title was manually renamed", async () => {
+    mockSessions = [
+      {
+        key: "chat-auto",
+        channel: "",
+        chatId: "chat-auto",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "生成的小标题",
+        titleIsCustom: false,
+        preview: "这是用户输入的第一句话，应该显示在导航栏里而不是自动生成的小标题",
+      },
+      {
+        key: "chat-custom",
+        channel: "",
+        chatId: "chat-custom",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        title: "我手动改过的名字",
+        titleIsCustom: true,
+        preview: "这句不该覆盖手动命名",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
+    expect(
+      within(sidebar).getByText("这是用户输入的第一句话，应该显示在导航栏里而不是自动生成的小标题"),
+    ).toBeInTheDocument();
+    expect(within(sidebar).queryByText("生成的小标题")).not.toBeInTheDocument();
+    expect(within(sidebar).getByText("我手动改过的名字")).toBeInTheDocument();
   });
 
   it("opens a blank start page without creating an empty chat", async () => {

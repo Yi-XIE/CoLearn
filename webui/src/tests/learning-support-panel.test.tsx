@@ -4,10 +4,16 @@ import { describe, expect, it } from "vitest";
 import { LearningSupportPanel } from "@/components/thread/LearningSupportPanel";
 
 describe("LearningSupportPanel", () => {
+  it("does not render when support is absent", () => {
+    const { container } = render(<LearningSupportPanel support={null} />);
+    expect(container.firstChild).toBeNull();
+  });
+
   it("renders prompt support references and retrieval misses", () => {
     render(
       <LearningSupportPanel
         support={{
+          retrieval_active: true,
           prompt_support_bundle: [
             {
               source_ref: "notes/force.md",

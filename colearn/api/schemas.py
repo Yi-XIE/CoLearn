@@ -115,6 +115,10 @@ class SettingsUiPayload(BaseModel):
     language: str | None = None
 
 
+class SettingsMemoryPayload(BaseModel):
+    enabled: bool | None = None
+
+
 class SettingsCatalogPayload(BaseModel):
     catalog: dict[str, Any] = Field(default_factory=dict)
 

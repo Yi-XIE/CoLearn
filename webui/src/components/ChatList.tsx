@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deriveTitle } from "@/lib/format";
+import { sessionTitle } from "@/hooks/useSessions";
 import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
 
@@ -67,8 +67,11 @@ export function ChatList({
                 const fallbackTitle = t("chat.fallbackTitle", {
                   id: s.chatId.slice(0, 6),
                 });
-                const rawLabel = s.title?.trim() || "";
-                const title = rawLabel || deriveTitle(s.preview, fallbackTitle);
+                const rawLabel = s.titleIsCustom ? (s.title?.trim() || "") : "";
+                const title = sessionTitle(
+                  { ...s, title: rawLabel, titleIsCustom: s.titleIsCustom },
+                  undefined,
+                ) || fallbackTitle;
                 return (
                   <li key={s.key} className="min-w-0">
                     <div

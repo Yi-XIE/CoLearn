@@ -28,6 +28,7 @@ def session_from_record(record: dict[str, Any]) -> Any:
     payload["session_id"] = str(payload.get("session_id") or "")
     payload["project_id"] = str(payload.get("project_id") or "")
     payload["title"] = str(payload.get("title") or "")
+    payload["title_is_custom"] = bool(payload.get("title_is_custom") or False)
     payload["created_at"] = int(payload.get("created_at") or 0)
     payload["updated_at"] = int(payload.get("updated_at") or 0)
     payload["turn_mode"] = str(payload.get("turn_mode") or "EXPLORE")

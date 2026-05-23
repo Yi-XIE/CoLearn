@@ -164,6 +164,7 @@ export function ThreadShell({
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const goalHeaderLabel = useMemo(() => toLearningGoalLabel(goalState), [goalState]);
   const showHeroComposer = messages.length === 0 && !loading;
+  const compactBlankState = theme === "dark" && !session && !loading;
 
   useEffect(() => {
     if (!chatId || loading) return;
@@ -305,7 +306,7 @@ export function ThreadShell({
           isStreaming={isStreaming}
           placeholder={booting ? t("thread.composer.placeholderOpening") : HERO_PLACEHOLDERS}
           modelLabel={toModelBadgeLabel(modelName)}
-          variant="hero"
+          variant={compactBlankState ? "thread" : "hero"}
           slashCommands={slashCommands}
           runStartedAt={runStartedAt}
           goalState={goalState}
@@ -314,7 +315,7 @@ export function ThreadShell({
     </>
   );
 
-  const emptyState = loading ? (
+  const emptyState = compactBlankState ? null : loading ? (
     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
       {t("thread.loadingConversation")}
     </div>

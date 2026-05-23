@@ -11,6 +11,7 @@ import {
   updateSettings,
   updateWebSearchSettings,
 } from "@/lib/api";
+import { deriveTitle } from "@/lib/format";
 
 describe("webui API helpers", () => {
   beforeEach(() => {
@@ -87,12 +88,13 @@ describe("webui API helpers", () => {
         session: {
           last_turn_result: {
             runtime_v2: {
-              retrieval: {
-                prompt_support_bundle: [
-                  {
-                    source_ref: "note.md",
-                    chunk_id: "c1",
-                    support_type: "definition",
+                retrieval: {
+                  retrieval_active: true,
+                  prompt_support_bundle: [
+                    {
+                      source_ref: "note.md",
+                      chunk_id: "c1",
+                      support_type: "definition",
                     summary: "Core idea",
                   },
                 ],
@@ -413,6 +415,17 @@ describe("webui API helpers", () => {
         updatedAt: "2026-05-22T12:39:28.000Z",
       }),
     ]);
+  });
+
+  it("truncates long default chat titles to a single compact line", () => {
+    const title = deriveTitle(
+      "This is a very long first user sentence that should become the default title and be truncated neatly for the sidebar",
+      "New chat",
+    );
+
+    expect(title).toHaveLength(60);
+    expect(title.startsWith("This is a very long first user sentence")).toBe(true);
+    expect(title.endsWith("...")).toBe(true);
   });
 
   it("keeps slash commands empty when the backend does not expose them", async () => {

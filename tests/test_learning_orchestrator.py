@@ -159,6 +159,8 @@ async def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert saved_session is not None
     assert saved_project is not None
     assert len(saved_session.messages) == 2
+    assert saved_session.title == "Explain why matrix multiplication is not commutative."
+    assert saved_session.title_is_custom is False
     assert "board_patch" in saved_session.last_turn_result
     assert saved_session.continuation_prompt
     assert saved_session.board_facts["current_turn_mode"] == "EXPLORE"
@@ -1066,6 +1068,7 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
         project=project,
         session=session,
         retrieval_query_context=query_context,
+        turn_mode="EXPLORE",
     )
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "no_source_refs"
@@ -1076,10 +1079,62 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
         project=project,
         session=session,
         retrieval_query_context=query_context,
+        turn_mode="EXPLORE",
     )
     assert ready["status"] == "ready"
     assert ready["queries"] == ["main query", "blocker one", "blocker two"]
     assert len(ready["results"]) == 3
+
+
+async def test_parallel_support_skips_when_paused(tmp_path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+    project = orchestrator.project_service.create_project("proj-paused", "Paused")
+    project.source_refs = ["source.md"]
+    session = orchestrator.session_store.create_session(session_id="sess-paused", project_id="proj-paused")
+    skipped = await orchestrator.retrieval._build_parallel_support_dispatch(
+        project=project,
+        session=session,
+        retrieval_query_context={"final_query": "main query"},
+        turn_mode="PAUSED",
+    )
+    assert skipped["status"] == "skipped"
+    assert skipped["reason"] == "turn_mode:paused"
+
+
+async def test_prefetch_bundle_skips_when_paused(tmp_path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    retrieval_service = FakeRetrievalService()
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=retrieval_service,
+    )
+    project = orchestrator.project_service.create_project("proj-paused-prefetch", "Paused Prefetch")
+    project.source_refs = ["source.md"]
+    session = orchestrator.session_store.create_session(
+        session_id="sess-paused-prefetch",
+        project_id="proj-paused-prefetch",
+    )
+    bundle = await orchestrator.retrieval._build_prefetch_bundle(
+        project=project,
+        session=session,
+        turn_mode="PAUSED",
+        retrieval_focus={"default_query": "default query"},
+        retrieval_query_context={"final_query": "main query"},
+        user_message="hello",
+    )
+    assert bundle.retrieval_status == "skipped"
+    assert bundle.fallback_reason == "prefetch_skipped:paused"
+    assert retrieval_service.last_bundle_query == ""
 
 
 def test_stream_hook_is_agenthook_and_requests_streaming() -> None:
@@ -1218,6 +1273,7 @@ def test_runtime_v2_tooling_registers_memory_and_lightrag(monkeypatch) -> None:
     class FakeBot:
         def __init__(self) -> None:
             self._loop = FakeLoop()
+            self.tools = self._loop.tools
 
     class FakeTool:
         async def execute(self, **kwargs):
@@ -1244,8 +1300,8 @@ def test_runtime_v2_tooling_registers_memory_and_lightrag(monkeypatch) -> None:
 
     install_colearn_tools(bot=bot, request=request, workspace=Path.cwd())
 
-    assert "memory" in bot._loop.tools.items
-    assert "lightrag" in bot._loop.tools.items
+    assert "memory" in bot.tools.items
+    assert "lightrag" in bot.tools.items
 
 
 def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> None:
@@ -1271,6 +1327,7 @@ def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> No
     class FakeBot:
         def __init__(self) -> None:
             self._loop = FakeLoop()
+            self.tools = self._loop.tools
 
     class FakeTool:
         async def execute(self, **kwargs):
@@ -1303,9 +1360,50 @@ def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> No
 
     install_colearn_tools(bot=bot, request=request, workspace=Path.cwd())
 
-    tool = bot._loop.tools.items["lightrag"]
+    tool = bot.tools.items["lightrag"]
 
     result = asyncio.run(tool.execute(question="Find the source"))
     assert result["status"] in {"ready", "empty", "error"}
     assert "evidence_refs" in result
     assert isinstance(result["evidence_map"], dict)
+
+
+def test_executor_get_bot_registers_colearn_tools_once(monkeypatch) -> None:
+    from colearn.runtime_v2.executor import NanobotTurnExecutor
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.items: dict[str, object] = {}
+
+        def has(self, name: str) -> bool:
+            return name in self.items
+
+        def unregister(self, name: str) -> None:
+            self.items.pop(name, None)
+
+        def register(self, tool: object) -> None:
+            self.items[getattr(tool, "name")] = tool
+
+        def get(self, name: str) -> object | None:
+            return self.items.get(name)
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self._loop = SimpleNamespace(tools=FakeRegistry())
+
+    fake_bot = FakeBot()
+
+    class FakeNanobot:
+        @classmethod
+        def from_config(cls, **kwargs):
+            _ = kwargs
+            return fake_bot
+
+    monkeypatch.setitem(sys.modules, "nanobot.nanobot", SimpleNamespace(Nanobot=FakeNanobot))
+
+    executor = NanobotTurnExecutor(workspace=Path.cwd())
+    bot = executor._get_bot()
+    assert bot is fake_bot
+    assert getattr(bot, "tools", None) is bot._loop.tools
+    assert "memory" in bot.tools.items
+    assert "lightrag" in bot.tools.items

@@ -43,7 +43,9 @@ def normalize_learning_turn_result(
     retrieval_hits = list(retrieval_metadata.get("hits") or [])
     retrieval_misses = list(retrieval_metadata.get("misses") or [])
     retrieval_evidence_map = dict(retrieval_metadata.get("evidence_map") or {})
+    retrieval_active = "lightrag" in {str(item).strip().lower() for item in list(request.enabled_tools or [])}
     runtime_retrieval = {
+        "retrieval_active": retrieval_active,
         "prefetched_references": list(retrieval_metadata.get("prefetched_references") or []),
         "prompt_support_bundle": list(retrieval_metadata.get("prompt_support_bundle") or []),
         "retrieval_focus": retrieval_focus,

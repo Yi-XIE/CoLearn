@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import anyio
 import httpx
+from colearn.api.session_api import serialize_session_summary
 from colearn.memory.store import MemoryEvent
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -58,6 +59,25 @@ async def _run_http_checks() -> None:
 
 def test_http_session_endpoints() -> None:
     anyio.run(_run_http_checks)
+
+
+def test_session_summary_uses_first_user_message_as_default_title() -> None:
+    app_module = importlib.import_module("colearn.api.app")
+    session = app_module.session_store.create_session(
+        session_id="summary-first-user-title",
+        project_id="proj-summary-title",
+        title="",
+    )
+    session.messages = [
+        {"role": "user", "content": "This is the first user sentence used as the default session title."},
+        {"role": "assistant", "content": "Got it, I will help analyze it."},
+    ]
+    app_module.session_store.save_session(session)
+
+    summary = serialize_session_summary(session, project_service=app_module.project_service)
+
+    assert summary["title"] == "This is the first user sentence used as the default se..."
+    assert summary["last_message"] == "This is the first user sentence used as the default session title."
 
 
 
@@ -387,74 +407,102 @@ async def _run_knowledge_task_checks() -> None:
     app_module.knowledge_task_service.reset()
     shutil.rmtree(app_module.state_store.root / "knowledge" / "kb-alpha", ignore_errors=True)
     shutil.rmtree(app_module.state_store.root / "knowledge" / "kb-missing", ignore_errors=True)
+    lightrag_config = Path.cwd() / ".colearn" / "lightrag.json"
+    lightrag_backup = lightrag_config.read_text(encoding="utf-8") if lightrag_config.exists() else None
+    if lightrag_config.exists():
+        lightrag_config.unlink()
+    ai_seed = Path.cwd() / "artificial-intelligence-notes.md"
+    ai_seed.write_text("Artificial intelligence, machine learning, retrieval augmented generation.", encoding="utf-8")
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        create = await client.post(
-            "/api/v1/knowledge/create",
-            data={
-                "name": "kb-alpha",
-                "rag_provider": "lightrag",
-            },
-            files=[("files", ("alpha.txt", b"hello world", "text/plain"))],
-        )
-        assert create.status_code == 200
-        task_id = create.json()["task_id"]
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            create = await client.post(
+                "/api/v1/knowledge/create",
+                data={
+                    "name": "kb-alpha",
+                    "rag_provider": "lightrag",
+                },
+                files=[("files", ("alpha.txt", b"hello world", "text/plain"))],
+            )
+            assert create.status_code == 200
+            task_id = create.json()["task_id"]
 
-        stream = await client.get(f"/api/v1/knowledge/tasks/{task_id}/stream")
-        assert stream.status_code == 200
-        text = stream.text
-        assert "event: process_log" in text
-        assert "event: progress" in text
-        assert "event: complete" in text
+            stream = await client.get(f"/api/v1/knowledge/tasks/{task_id}/stream")
+            assert stream.status_code == 200
+            text = stream.text
+            assert "event: process_log" in text
+            assert "event: progress" in text
+            assert "event: complete" in text
 
-        listing = await client.get("/api/v1/knowledge/kb-alpha/files")
-        assert listing.status_code == 200
-        files = listing.json()["files"]
-        assert len(files) == 1
-        assert files[0]["name"] == "alpha.txt"
+            listing = await client.get("/api/v1/knowledge/kb-alpha/files")
+            assert listing.status_code == 200
+            files = listing.json()["files"]
+            assert len(files) == 1
+            assert files[0]["name"] == "alpha.txt"
 
-        graph = await client.get("/api/v1/knowledge/kb-alpha/graph")
-        assert graph.status_code == 200
-        graph_payload = graph.json()
-        assert isinstance(graph_payload["nodes"], list)
-        assert isinstance(graph_payload["edges"], list)
-        assert any(
-            node["id"] == "library:kb-alpha" and node["kind"] == "library"
-            for node in graph_payload["nodes"]
-        )
-        assert any(
-            node["id"] == "file:kb-alpha:alpha.txt" and node["kind"] == "file"
-            for node in graph_payload["nodes"]
-        )
-        assert any(
-            node["label"] == "Alpha" and node["kind"] == "concept"
-            for node in graph_payload["nodes"]
-        )
-        assert any(
-            edge["source"] == "library:kb-alpha"
-            and edge["target"] == "file:kb-alpha:alpha.txt"
-            and edge["kind"] == "contains"
-            for edge in graph_payload["edges"]
-        )
-        assert any(edge["kind"] == "mentions" for edge in graph_payload["edges"])
+            imported = await client.post("/api/v1/knowledge/kb-alpha/import-local")
+            assert imported.status_code == 200
+            assert imported.json()["task_id"]
 
-        fetched = await client.get("/api/v1/knowledge/kb-alpha/files/alpha.txt")
-        assert fetched.status_code == 200
-        assert fetched.text == "hello world"
+            listing_after_import = await client.get("/api/v1/knowledge/kb-alpha/files")
+            names = {item["name"] for item in listing_after_import.json()["files"]}
+            assert "alpha.txt" in names
+            assert "artificial-intelligence-notes.md" in names
 
-        missing = await client.get("/api/v1/knowledge/kb-alpha/files/missing.txt")
-        assert missing.status_code == 404
+            assert lightrag_config.exists()
+            lightrag_payload = json.loads(lightrag_config.read_text(encoding="utf-8"))
+            assert lightrag_payload["enabled"] is True
+            assert lightrag_payload["provider"]["name"] == "local"
 
-        reindex_ok = await client.post("/api/v1/knowledge/kb-alpha/reindex")
-        assert reindex_ok.status_code == 200
-        assert reindex_ok.json()["task_id"]
+            graph = await client.get("/api/v1/knowledge/kb-alpha/graph")
+            assert graph.status_code == 200
+            graph_payload = graph.json()
+            assert isinstance(graph_payload["nodes"], list)
+            assert isinstance(graph_payload["edges"], list)
+            assert graph_payload["visualization_url"] is None
+            assert any(
+                node["id"] == "library:kb-alpha" and node["kind"] == "library"
+                for node in graph_payload["nodes"]
+            )
+            assert any(
+                node["id"] == "file:kb-alpha:alpha.txt" and node["kind"] == "file"
+                for node in graph_payload["nodes"]
+            )
+            assert any(
+                node["label"] == "Alpha" and node["kind"] == "concept"
+                for node in graph_payload["nodes"]
+            )
+            assert any(
+                edge["source"] == "library:kb-alpha"
+                and edge["target"] == "file:kb-alpha:alpha.txt"
+                and edge["kind"] == "contains"
+                for edge in graph_payload["edges"]
+            )
+            assert any(edge["kind"] == "mentions" for edge in graph_payload["edges"])
 
-        reindex_fail = await client.post("/api/v1/knowledge/kb-missing/reindex")
-        assert reindex_fail.status_code == 200
-        failed_stream = await client.get(
-            f"/api/v1/knowledge/tasks/{reindex_fail.json()['task_id']}/stream"
-        )
-        assert "event: failed" in failed_stream.text
+            fetched = await client.get("/api/v1/knowledge/kb-alpha/files/alpha.txt")
+            assert fetched.status_code == 200
+            assert fetched.text == "hello world"
+
+            missing = await client.get("/api/v1/knowledge/kb-alpha/files/missing.txt")
+            assert missing.status_code == 404
+
+            reindex_ok = await client.post("/api/v1/knowledge/kb-alpha/reindex")
+            assert reindex_ok.status_code == 200
+            assert reindex_ok.json()["task_id"]
+
+            reindex_fail = await client.post("/api/v1/knowledge/kb-missing/reindex")
+            assert reindex_fail.status_code == 200
+            failed_stream = await client.get(
+                f"/api/v1/knowledge/tasks/{reindex_fail.json()['task_id']}/stream"
+            )
+            assert "event: failed" in failed_stream.text
+    finally:
+        ai_seed.unlink(missing_ok=True)
+        if lightrag_backup is None:
+            lightrag_config.unlink(missing_ok=True)
+        else:
+            lightrag_config.write_text(lightrag_backup, encoding="utf-8")
 
 
 def test_knowledge_task_and_file_endpoints() -> None:
@@ -549,6 +597,18 @@ async def _run_settings_apply_persistence_checks() -> None:
     assert "DEEPSEEK_MODEL=deepseek-v4-flash" in env_text
     assert "EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1/embeddings" in env_text
     assert "EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B" in env_text
+
+    config_path = Path(app_module.settings_service.settings()["runtime"]["config_path"])
+    assert config_path.exists()
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["agents"]["defaults"]["provider"] == "deepseek"
+    assert config["agents"]["defaults"]["model"] == "deepseek-v4-flash"
+    assert config["providers"] == {
+        "deepseek": {
+            "apiKey": "${DEEPSEEK_API_KEY}",
+            "apiBase": "https://api.deepseek.com",
+        }
+    }
 
 
 def test_settings_apply_persists_state_and_env() -> None:

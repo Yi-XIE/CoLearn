@@ -80,6 +80,7 @@ def update_session(session_id: str, payload: SessionUpdatePayload) -> dict[str, 
     next_title = payload.title.strip()
     if next_title:
         session.title = next_title
+        session.title_is_custom = True
     touch_session(session)
     session_store.save_session(session)
     return {"session": serialize_session_detail(session, project_service=project_service)}

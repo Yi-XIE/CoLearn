@@ -16,6 +16,7 @@ class LearningSession:
     session_id: str
     project_id: str = ""
     title: str = ""
+    title_is_custom: bool = False
     created_at: int = 0
     updated_at: int = 0
     turn_mode: str = "EXPLORE"

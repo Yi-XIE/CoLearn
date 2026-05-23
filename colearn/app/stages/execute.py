@@ -6,6 +6,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from colearn.compression import RuntimeCompressionBridge
+from colearn.api.state import SettingsStateService
 from colearn.learning.state_hooks import before_turn, policy
 from colearn.paths import colearn_nanobot_workspace
 from colearn.projects.models import LearningProject
@@ -25,9 +26,11 @@ class ExecuteStage:
         *,
         executor: NanobotTurnExecutor,
         runtime_compression: RuntimeCompressionBridge,
+        settings_service: SettingsStateService,
     ) -> None:
         self.executor = executor
         self.runtime_compression = runtime_compression
+        self.settings_service = settings_service
 
     # ------------------------------------------------------------------
     # Public entry
@@ -36,6 +39,7 @@ class ExecuteStage:
         ctx.turn_policy = policy(
             board=ctx.board,
             user_message=ctx.user_message,
+            memory_enabled=self.settings_service.memory_settings()["enabled"],
         )
         ctx.request = self._build_turn_request(
             session=ctx.session,

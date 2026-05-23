@@ -36,9 +36,15 @@ class LightRAGConfig:
         enabled = bool(payload.get("enabled", False))
         if "LIGHTRAG_ENABLED" in env_values:
             enabled = str(env_values["LIGHTRAG_ENABLED"]).strip().lower() in {"1", "true", "yes", "on"}
+        provider = str(
+            env_values.get("LIGHTRAG_PROVIDER")
+            or provider_block.get("name")
+            or payload.get("provider_name")
+            or "local"
+        ).strip() or "local"
         return cls(
             enabled=enabled,
-            provider=str(provider_block.get("name") or payload.get("provider_name") or "local").strip() or "local",
+            provider=provider,
             api_key=str(provider_block.get("api_key") or env_values.get("LIGHTRAG_API_KEY") or "").strip(),
             base_url=str(provider_block.get("base_url") or env_values.get("LIGHTRAG_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/"),
             top_k=int(payload.get("top_k") or env_values.get("LIGHTRAG_TOP_K") or DEFAULT_TOP_K),
@@ -65,3 +71,23 @@ class LightRAGConfig:
             encoding="utf-8",
         )
         return path
+
+
+def ensure_lightrag_config(
+    path: Path,
+    *,
+    provider: str = "local",
+    enabled: bool = True,
+    base_url: str = DEFAULT_BASE_URL,
+    api_key: str = "",
+) -> LightRAGConfig:
+    if path.exists():
+        return LightRAGConfig.load(path)
+    config = LightRAGConfig(
+        enabled=enabled,
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url.rstrip("/"),
+    )
+    config.save(path)
+    return config

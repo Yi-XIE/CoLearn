@@ -40,8 +40,8 @@ class PreflightStage:
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
-    def run(self, ctx: TurnContext) -> TurnContext:
-        prepared = self._prepare_turn_context(
+    async def run_async(self, ctx: TurnContext) -> TurnContext:
+        prepared = await self._prepare_turn_context(
             session_id=ctx.session_id,
             project_id=ctx.project_id,
         )
@@ -70,7 +70,7 @@ class PreflightStage:
     # ------------------------------------------------------------------
     # Internals (lifted verbatim from LearningOrchestrator)
     # ------------------------------------------------------------------
-    def _prepare_turn_context(
+    async def _prepare_turn_context(
         self,
         *,
         session_id: str,
@@ -79,7 +79,7 @@ class PreflightStage:
         session = self._get_or_create_session(session_id=session_id, project_id=project_id)
         project = self._get_or_create_project(project_id=project_id, session=session)
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
-        source_profile = self.source_preflight.run(
+        source_profile = await self.source_preflight.run_async(
             project_id=project.project_id,
             source_refs=source_refs,
         )

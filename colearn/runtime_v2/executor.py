@@ -22,10 +22,10 @@ from colearn.logging_config import get_logger
 from colearn.memory.store import EventMemoryStore
 from colearn.retrieval.service import RetrievalService
 
-from .profile import COLEARN_NANOBOT_SLIM_CONFIG
+from .profile import COLEARN_NANOBOT_SLIM_CONFIG, DEFAULT_ENABLED_TOOLS
 from .prompting import build_turn_prompt
 from .result_bridge import normalize_learning_turn_result
-from .tooling import install_colearn_tools
+from .tooling import bind_colearn_tools, register_colearn_tools
 
 logger = get_logger(__name__)
 
@@ -150,7 +150,7 @@ class NanobotTurnExecutor:
                         f"stream_emit_failed:{type(exc).__name__}"
                     )
 
-        install_colearn_tools(
+        bind_colearn_tools(
             bot=bot,
             request=request,
             workspace=self.workspace,
@@ -258,6 +258,22 @@ class NanobotTurnExecutor:
             if self.workspace is not None:
                 kwargs["workspace"] = self.workspace
             self._bot = Nanobot.from_config(**kwargs)
+            # Expose the tool registry through a CoLearn-owned public surface so
+            # runtime tooling does not need to reach into nanobot internals.
+            if getattr(self._bot, "tools", None) is None and getattr(self._bot, "_loop", None) is not None:
+                self._bot.tools = self._bot._loop.tools
+            bootstrap_request = LearningTurnRequest(
+                session_id="colearn-bootstrap",
+                project_id="colearn-bootstrap",
+                enabled_tools=list(DEFAULT_ENABLED_TOOLS),
+            )
+            register_colearn_tools(
+                bot=self._bot,
+                request=bootstrap_request,
+                workspace=self.workspace,
+                retrieval_service=self.retrieval_service,
+                memory_store=self.memory_store,
+            )
         return self._bot
 
     def _build_prompt(self, request: LearningTurnRequest) -> str:

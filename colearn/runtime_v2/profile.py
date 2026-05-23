@@ -8,11 +8,10 @@ from colearn.paths import colearn_slim_config
 COLEARN_NANOBOT_SLIM_CONFIG = colearn_slim_config()
 
 # First-wave tools to keep in the mainline once CoLearn starts wiring into
-# nanobot v0.2 directly. The important bit is that LightRAG stays in the core
-# conversation path from day one.
+# nanobot v0.2 directly. Keep the default runtime light; retrieval-heavy tools
+# can be enabled per turn by policy.
 DEFAULT_ENABLED_TOOLS = [
     "memory",
-    "lightrag",
 ]
 
 # Upstream areas we intentionally keep out of the first CoLearn-v0.2 runtime

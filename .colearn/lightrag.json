@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "enabled": true,
+  "provider": {
+    "name": "local",
+    "api_key": "",
+    "base_url": "http://127.0.0.1:9621"
+  },
+  "top_k": 5
+}

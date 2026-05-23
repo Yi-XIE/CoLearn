@@ -89,6 +89,7 @@ export interface ChatSummary {
   createdAt: string | null;
   updatedAt: string | null;
   title?: string;
+  titleIsCustom?: boolean;
   preview: string;
 }
 
@@ -107,6 +108,7 @@ export interface LearningSupportItem {
 }
 
 export interface LearningSupportPayload {
+  retrieval_active?: boolean;
   prompt_support_bundle: LearningSupportItem[];
   retrieval_hits: LearningSupportItem[];
   retrieval_misses: Array<Record<string, unknown>>;
@@ -172,6 +174,13 @@ export interface KnowledgeFileSummary {
   mime_type?: string | null;
 }
 
+export interface KnowledgeFilePreview {
+  name: string;
+  path: string;
+  kind: "markdown" | "text" | "unsupported";
+  content: string;
+}
+
 export interface KnowledgeBaseSummary {
   id: string;
   name: string;
@@ -220,6 +229,9 @@ export interface KnowledgeGraphEdge {
 export interface KnowledgeGraphPayload {
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
+  visualization_url?: string | null;
+  provider?: string | null;
+  sync_status?: string | null;
 }
 
 export interface MemorySummaryItem {

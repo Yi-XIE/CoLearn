@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSessionHistory, useSessions } from "@/hooks/useSessions";
+import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
 import { ClientProvider } from "@/providers/ClientProvider";
 
@@ -462,5 +462,34 @@ describe("useSessions", () => {
 
     expect(api.updateSessionTitle).toHaveBeenCalledWith("tok", "chat-a", "Custom name");
     expect(result.current.sessions[0]?.title).toBe("Custom name");
+  });
+
+  it("uses the first user message as the default title until the user renames the session", () => {
+    const autoTitle = sessionTitle({
+      key: "chat-a",
+      channel: "",
+      chatId: "chat-a",
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      title: "Generated title",
+      titleIsCustom: false,
+      preview: "This is the first user sentence that should become the default title",
+    });
+
+    expect(autoTitle.startsWith("This is the first user sentence")).toBe(true);
+    expect(autoTitle.endsWith("...")).toBe(true);
+
+    expect(
+      sessionTitle({
+        key: "chat-b",
+        channel: "",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Custom name",
+        titleIsCustom: true,
+        preview: "This preview should not override the custom title",
+      }),
+    ).toBe("Custom name");
   });
 });

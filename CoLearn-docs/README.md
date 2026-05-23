@@ -5,7 +5,8 @@ This folder keeps the documents for the current CoLearn mainline.
 ## What to read
 
 - `02-Architecture`: current runtime, state, and writeback facts
-- `03-Learning-Knowledge/LightRAG-background-knowledge-state-machine.md`: knowledge base strategy and state-machine integration
+- `02-Architecture/CoLearn-LightRAG-学习状态机瘦身评估.md`: single source of truth for the current Learning Mode slimming plan, including LightRAG, PlanStage, LearningBoard, and web search
+- `03-Learning-Knowledge/LightRAG-background-knowledge-state-machine.md`: compatibility stub that points back to the main architecture doc
 - `04-Claude-Handoffs`: handoff notes for collaborators
 - `05-Nanobot-v0.2`: runtime adoption status and remaining cleanup
 
@@ -13,7 +14,7 @@ This folder keeps the documents for the current CoLearn mainline.
 
 - `webui + runtime_v2 + slim config` is the default path.
 - `LearningState` is part of the turn writeback chain.
-- `LightRAG` and `memory` are the default learning tools.
+- `memory` is the default learning tool, and `LightRAG` is enabled on demand.
 
 ## Maintenance Rules
 

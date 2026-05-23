@@ -9,7 +9,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { Sidebar } from "@/components/Sidebar";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { useSessions } from "@/hooks/useSessions";
+import { sessionTitle, useSessions } from "@/hooks/useSessions";
 import { useTheme } from "@/hooks/useTheme";
 import { deriveWsUrl, fetchBootstrap, loadSavedSecret, saveSecret } from "@/lib/bootstrap";
 import { deriveTitle } from "@/lib/format";
@@ -247,11 +247,13 @@ function Shell({
   }, [renameChat, t]);
 
   const headerTitle = activeSession
-    ? (activeSession.title?.trim()
-      || deriveTitle(
+    ? sessionTitle(
+        activeSession,
+        undefined,
+      ) || deriveTitle(
         activeSession.preview,
         t("chat.fallbackTitle", { id: activeSession.chatId.slice(0, 6) }),
-      ))
+      )
     : BRAND_NAME;
 
   useEffect(() => {

@@ -2,6 +2,7 @@ import type {
   ChatSummary,
   KnowledgeBaseSummary,
   KnowledgeFileSummary,
+  KnowledgeFilePreview,
   KnowledgeGraphPayload,
   KnowledgeTaskResult,
   LearningSupportPayload,
@@ -286,6 +287,7 @@ export async function listSessions(
     created_at?: string | null;
     updated_at?: string | null;
     title?: string;
+    title_is_custom?: boolean;
     last_message?: string;
   };
   const body = await request<{ sessions: Row[] }>(
@@ -298,6 +300,7 @@ export async function listSessions(
     createdAt: normalizeSessionDate(s.created_at),
     updatedAt: normalizeSessionDate(s.updated_at),
     title: s.title ?? "",
+    titleIsCustom: Boolean(s.title_is_custom),
     preview: s.last_message ?? "",
   }));
 }
@@ -363,6 +366,7 @@ export async function fetchLearningSupport(
   const lastTurn = (session.last_turn_result ?? {}) as Record<string, unknown>;
   const runtime = (lastTurn.runtime_v2 ?? {}) as Record<string, unknown>;
   const retrieval = ((runtime.retrieval as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const retrievalActive = Boolean(retrieval.retrieval_active);
   const promptSupport =
     (retrieval.prompt_support_bundle as LearningSupportPayload["prompt_support_bundle"] | undefined)
     ?? [];
@@ -372,8 +376,10 @@ export async function fetchLearningSupport(
   const hits =
     (retrieval.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
     ?? [];
+  if (!retrievalActive) return null;
   if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0) return null;
   return {
+    retrieval_active: retrievalActive,
     prompt_support_bundle: promptSupport,
     retrieval_hits: hits,
     retrieval_misses: misses,
@@ -414,6 +420,7 @@ export async function updateSessionTitle(
       created_at?: string | number | null;
       updated_at?: string | number | null;
       title?: string;
+      title_is_custom?: boolean;
       last_message?: string;
     };
   }>(
@@ -433,6 +440,7 @@ export async function updateSessionTitle(
     createdAt: normalizeSessionDate(session.created_at),
     updatedAt: normalizeSessionDate(session.updated_at),
     title: String(session.title ?? ""),
+    titleIsCustom: Boolean(session.title_is_custom),
     preview: String(session.last_message ?? ""),
   };
 }
@@ -574,6 +582,18 @@ export async function listKnowledgeFiles(
   return body.files;
 }
 
+export async function fetchKnowledgeFilePreview(
+  token: string,
+  name: string,
+  filePath: string,
+  base: string = "",
+): Promise<KnowledgeFilePreview> {
+  return request<KnowledgeFilePreview>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/files/${encodeURIComponent(filePath)}/preview`,
+    token,
+  );
+}
+
 export async function fetchKnowledgeGraph(
   token: string,
   id: string,
@@ -623,6 +643,18 @@ export async function reindexKnowledgeBase(
 ): Promise<KnowledgeTaskResult> {
   return request<KnowledgeTaskResult>(
     `${base}/api/v1/knowledge/${encodeURIComponent(name)}/reindex`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export async function importLocalKnowledgeFiles(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<KnowledgeTaskResult> {
+  return request<KnowledgeTaskResult>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/import-local`,
     token,
     { method: "POST" },
   );

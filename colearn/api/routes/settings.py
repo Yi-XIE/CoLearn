@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from colearn.api.dependencies import settings_service
-from colearn.api.schemas import SettingsCatalogPayload, SettingsUiPayload
+from colearn.api.schemas import SettingsCatalogPayload, SettingsMemoryPayload, SettingsUiPayload
 
 router = APIRouter()
 
@@ -69,6 +69,11 @@ def get_llm_options() -> dict[str, Any]:
 @router.put("/api/v1/settings/ui")
 def update_settings_ui(payload: SettingsUiPayload) -> dict[str, Any]:
     return {"ui": settings_service.update_ui(theme=payload.theme, language=payload.language)}
+
+
+@router.put("/api/v1/settings/memory")
+def update_settings_memory(payload: SettingsMemoryPayload) -> dict[str, Any]:
+    return {"memory": settings_service.update_memory_settings(enabled=payload.enabled)}
 
 
 @router.put("/api/v1/settings/catalog")

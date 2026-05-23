@@ -235,11 +235,18 @@
 
 ## 当前边界与已知限制
 
-截至当前代码，Learning State 协议有几个明确边界：
+### 已解决的边界
 
-- Session 是 Board 的事实主源，project 是镜像
-- 事件抽取仍是轻量启发式，不是完整状态机
-- `BoardFacts` 的运行时类型和持久化类型仍是双重表示
-- `board_version` 具备 stale write 保护，但不是严格 compare-and-swap 协议
+- 事件抽取：除启发式兜底（`signal_extractor.py`）外，已加入 LLM 驱动的 `BoardSnapshotDeriver` 定期重推 BoardFacts，自动修正回合级 patch 错误
+- `board_version` stale write 保护：`WritebackStage._write_back()` 会在冲突时跳过写入并记录 warning
+- Session 自动压缩、Dream 后台合并、AgentHook 真流式已全部接入
+- 回合前 `retrieval_focus` / `prefetch` / `prompt_support_bundle` 已进入主链
 
-这份文档记录的是当前协议事实。后续如果推进强类型 Board 存储、严格版本写入或 retrieval contract 收紧，应同步更新本文档。
+### 仍然存在的边界
+
+- `parallel_support` 仍是轻量并行检索闭环，尚未替换为 nanobot `SubagentManager`
+- `BoardFacts` 运行时是 dataclass，持久化仍为 dict，类型边界未完全收紧
+- `retrieval_evidence_map` 已有带 target_type / target_id / support_reason 的映射，但尚未把模型最终回答中的逐条引用反写成完整引用图
+- 认证、knowledge task、settings diagnostics 仍是本地联调用轻量实现，不是生产级平台能力
+
+这份文档记录的是当前协议事实。后续如果解决上述任一边界，应同步更新本文档。

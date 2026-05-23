@@ -83,6 +83,7 @@ class FinalizeStage:
         evidence_map = {key: list(value or []) for key, value in retrieval_evidence_map.items()}
         hits: list[dict[str, Any]] = []
         misses: list[dict[str, Any]] = []
+        retrieval_active = "lightrag" in {str(item).strip().lower() for item in list(request.enabled_tools or [])}
         board = request.board_facts
         active_node_id = str(board.current_progress.active_node_id or "").strip()
         blocker_ids = [
@@ -102,7 +103,7 @@ class FinalizeStage:
                 for item in values:
                     if item not in hits:
                         hits.append(item)
-        if not hits:
+        if retrieval_active and not hits:
             misses.append(
                 {
                     "reason": "no_prefetched_references",

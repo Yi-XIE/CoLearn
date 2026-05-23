@@ -297,8 +297,9 @@ export function sessionTitle(
   session: ChatSummary,
   firstUserMessage?: string,
 ): string {
+  const customTitle = session.titleIsCustom ? session.title : "";
   return deriveTitle(
-    session.title || firstUserMessage || session.preview,
+    customTitle || firstUserMessage || session.preview,
     i18n.t("chat.newChat"),
   );
 }

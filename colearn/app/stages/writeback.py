@@ -7,9 +7,11 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from colearn.logging_config import get_logger
+from colearn.api.state import MemoryDocStateService, SettingsStateService
 from colearn.memory.store import EventMemoryStore, MemoryEvent
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
+from colearn.sessions.titles import derive_session_title
 from colearn.runtime_v2.executor import NanobotTurnExecutor
 from colearn.sessions.store import LearningSession, SessionStore
 
@@ -41,6 +43,8 @@ class WritebackStage:
         project_service: LearningProjectService,
         session_store: SessionStore,
         memory_store: EventMemoryStore,
+        settings_service: SettingsStateService,
+        memory_doc_service: MemoryDocStateService,
         executor: NanobotTurnExecutor,
         background_finalizer: Any,
         build_last_turn_result: Callable[..., dict[str, Any]],
@@ -49,6 +53,8 @@ class WritebackStage:
         self.project_service = project_service
         self.session_store = session_store
         self.memory_store = memory_store
+        self.settings_service = settings_service
+        self.memory_doc_service = memory_doc_service
         self.executor = executor
         self.background_finalizer = background_finalizer
         # Borrowed from FinalizeStage so we don't cross-import it.
@@ -141,6 +147,8 @@ class WritebackStage:
                 {"role": "assistant", "content": result.final_text},
             ]
         )
+        if not session.title_is_custom and not str(session.title or "").strip():
+            session.title = derive_session_title(request.user_message)
         current_project = self.project_service.get_project(project.project_id)
         if current_project is not None:
             project = current_project
@@ -159,29 +167,32 @@ class WritebackStage:
         project.current_main_goal = (
             request.turn_policy.main_goal if request.turn_policy else project.current_main_goal
         )
-        for item in result.memory_events:
-            self.memory_store.append(
-                MemoryEvent(
-                    event_id=str(uuid4()),
-                    kind=str(item.get("kind") or "event"),
-                    payload=dict(item.get("payload") or {}),
-                )
-            )
-        # P2: Persist learning_events (incl. signal_extractor output) to event store
-        for item in result.learning_events:
-            if hasattr(item, "event_id"):
-                self.memory_store.append(item)
-            elif isinstance(item, dict) and item.get("kind"):
+        memory_enabled = self.settings_service.memory_settings()["enabled"]
+        if memory_enabled:
+            for item in result.memory_events:
                 self.memory_store.append(
                     MemoryEvent(
-                        event_id=str(item.get("event_id") or uuid4()),
-                        kind=str(item["kind"]),
+                        event_id=str(uuid4()),
+                        kind=str(item.get("kind") or "event"),
                         payload=dict(item.get("payload") or {}),
                     )
                 )
+        # P2: Persist learning_events (incl. signal_extractor output) to event store
+        if memory_enabled:
+            for item in result.learning_events:
+                if hasattr(item, "event_id"):
+                    self.memory_store.append(item)
+                elif isinstance(item, dict) and item.get("kind"):
+                    self.memory_store.append(
+                        MemoryEvent(
+                            event_id=str(item.get("event_id") or uuid4()),
+                            kind=str(item["kind"]),
+                            payload=dict(item.get("payload") or {}),
+                        )
+                    )
         # P1: Record board_patch application as event for consolidation input
         board_patch = result.board_patch
-        if board_patch and not session_conflict:
+        if memory_enabled and board_patch and not session_conflict:
             self.memory_store.append(
                 MemoryEvent(
                     event_id=str(uuid4()),
@@ -196,6 +207,10 @@ class WritebackStage:
             )
         self._append_nanobot_history(project=project, session=session, result=result)
         self._maybe_compact_session(session)
+        self._sync_memory_documents(
+            session=session,
+            review_summary=str(getattr(result, "review_summary", "") or ""),
+        )
         self._maybe_consolidate_memory(project, session, result)
         self._maybe_derive_board_snapshot(project=project, session=session, result=result)
         if not session.source_refs and project.source_refs:
@@ -326,6 +341,8 @@ class WritebackStage:
         session: LearningSession,
         result,
     ) -> None:
+        if not self.settings_service.memory_settings()["enabled"]:
+            return
         event_count = len(self.memory_store.list_events())
         if event_count == 0 or event_count % self.DREAM_CONSOLIDATION_EVENT_INTERVAL != 0:
             return
@@ -374,6 +391,32 @@ class WritebackStage:
                     },
                 )
             )
+
+    def _sync_memory_documents(self, *, session: LearningSession) -> None:
+        if not self.settings_service.memory_settings()["enabled"]:
+            return
+        memory_docs = getattr(self.settings_service, "memory_doc_service", None)
+        if not isinstance(memory_docs, MemoryDocStateService):
+            return
+        review_summary = str((session.pending_review or {}).get("summary") or "").strip()
+        if review_summary:
+            memory_docs.refresh_summary(review_summary)
+        events = self.memory_store.list_events_for_session(session.session_id)
+        for event in reversed(events):
+            if str(getattr(event, "kind", "") or "") != MemoryEventKind.PROFILE_CONSOLIDATED:
+                continue
+            payload = dict(getattr(event, "payload", {}) or {})
+            excerpt = str(payload.get("memory_excerpt") or "").strip()
+            source_key = str(payload.get("dream_cursor") or payload.get("event_id") or event.event_id or "").strip()
+            if not excerpt or not source_key:
+                return
+            memory_docs.append_auto_entry(
+                "profile",
+                source_key=f"dream:{source_key}",
+                title="长期画像",
+                body=excerpt,
+            )
+            return
 
     def _maybe_derive_board_snapshot(
         self,

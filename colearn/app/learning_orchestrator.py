@@ -9,6 +9,7 @@ from colearn.logging_config import get_logger
 from colearn.config.defaults import Defaults
 from colearn.compression import ProductCompressionBridge, RuntimeCompressionBridge
 from colearn.knowledge import KnowledgeWorkspaceService
+from colearn.api.state import MemoryDocStateService, SettingsStateService
 from colearn.learning.board_deriver import BoardSnapshotDeriver
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.memory.store import EventMemoryStore
@@ -49,6 +50,8 @@ class LearningOrchestrator:
         runtime_compression: RuntimeCompressionBridge | None = None,
         product_compression: ProductCompressionBridge | None = None,
         board_deriver: BoardSnapshotDeriver | None = None,
+        settings_service: SettingsStateService | None = None,
+        memory_doc_service: MemoryDocStateService | None = None,
     ) -> None:
         self.project_service = project_service or LearningProjectService()
         self.session_store = session_store or SessionStore()
@@ -66,6 +69,8 @@ class LearningOrchestrator:
         )
         self.runtime_compression = runtime_compression or RuntimeCompressionBridge()
         self.product_compression = product_compression or ProductCompressionBridge()
+        self.settings_service = settings_service or SettingsStateService()
+        self.memory_doc_service = memory_doc_service or MemoryDocStateService()
         self.background_finalizer = BackgroundTurnFinalizer(
             product_compression=self.product_compression,
             on_result=lambda **payload: self.writeback.apply_background_result(**payload),
@@ -88,12 +93,15 @@ class LearningOrchestrator:
         self.execute = ExecuteStage(
             executor=self.executor,
             runtime_compression=self.runtime_compression,
+            settings_service=self.settings_service,
         )
         self.finalize = FinalizeStage()
         self.writeback = WritebackStage(
             project_service=self.project_service,
             session_store=self.session_store,
             memory_store=self.memory_store,
+            settings_service=self.settings_service,
+            memory_doc_service=self.memory_doc_service,
             executor=self.executor,
             background_finalizer=self.background_finalizer,
             build_last_turn_result=self.finalize.build_last_turn_result,
@@ -149,7 +157,7 @@ class LearningOrchestrator:
             stream_emit=stream_emit,
             cancel_check=cancel_check,
         )
-        ctx = self.preflight.run(ctx)
+        ctx = await self.preflight.run_async(ctx)
         ctx = await self.retrieval.run_async(ctx)
         self.preflight.sync_project_retrieval_profile(ctx)
         ctx = await self.execute.run_async(ctx)
