@@ -67,10 +67,8 @@ nanobot 的 `AgentLoop` 原生支持 `set_model_preset(name)`，切的是当前�
 ```python
 def resolve_model_preset(turn_mode: str) -> str | None:
     return {
-        "EXPLORE": "explore",
-        "ANCHOR": "deep",
-        "CORRECTION": "deep",
-        "VERIFY": "deep",
+        "LEARN": "explore",
+        "CHECK": "deep",
     }.get(turn_mode)
 ```
 

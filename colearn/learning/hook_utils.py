@@ -13,10 +13,6 @@ def normalize_turn_mode(raw: str | None) -> TurnMode:
     value = str(raw or "LEARN").upper()
     if value in {"LEARN", "CHECK", "PAUSED"}:
         return cast(TurnMode, value)
-    if value in {"ANCHOR", "EXPLORE"}:
-        return "LEARN"
-    if value in {"CORRECTION", "VERIFY"}:
-        return "CHECK"
     return "LEARN"
 
 

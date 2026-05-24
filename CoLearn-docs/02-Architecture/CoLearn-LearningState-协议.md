@@ -88,13 +88,11 @@
 
 当前允许的 turn mode 是：
 
-- `ANCHOR`
-- `CORRECTION`
-- `VERIFY`
-- `EXPLORE`
+- `LEARN`
+- `CHECK`
 - `PAUSED`
 
-归一化逻辑在 `_normalize_turn_mode()` 中，未知值会回退为 `EXPLORE`。
+归一化逻辑在 `normalize_turn_mode()` 中，未知值会回退为 `LEARN`。
 
 ## TurnPolicy
 
@@ -122,15 +120,13 @@
 当前 `policy()` 采用轻量规则：
 
 - `PAUSED` 保持暂停
-- 没有 active node 时进入 `ANCHOR`
-- 有 critical blockers 时进入 `CORRECTION`
-- 有 unverified gaps 时进入 `VERIFY`
-- 其他情况进入 `EXPLORE`
+- 有 critical blockers 或 unverified gaps 时进入 `CHECK`
+- 其他学习回合进入 `LEARN`
 
 工具开放规则当前是：
 
 - `memory` 默认可用
-- `lightrag` 仅在 `EXPLORE` 时开启
+- `lightrag` 在 `LEARN` 首轮、资料不足或 `CHECK` 需要证据时按需开启
 
 ### metadata 的当前用途
 

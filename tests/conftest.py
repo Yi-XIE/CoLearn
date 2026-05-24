@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
@@ -33,7 +33,7 @@ class FakeExecutor:
             final_text=f"Answering: {request.user_message}",
             board_before=request.board_facts,
             board_after=request.board_facts,
-            turn_mode_before=request.metadata.get("turn_mode_before", "EXPLORE"),
+            turn_mode_before=request.metadata.get("turn_mode_before", "LEARN"),
             turn_mode_after=request.turn_mode,
             retrieval_bundle=request.retrieval_bundle,
             raw_learning_result={"tool_events": [], "raw_messages": []},
@@ -92,7 +92,7 @@ def make_board(**overrides) -> BoardFacts:
     """Create a BoardFacts with sensible defaults for testing."""
     defaults = {
         "board_version": 1,
-        "current_turn_mode": "EXPLORE",
+        "current_turn_mode": "LEARN",
         "current_progress": ProgressFacts(active_node_id="node-1", mastery_pct=30),
         "gaps_and_blockers": GapsAndBlockers(critical_blockers=[]),
         "student_snapshot": StudentSnapshot(cognitive_load="medium"),

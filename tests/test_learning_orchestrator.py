@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import asyncio
@@ -46,7 +46,7 @@ class FakeExecutor:
             final_text=f"Answering: {request.user_message}",
             board_before=request.board_facts,
             board_after=request.board_facts,
-            turn_mode_before=request.metadata.get("turn_mode_before", "EXPLORE"),
+            turn_mode_before=request.metadata.get("turn_mode_before", "LEARN"),
             turn_mode_after=request.turn_mode,
             retrieval_bundle=request.retrieval_bundle,
             raw_learning_result={"tool_events": [], "raw_messages": []},
@@ -658,7 +658,7 @@ async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
     session.board_facts = {
         "project_id": "proj-meta",
         "session_id": "sess-meta",
-        "current_turn_mode": "EXPLORE",
+        "current_turn_mode": "LEARN",
         "board_version": 4,
         "current_progress": {
             "active_node_id": "node-meta",
@@ -724,7 +724,7 @@ async def test_orchestrator_persists_learning_state_writeback(tmp_path):
     session.board_facts = {
         "project_id": "proj-learning",
         "session_id": "sess-learning",
-        "current_turn_mode": "EXPLORE",
+        "current_turn_mode": "LEARN",
         "board_version": 1,
         "current_progress": {
             "active_node_id": "node-1",
@@ -820,7 +820,7 @@ def test_background_result_only_patches_review_fields(tmp_path):
     session.active_turns = []
     session.messages = [{"role": "assistant", "content": "main result"}]
     session.board_version = 7
-    session.board_facts = {"board_version": 7, "current_turn_mode": "VERIFY"}
+    session.board_facts = {"board_version": 7, "current_turn_mode": "CHECK"}
     session.last_turn_result = {"final_text": "main result", "warnings": [], "product_compression": {"status": "scheduled"}}
     session_store.save_session(session)
 
@@ -851,7 +851,7 @@ def test_background_result_only_patches_review_fields(tmp_path):
     assert saved_session is not None
     assert saved_session.messages == [{"role": "assistant", "content": "main result"}]
     assert saved_session.board_version == 7
-    assert saved_session.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_session.board_facts["current_turn_mode"] == "CHECK"
     assert saved_session.status == "completed"
     assert saved_session.active_turns == []
     assert saved_session.pending_review["summary"] == "review"
@@ -868,7 +868,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     current_project.board_facts = {
         "project_id": "proj-conflict",
         "session_id": "sess-conflict",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "board_version": 3,
     }
     project_service.save_project(current_project)
@@ -878,7 +878,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     current_session.board_facts = {
         "project_id": "proj-conflict",
         "session_id": "sess-conflict",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "board_version": 3,
     }
     session_store.save_session(current_session)
@@ -894,7 +894,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     result_board = BoardFacts(
         project_id="proj-conflict",
         session_id="sess-conflict",
-        current_turn_mode="EXPLORE",
+        current_turn_mode="LEARN",
         board_version=2,
     )
     request = LearningTurnRequest(
@@ -907,7 +907,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
         final_text="stale answer",
         board_before=stale_board,
         board_after=result_board,
-        turn_mode_after="EXPLORE",
+        turn_mode_after="LEARN",
     )
     stale_session = current_session.__class__(
         session_id="sess-conflict",
@@ -934,9 +934,9 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     assert saved_session is not None
     assert saved_project is not None
     assert saved_session.board_version == 3
-    assert saved_session.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_session.board_facts["current_turn_mode"] == "CHECK"
     assert saved_project.board_version == 3
-    assert saved_project.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_project.board_facts["current_turn_mode"] == "CHECK"
     assert "board_version_conflict_session_write_skipped" in saved_session.last_turn_result["warnings"]
     assert "board_version_conflict_project_write_skipped" not in saved_session.last_turn_result["warnings"]
 
@@ -950,12 +950,12 @@ def test_build_learning_board_ignores_legacy_project_board_facts() -> None:
         board_facts={
             "project_id": "proj-board",
             "session_id": "legacy-session",
-            "current_turn_mode": "ANCHOR",
+            "current_turn_mode": "LEARN",
             "board_version": 99,
             "updated_at": "legacy-project-board",
         },
     )
-    session = SessionStore().create_session(session_id="sess-board", project_id="proj-board", turn_mode="VERIFY")
+    session = SessionStore().create_session(session_id="sess-board", project_id="proj-board", turn_mode="CHECK")
     session.board_version = 3
 
     board = build_learning_board(
@@ -1033,7 +1033,7 @@ def test_memory_store_search_events() -> None:
         MemoryEvent(
             event_id="2",
             kind="turn_completed",
-            payload={"session_id": "s1", "project_id": "p1", "turn_mode": "EXPLORE", "summary": "matrix multiplication is not commutative"},
+            payload={"session_id": "s1", "project_id": "p1", "turn_mode": "LEARN", "summary": "matrix multiplication is not commutative"},
         )
     )
     hits = store.search_events(query="matrix", session_id="s1")
@@ -1111,7 +1111,7 @@ async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: P
     session.board_facts = {
         "project_id": "proj-retrieval",
         "session_id": "sess-retrieval",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "board_version": 2,
         "current_progress": {
             "active_node_id": "node-verify",
@@ -1394,7 +1394,7 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
         project=project,
         session=session,
         retrieval_query_context=query_context,
-        turn_mode="EXPLORE",
+        turn_mode="LEARN",
     )
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "no_source_refs"
@@ -1405,7 +1405,7 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
         project=project,
         session=session,
         retrieval_query_context=query_context,
-        turn_mode="EXPLORE",
+        turn_mode="LEARN",
     )
     assert ready["status"] == "ready"
     assert ready["queries"] == ["main query", "blocker one", "blocker two"]
@@ -1506,11 +1506,11 @@ def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
         project_id="proj-summary",
         project_title="Board Summary",
         user_message="Summarize the current state",
-        turn_mode="VERIFY",
+        turn_mode="CHECK",
         board_facts=BoardFacts(
             project_id="proj-summary",
             session_id="sess-summary",
-            current_turn_mode="VERIFY",
+            current_turn_mode="CHECK",
             current_progress=ProgressFacts(
                 active_node_id="node-verify",
                 active_node_label="Verify inference",
@@ -1539,7 +1539,7 @@ def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
     )
 
     board_summary = result.metadata["runtime_v2_board_summary"]
-    assert board_summary["turn_mode"] == "VERIFY"
+    assert board_summary["turn_mode"] == "CHECK"
     assert board_summary["active_node_id"] == "node-verify"
     assert board_summary["active_node_label"] == "Verify inference"
     assert board_summary["mastery_level"] == 0.75

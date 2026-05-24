@@ -1,4 +1,4 @@
-"""Tests for MemoryEventKind constants and TypedDict schemas."""
+﻿"""Tests for MemoryEventKind constants and TypedDict schemas."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_board_snapshot_derived_payload_fields():
         "project_id": "p1",
         "board_version": 3,
         "event_count": 10,
-        "changes": {"turn_mode": {"old": "EXPLORE", "new": "VERIFY"}},
+        "changes": {"turn_mode": {"old": "LEARN", "new": "CHECK"}},
     }
     assert payload["board_version"] == 3
 

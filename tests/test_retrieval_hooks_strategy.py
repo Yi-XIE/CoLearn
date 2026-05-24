@@ -1,4 +1,4 @@
-"""Tests for turn_mode-driven retrieval query strategy and gap re-rank."""
+﻿"""Tests for turn_mode-driven retrieval query strategy and gap re-rank."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def test_check_mode_leads_with_blockers():
 
 
 def test_legacy_anchor_mode_normalizes_to_learn():
-    board = _board(turn_mode="ANCHOR", gaps=["scalar multiplication"])
+    board = _board(turn_mode="LEARN", gaps=["scalar multiplication"])
     ctx = build_retrieval_query_context(
         board=board,
         user_message="explain matrices",
@@ -80,7 +80,7 @@ def test_legacy_anchor_mode_normalizes_to_learn():
 
 
 def test_legacy_verify_mode_normalizes_to_check():
-    board = _board(turn_mode="VERIFY", active_node="rank_theorem")
+    board = _board(turn_mode="CHECK", active_node="rank_theorem")
     ctx = build_retrieval_query_context(
         board=board,
         user_message="check my proof",

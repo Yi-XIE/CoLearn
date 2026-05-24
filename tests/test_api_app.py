@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import json
@@ -143,7 +143,7 @@ def test_turn_mode_maps_to_model_preset() -> None:
     from colearn.learning.state_hooks import policy
 
     board = BoardFacts(
-        current_turn_mode="VERIFY",
+        current_turn_mode="CHECK",
         current_progress=ProgressFacts(active_node_id="node-1", active_node_label="Node 1"),
         student_snapshot=StudentSnapshot(),
         gaps_and_blockers=GapsAndBlockers(),
@@ -162,15 +162,15 @@ def test_turn_request_bridges_workspace_and_model_preset() -> None:
         user_message="hello",
         project_id="p1",
         project_title="P1",
-        turn_mode="VERIFY",
+        turn_mode="CHECK",
         board_facts=BoardFacts(
-            current_turn_mode="VERIFY",
+            current_turn_mode="CHECK",
             current_progress=ProgressFacts(active_node_id="node-1", active_node_label="Node 1"),
             student_snapshot=StudentSnapshot(),
             gaps_and_blockers=GapsAndBlockers(),
             continuation=ContinuationFacts(),
         ),
-        turn_policy=TurnPolicy(turn_mode="VERIFY", model_preset="deep"),
+        turn_policy=TurnPolicy(turn_mode="CHECK", model_preset="deep"),
         metadata={"workspace": "D:/Colearn-nightly"},
     )
     assert request.model_preset == "deep"
@@ -261,7 +261,7 @@ async def _run_project_checks() -> None:
         "session_id": "project-api-session",
         "board_version": 5,
         "updated_at": "2026-05-22T00:00:00Z",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
     }
     session.pending_review = {"summary": "session review", "status": "ready"}
     app_module.session_store.save_session(session)
@@ -399,7 +399,7 @@ class FakeWebSocketOrchestrator:
             )
         return LearningTurnResult(
             final_text=f"WS answer: {kwargs['user_message']}",
-            turn_mode_after="EXPLORE",
+            turn_mode_after="LEARN",
             warnings=[],
             tool_events=[],
             stream_events=[

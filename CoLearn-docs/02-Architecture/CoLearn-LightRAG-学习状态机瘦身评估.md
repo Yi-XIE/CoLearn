@@ -233,7 +233,7 @@
 - `CHECK` 通过后回到下一个 `LEARN`
 - 用户暂停、退出或切回普通聊天时，进入 `PAUSED`
 
-这个三态不再扩回 `ANCHOR / CORRECTION / VERIFY / EXPLORE / PAUSED` 五态，除非后面证明三态不够。
+这个三态不再扩回更细的历史状态集合，除非后面证明三态不够。
 
 ### 7.4 Agent 的边界护栏
 

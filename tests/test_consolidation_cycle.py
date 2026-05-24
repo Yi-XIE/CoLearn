@@ -1,4 +1,4 @@
-"""Integration tests for board snapshot consolidation cycle inside the orchestrator."""
+﻿"""Integration tests for board snapshot consolidation cycle inside the orchestrator."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def _make_orchestrator(tmp_path: Path, *, llm_responses: list[str], deriver_kwar
 
 async def test_board_snapshot_event_appended_after_turn(tmp_path: Path):
     valid_response = json.dumps({
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "mastery_level": 0.6,
         "cognitive_load": "LOW",
         "active_node_id": "x",
