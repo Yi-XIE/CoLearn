@@ -295,6 +295,7 @@ export async function listSessions(
     title?: string;
     title_is_custom?: boolean;
     last_message?: string;
+    mode?: "chat" | "learning";
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/v1/sessions`,
@@ -308,6 +309,7 @@ export async function listSessions(
     title: s.title ?? "",
     titleIsCustom: Boolean(s.title_is_custom),
     preview: s.last_message ?? "",
+    mode: s.mode === "learning" ? "learning" : "chat",
   }));
 }
 
@@ -382,10 +384,26 @@ export async function fetchLearningSupport(
   const hits =
     (retrieval.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
     ?? [];
-  if (!retrievalActive) return null;
-  if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0) return null;
+  const learningPlan = runtime.learning_plan as LearningSupportPayload["learning_plan"] | undefined;
+  const learningBoard = runtime.learning_board as LearningSupportPayload["learning_board"] | undefined;
+  const hasLearningState = Boolean(
+    learningPlan?.goal
+      || learningPlan?.current_node_id
+      || learningPlan?.plan_nodes?.length
+      || learningBoard?.current_progress
+      || learningBoard?.completed_nodes?.length
+      || learningBoard?.blockers?.length
+      || learningBoard?.objections?.length
+      || learningBoard?.evidence_refs?.length
+      || learningBoard?.continuation,
+  );
+  if (!retrievalActive && !hasLearningState) return null;
+  if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0 && !hasLearningState) return null;
   return {
     retrieval_active: retrievalActive,
+    turn_mode: typeof runtime.turn_mode === "string" ? runtime.turn_mode : undefined,
+    learning_plan: learningPlan,
+    learning_board: learningBoard,
     prompt_support_bundle: promptSupport,
     retrieval_hits: hits,
     retrieval_misses: misses,
@@ -428,6 +446,7 @@ export async function updateSessionTitle(
       title?: string;
       title_is_custom?: boolean;
       last_message?: string;
+      mode?: "chat" | "learning";
     };
   }>(
     `${base}/api/v1/sessions/${encodeURIComponent(splitKey(key).chatId || key)}`,
@@ -448,6 +467,7 @@ export async function updateSessionTitle(
     title: String(session.title ?? ""),
     titleIsCustom: Boolean(session.title_is_custom),
     preview: String(session.last_message ?? ""),
+    mode: session.mode === "learning" ? "learning" : "chat",
   };
 }
 

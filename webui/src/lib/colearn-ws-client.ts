@@ -4,6 +4,7 @@ import type {
   InboundEvent,
   OutboundImageGeneration,
   OutboundMedia,
+  SessionMode,
   ToolProgressEvent,
 } from "./types";
 import type {
@@ -50,6 +51,17 @@ function colearnToolEvents(frame: ColearnWsFrame): ToolProgressEvent[] | undefin
 function colearnLatencyMs(frame: ColearnWsFrame): number | undefined {
   const value = colearnMetadata(frame).latency_ms;
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+}
+
+function colearnGoalState(frame: ColearnWsFrame): GoalStateWsPayload | undefined {
+  const value = colearnMetadata(frame).goal_state;
+  if (!value || typeof value !== "object") return undefined;
+  const state = value as Record<string, unknown>;
+  return {
+    active: Boolean(state.active),
+    objective: typeof state.objective === "string" ? state.objective : undefined,
+    ui_summary: typeof state.ui_summary === "string" ? state.ui_summary : undefined,
+  };
 }
 
 function colearnStatus(frame: ColearnWsFrame): string {
@@ -246,7 +258,7 @@ export class ColearnWsClient implements NanobotClientLike {
     chatId: string,
     content: string,
     media?: OutboundMedia[],
-    options?: { imageGeneration?: OutboundImageGeneration },
+    options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void {
     if (!chatId) return;
     if (content.trim() === "/stop") {
@@ -270,6 +282,9 @@ export class ColearnWsClient implements NanobotClientLike {
       language: "zh",
       attachments,
     };
+    if (options?.sessionMode) {
+      frame.mode = options.sessionMode;
+    }
     if (options?.imageGeneration) {
       frame.config = { image_generation: options.imageGeneration };
     }
@@ -411,6 +426,19 @@ export class ColearnWsClient implements NanobotClientLike {
       return;
     }
 
+    if (frame.type === "goal_state" && sessionId) {
+      const goalState = colearnGoalState(frame);
+      if (goalState) {
+        this.goalStateByChatId.set(sessionId, goalState);
+        this.dispatch(sessionId, {
+          event: "goal_state",
+          chat_id: sessionId,
+          goal_state: goalState,
+        });
+      }
+      return;
+    }
+
     if (frame.type === "turn_state" && sessionId) {
       const status = colearnStatus(frame);
       const phase = colearnPhase(frame);
@@ -434,6 +462,15 @@ export class ColearnWsClient implements NanobotClientLike {
         this.runStartedAtByChatId.delete(sessionId);
         if (turnId) this.sawDeltaByTurnId.delete(turnId);
         if (turnId) this.latestSeqByTurnId.delete(turnId);
+        const goalState = colearnGoalState(frame);
+        if (goalState) {
+          this.goalStateByChatId.set(sessionId, goalState);
+          this.dispatch(sessionId, {
+            event: "goal_state",
+            chat_id: sessionId,
+            goal_state: goalState,
+          });
+        }
         this.dispatch(sessionId, {
           event: "goal_status",
           chat_id: sessionId,

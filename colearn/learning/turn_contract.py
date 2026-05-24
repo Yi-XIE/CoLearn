@@ -17,7 +17,7 @@ class LearningTurnRequest:
     language: str = "zh"
     project_id: str = ""
     project_title: str = ""
-    turn_mode: str = "EXPLORE"
+    turn_mode: str = "LEARN"
     model_preset: str | None = None
     board_facts: BoardFacts = field(default_factory=BoardFacts)
     turn_policy: TurnPolicy | None = None

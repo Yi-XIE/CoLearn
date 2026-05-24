@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -275,6 +276,90 @@ class NanobotTurnExecutor:
                 memory_store=self.memory_store,
             )
         return self._bot
+
+    def sync_sustained_goal(
+        self,
+        *,
+        session_id: str,
+        objective: str,
+        ui_summary: str = "",
+    ) -> dict[str, Any]:
+        """Mirror CoLearn's learning goal into nanobot's native goal metadata."""
+        objective = str(objective or "").strip()
+        if not session_id or not objective:
+            return {"status": "skipped", "reason": "missing_goal"}
+
+        try:
+            from nanobot.session.goal_state import GOAL_STATE_KEY, discard_legacy_goal_state_key, parse_goal_state
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"goal_state_unavailable:{type(exc).__name__}"}
+
+        try:
+            bot = self._get_bot()
+            sessions = getattr(getattr(bot, "_loop", None), "sessions", None)
+            if sessions is None:
+                return {"status": "skipped", "reason": "session_manager_unavailable"}
+            session = sessions.get_or_create(session_id)
+            metadata = session.metadata
+            prior = parse_goal_state(metadata.get(GOAL_STATE_KEY))
+            if isinstance(prior, dict) and prior.get("status") == "active":
+                prior_objective = str(prior.get("objective") or "").strip()
+                if prior_objective == objective:
+                    return {"status": "active_existing", "objective": objective}
+                metadata[GOAL_STATE_KEY] = {
+                    **prior,
+                    "status": "completed",
+                    "completed_at": datetime.now().isoformat(),
+                    "recap": "Superseded by a new CoLearn learning goal.",
+                }
+            metadata[GOAL_STATE_KEY] = {
+                "status": "active",
+                "objective": objective,
+                "ui_summary": str(ui_summary or "").strip()[:120],
+                "started_at": datetime.now().isoformat(),
+            }
+            discard_legacy_goal_state_key(metadata)
+            sessions.save(session)
+            return {"status": "active_started", "objective": objective}
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"sync_failed:{type(exc).__name__}"}
+
+    def complete_sustained_goal(
+        self,
+        *,
+        session_id: str,
+        recap: str = "",
+    ) -> dict[str, Any]:
+        """Mark nanobot's native sustained goal complete for this session."""
+        if not session_id:
+            return {"status": "skipped", "reason": "missing_session"}
+
+        try:
+            from nanobot.session.goal_state import GOAL_STATE_KEY, discard_legacy_goal_state_key, parse_goal_state
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"goal_state_unavailable:{type(exc).__name__}"}
+
+        try:
+            bot = self._get_bot()
+            sessions = getattr(getattr(bot, "_loop", None), "sessions", None)
+            if sessions is None:
+                return {"status": "skipped", "reason": "session_manager_unavailable"}
+            session = sessions.get_or_create(session_id)
+            metadata = session.metadata
+            prior = parse_goal_state(metadata.get(GOAL_STATE_KEY))
+            if not isinstance(prior, dict) or prior.get("status") != "active":
+                return {"status": "skipped", "reason": "no_active_goal"}
+            metadata[GOAL_STATE_KEY] = {
+                **prior,
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "recap": str(recap or "").strip(),
+            }
+            discard_legacy_goal_state_key(metadata)
+            sessions.save(session)
+            return {"status": "completed", "objective": str(prior.get("objective") or "")}
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"complete_failed:{type(exc).__name__}"}
 
     def _build_prompt(self, request: LearningTurnRequest) -> str:
         return build_turn_prompt(request)

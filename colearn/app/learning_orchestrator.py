@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable
 
 from colearn.logging_config import get_logger
@@ -24,6 +25,7 @@ from .source_preflight import SourceReadinessPreflight
 from .stages import (
     TurnContext,
     PreflightStage,
+    PlanStage,
     RetrievalStage,
     ExecuteStage,
     FinalizeStage,
@@ -104,6 +106,7 @@ class LearningOrchestrator:
             knowledge_service=self.knowledge_service,
             source_preflight=self.source_preflight,
         )
+        self.plan = PlanStage()
         self.retrieval = RetrievalStage(
             retrieval_service=self.retrieval_service,
             knowledge_service=self.knowledge_service,
@@ -139,6 +142,7 @@ class LearningOrchestrator:
         language: str = "zh",
         attachments: list[dict[str, object]] | None = None,
         requested_skills: list[str] | None = None,
+        requested_mode: str | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> LearningTurnResult:
@@ -150,6 +154,7 @@ class LearningOrchestrator:
             language=language,
             attachments=attachments,
             requested_skills=requested_skills,
+            requested_mode=requested_mode,
             stream_emit=stream_emit,
             cancel_check=cancel_check,
         )
@@ -163,6 +168,7 @@ class LearningOrchestrator:
         language: str = "zh",
         attachments: list[dict[str, object]] | None = None,
         requested_skills: list[str] | None = None,
+        requested_mode: str | None = None,
         stream_emit: Callable[[dict[str, Any]], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> LearningTurnResult:
@@ -173,13 +179,84 @@ class LearningOrchestrator:
             language=language,
             attachments=list(attachments or []),
             requested_skills=list(requested_skills or []),
+            requested_mode=requested_mode,
             stream_emit=stream_emit,
             cancel_check=cancel_check,
         )
         ctx = await self.preflight.run_async(ctx)
-        ctx = await self.retrieval.run_async(ctx)
+        ctx = self.plan.run(ctx)
+        if ctx.session_mode == "learning":
+            ctx = self._sync_sustained_goal(ctx)
+        else:
+            ctx = self._complete_sustained_goal_for_exit(ctx, reason="session_mode:chat")
+        if ctx.session_mode == "learning":
+            ctx = await self.retrieval.run_async(ctx)
+        else:
+            ctx = self.retrieval.skip(ctx, reason="session_mode:chat")
         self.preflight.sync_project_retrieval_profile(ctx)
         ctx = await self.execute.run_async(ctx)
         ctx = self.finalize.run(ctx)
+        ctx = self._complete_sustained_goal_if_finished(ctx)
         await self.writeback.run_async(ctx)
         return ctx.result
+
+    def _sync_sustained_goal(self, ctx: TurnContext) -> TurnContext:
+        if ctx.session_mode != "learning" or ctx.board is None:
+            ctx.goal_lifecycle = {"status": "skipped", "reason": "session_mode:chat"}
+            return ctx
+        plan = ctx.board.learning_plan
+        board = ctx.board.learning_board
+        objective = str(plan.goal or getattr(ctx.project, "goal", "") or "").strip()
+        ui_summary = str(board.current_progress or objective).strip()
+        sync_goal = getattr(self.executor, "sync_sustained_goal", None)
+        if not callable(sync_goal):
+            ctx.goal_lifecycle = {"status": "skipped", "reason": "executor_goal_sync_unavailable"}
+            return ctx
+        ctx.goal_lifecycle = sync_goal(
+            session_id=ctx.session_id,
+            objective=objective,
+            ui_summary=ui_summary,
+        )
+        return ctx
+
+    def _complete_sustained_goal_for_exit(self, ctx: TurnContext, *, reason: str) -> TurnContext:
+        complete_goal = getattr(self.executor, "complete_sustained_goal", None)
+        if not callable(complete_goal):
+            ctx.goal_lifecycle = {"status": "skipped", "reason": "executor_goal_complete_unavailable"}
+            return ctx
+        ctx.goal_lifecycle = complete_goal(
+            session_id=ctx.session_id,
+            recap=f"Learning goal closed because {reason}.",
+        )
+        return ctx
+
+    def _complete_sustained_goal_if_finished(self, ctx: TurnContext) -> TurnContext:
+        if ctx.session_mode != "learning" or ctx.result is None:
+            return ctx
+        if not self._learning_goal_finished(ctx.result):
+            return ctx
+        complete_goal = getattr(self.executor, "complete_sustained_goal", None)
+        if not callable(complete_goal):
+            ctx.goal_lifecycle = {"status": "skipped", "reason": "executor_goal_complete_unavailable"}
+            return ctx
+        recap = f"Completed learning goal: {ctx.result.board_after.learning_plan.goal or ctx.project.title}"
+        completed = complete_goal(session_id=ctx.session_id, recap=recap)
+        ctx.goal_lifecycle = completed
+        raw = dict(ctx.result.raw_learning_result or {})
+        runtime_v2 = dict(raw.get("runtime_v2") or {})
+        if completed.get("status") == "completed":
+            runtime_v2["goal_state"] = {
+                "active": False,
+                "objective": str(completed.get("objective") or ctx.result.board_after.learning_plan.goal or ""),
+                "ui_summary": recap,
+            }
+            raw["runtime_v2"] = runtime_v2
+            ctx.result = replace(ctx.result, raw_learning_result=raw)
+        return ctx
+
+    def _learning_goal_finished(self, result: LearningTurnResult) -> bool:
+        if str(result.turn_mode_after or "").upper() == "PAUSED":
+            return True
+        plan = result.board_after.learning_plan
+        nodes = list(plan.plan_nodes or [])
+        return bool(nodes) and all(str(node.status or "").lower() == "completed" for node in nodes)

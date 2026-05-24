@@ -38,16 +38,39 @@ LIGHTRAG_HINT_KEYWORDS: tuple[str, ...] = (
     "proof",
 )
 
+WEB_SOURCE_KEYWORDS: tuple[str, ...] = (
+    "latest",
+    "current",
+    "today",
+    "news",
+    "web",
+    "internet",
+    "online",
+    "search",
+    "browse",
+    "external source",
+    "public source",
+    "最新",
+    "今天",
+    "新闻",
+    "网页",
+    "网上",
+    "互联网",
+    "搜索",
+    "公开资料",
+    "外部资料",
+)
+
 
 def _needs_lightrag(*, board, user_message: str, turn_mode: str) -> bool:
-    if turn_mode == "EXPLORE":
+    if turn_mode == "LEARN":
         return True
-    if turn_mode == "VERIFY" and bool(board.gaps_and_blockers.unverified_gaps):
+    if turn_mode == "CHECK" and bool(board.gaps_and_blockers.unverified_gaps):
         return True
     lowered = str(user_message or "").strip().lower()
     if lowered and any(keyword in lowered for keyword in LIGHTRAG_HINT_KEYWORDS):
         return True
-    if turn_mode == "CORRECTION":
+    if turn_mode == "CHECK":
         blockers = list(board.gaps_and_blockers.critical_blockers or [])
         if blockers:
             blocker_text = " ".join(str(blocker.desc or "") for blocker in blockers).lower()
@@ -56,33 +79,40 @@ def _needs_lightrag(*, board, user_message: str, turn_mode: str) -> bool:
     return False
 
 
+def _needs_web_tools(*, user_message: str, retrieval_context: dict[str, Any] | None = None) -> bool:
+    lowered = str(user_message or "").strip().lower()
+    if lowered and any(keyword in lowered for keyword in WEB_SOURCE_KEYWORDS):
+        return True
+    fallback = dict((retrieval_context or {}).get("external_web_fallback") or {})
+    return bool(fallback.get("recommended"))
+
+
 def policy(
     *,
     board,
     user_message: str,
     memory_enabled: bool = True,
+    retrieval_context: dict[str, Any] | None = None,
     **_: Any,
 ) -> TurnPolicy:
     turn_mode = determine_turn_mode(board, user_message)
     restrictions: list[str] = []
 
-    if turn_mode == "ANCHOR":
-        restrictions.append("must_clarify_anchor_first")
-    elif turn_mode == "CORRECTION":
+    if turn_mode == "CHECK":
         restrictions.extend(["do_not_introduce_new_topic", "do_not_give_direct_answer"])
-    elif turn_mode == "VERIFY":
-        restrictions.append("do_not_give_direct_answer")
 
     allowed_tools: list[str] = ["memory"] if memory_enabled else []
     if _needs_lightrag(board=board, user_message=user_message, turn_mode=turn_mode):
         allowed_tools.append("lightrag")
+    if _needs_web_tools(user_message=user_message, retrieval_context=retrieval_context):
+        allowed_tools.extend(["web_search", "web_fetch"])
 
     return TurnPolicy(
         turn_mode=turn_mode,
         model_preset=resolve_model_preset(turn_mode),
         main_goal=(
-            "Complete the learning anchor first."
-            if turn_mode == "ANCHOR"
+            "Check and strengthen the current learning node."
+            if turn_mode == "CHECK"
             else "Advance the current learning turn with grounded explanations."
         ),
         restrictions=restrictions,
@@ -90,15 +120,14 @@ def policy(
         enabled_tools=list(allowed_tools),
         reply_contract=ReplyContract(),
         warnings=(
-            ["Project anchor is incomplete."]
-            if turn_mode == "ANCHOR"
-            else [blocker.desc for blocker in board.gaps_and_blockers.critical_blockers]
+            [blocker.desc for blocker in board.gaps_and_blockers.critical_blockers]
         ),
         continuation_prompt=board.continuation.next_prompt_hint,
         metadata={
             "board_version": board.board_version,
             "blocker_count": len(board.gaps_and_blockers.critical_blockers),
             "lightrag_enabled": "lightrag" in allowed_tools,
+            "web_search_enabled": "web_search" in allowed_tools,
         },
     )
 
@@ -118,7 +147,7 @@ def before_turn(
             request,
             metadata={
                 **request.metadata,
-                "turn_mode_before": getattr(request, "turn_mode", "EXPLORE"),
+                "turn_mode_before": getattr(request, "turn_mode", "LEARN"),
                 "board_version_before": int(getattr(board, "board_version", 1) or 1),
                 "active_node_id_before": str(getattr(progress, "active_node_id", "") or ""),
                 "active_node_label_before": str(getattr(progress, "active_node_label", "") or ""),
@@ -149,7 +178,7 @@ def after_turn_payload(
             project=project,
             session_id=getattr(session, "session_id", ""),
             board_version=int(getattr(session, "board_version", 1) or 1),
-            turn_mode=getattr(session, "turn_mode", "EXPLORE"),
+            turn_mode=getattr(session, "turn_mode", "LEARN"),
         )
     updated_board, events = after_turn(
         board=board,
@@ -165,7 +194,7 @@ def after_turn_payload(
     continuation_prompt = updated_board.continuation.next_prompt_hint or str(
         getattr(request, "continuation_prompt", "")
     )
-    turn_mode_before = str(getattr(request, "turn_mode", "EXPLORE"))
+    turn_mode_before = str(getattr(request, "turn_mode", "LEARN"))
     base_board_version = int(getattr(board, "board_version", 1) or 1)
     resolved_board_version = int(updated_board.board_version or 1)
     event_types = [event.type for event in events]
@@ -191,7 +220,11 @@ def after_turn_payload(
             "student_snapshot": asdict(updated_board.student_snapshot),
             "gaps_and_blockers": asdict(updated_board.gaps_and_blockers),
             "evidence_refs": list(updated_board.evidence_refs),
+            "learning_plan": asdict(updated_board.learning_plan),
+            "learning_board": asdict(updated_board.learning_board),
         },
+        "plan_patch": asdict(updated_board.learning_plan),
+        "learning_board": asdict(updated_board.learning_board),
         "continuation_retrieval_hint": {
             "active_node_id": updated_board.current_progress.active_node_id,
             "evidence_refs": list(updated_board.evidence_refs or []),

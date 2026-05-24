@@ -107,6 +107,7 @@ export function useSessions(): {
           updatedAt: new Date().toISOString(),
           title: "",
           preview: "",
+          mode: "chat",
         },
         ...prev.filter((s) => s.key !== key),
       ]),

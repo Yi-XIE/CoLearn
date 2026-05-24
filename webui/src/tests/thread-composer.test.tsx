@@ -101,7 +101,7 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.className).toContain("rounded-[22px]");
     expect(input.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
-    expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
+    expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-[#8C8D8F]");
   });
 
   it("shows turn run timer when runStartedAt is set", () => {

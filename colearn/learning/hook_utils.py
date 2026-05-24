@@ -10,10 +10,14 @@ from colearn.learning.state import TurnMode
 
 
 def normalize_turn_mode(raw: str | None) -> TurnMode:
-    value = str(raw or "EXPLORE").upper()
-    if value in {"ANCHOR", "CORRECTION", "VERIFY", "EXPLORE", "PAUSED"}:
+    value = str(raw or "LEARN").upper()
+    if value in {"LEARN", "CHECK", "PAUSED"}:
         return cast(TurnMode, value)
-    return "EXPLORE"
+    if value in {"ANCHOR", "EXPLORE"}:
+        return "LEARN"
+    if value in {"CORRECTION", "VERIFY"}:
+        return "CHECK"
+    return "LEARN"
 
 
 def utc_now() -> str:

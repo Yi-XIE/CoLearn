@@ -40,6 +40,7 @@ class ExecuteStage:
             board=ctx.board,
             user_message=ctx.user_message,
             memory_enabled=self.settings_service.memory_settings()["enabled"],
+            retrieval_context=ctx.retrieval_context(),
         )
         ctx.request = self._build_turn_request(
             session=ctx.session,
@@ -55,6 +56,8 @@ class ExecuteStage:
             requested_skills=ctx.requested_skills,
             stream_emit=ctx.stream_emit,
             cancel_check=ctx.cancel_check,
+            plan_stage=ctx.plan_stage,
+            goal_lifecycle=ctx.goal_lifecycle,
         )
         compressed, normalized = await self._execute_turn_async(
             project=ctx.project,
@@ -86,6 +89,8 @@ class ExecuteStage:
         requested_skills: list[str],
         stream_emit: Callable[[dict[str, Any]], None] | None,
         cancel_check: Callable[[], bool] | None,
+        plan_stage: dict[str, Any] | None = None,
+        goal_lifecycle: dict[str, Any] | None = None,
     ):
         return build_learning_turn_request(
             session_id=session.session_id,
@@ -110,6 +115,9 @@ class ExecuteStage:
             metadata=self._build_turn_request_metadata(
                 source_profile=source_profile,
                 retrieval_context=retrieval_context,
+                session_mode=str(getattr(session, "mode", "") or "chat"),
+                plan_stage=plan_stage,
+                goal_lifecycle=goal_lifecycle,
             ),
         )
 
@@ -118,6 +126,9 @@ class ExecuteStage:
         *,
         source_profile: dict[str, Any],
         retrieval_context: dict[str, Any],
+        session_mode: str,
+        plan_stage: dict[str, Any] | None = None,
+        goal_lifecycle: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         retrieval_metadata = {
             "focus": retrieval_context["retrieval_focus"],
@@ -126,9 +137,13 @@ class ExecuteStage:
             "prefetched_references": retrieval_context["prefetched_references"],
             "parallel_support": retrieval_context["parallel_support"],
             "prompt_support_bundle": retrieval_context["prompt_support_bundle"],
+            "external_web_fallback": retrieval_context.get("external_web_fallback", {}),
         }
         return {
             "turn_id": str(uuid4()),
+            "session_mode": session_mode,
+            "plan_stage": dict(plan_stage or {}),
+            "goal_lifecycle": dict(goal_lifecycle or {}),
             "source_profile": dict(source_profile),
             "retrieval": retrieval_metadata,
             # Compatibility bridge for older prompt/result helpers. New code

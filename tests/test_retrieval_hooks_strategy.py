@@ -18,7 +18,7 @@ from colearn.learning.state import (
 
 def _board(
     *,
-    turn_mode="EXPLORE",
+    turn_mode="LEARN",
     blockers=None,
     gaps=None,
     active_node="linear_algebra",
@@ -39,23 +39,23 @@ def _board(
 
 # --- K1 query strategy ---
 
-def test_explore_mode_favors_user_message():
-    board = _board(turn_mode="EXPLORE")
+def test_learn_mode_favors_user_message():
+    board = _board(turn_mode="LEARN")
     ctx = build_retrieval_query_context(
         board=board,
         user_message="How does eigendecomposition work?",
         retrieval_focus={"default_query": "default fallback"},
     )
-    assert ctx["query_intent"] == "expand_concept"
+    assert ctx["query_intent"] == "learn_current_node"
     # user_message should appear before default_query in priority_terms
     user_idx = ctx["priority_terms"].index("How does eigendecomposition work?")
     default_idx = ctx["priority_terms"].index("default fallback")
     assert user_idx < default_idx
 
 
-def test_correction_mode_leads_with_blockers():
+def test_check_mode_leads_with_blockers():
     board = _board(
-        turn_mode="CORRECTION",
+        turn_mode="CHECK",
         blockers=[{"id": "b1", "desc": "matrix is commutative"}],
     )
     ctx = build_retrieval_query_context(
@@ -63,30 +63,30 @@ def test_correction_mode_leads_with_blockers():
         user_message="why does AB != BA",
         retrieval_focus={"default_query": "linear algebra"},
     )
-    assert ctx["query_intent"] == "dispel_misconception"
+    assert ctx["query_intent"] == "check_understanding"
     # blocker text should be first in priority_terms
     assert ctx["priority_terms"][0] == "matrix is commutative"
 
 
-def test_anchor_mode_leads_with_gaps():
+def test_legacy_anchor_mode_normalizes_to_learn():
     board = _board(turn_mode="ANCHOR", gaps=["scalar multiplication"])
     ctx = build_retrieval_query_context(
         board=board,
         user_message="explain matrices",
         retrieval_focus={"default_query": "math basics"},
     )
-    assert ctx["query_intent"] == "ground_prerequisites"
-    assert ctx["priority_terms"][0] == "scalar multiplication"
+    assert ctx["query_intent"] == "learn_current_node"
+    assert "scalar multiplication" in ctx["priority_terms"]
 
 
-def test_verify_mode_leads_with_active_node():
+def test_legacy_verify_mode_normalizes_to_check():
     board = _board(turn_mode="VERIFY", active_node="rank_theorem")
     ctx = build_retrieval_query_context(
         board=board,
         user_message="check my proof",
         retrieval_focus={"default_query": "verification"},
     )
-    assert ctx["query_intent"] == "validate_understanding"
+    assert ctx["query_intent"] == "check_understanding"
     assert "rank theorem" == ctx["priority_terms"][0]
 
 
@@ -102,19 +102,19 @@ def test_paused_mode_leads_with_continuation_prompt():
     assert ctx["priority_terms"][0] == "we were comparing two matrix factorizations"
 
 
-def test_query_intent_falls_back_to_explore_for_unknown_mode():
+def test_query_intent_falls_back_to_learn_for_unknown_mode():
     board = _board(turn_mode="WHATEVER")
     ctx = build_retrieval_query_context(
         board=board,
         user_message="hi",
         retrieval_focus={},
     )
-    # normalize_turn_mode collapses unknowns to EXPLORE
-    assert ctx["query_intent"] == "expand_concept"
+    # normalize_turn_mode collapses unknowns to the new lightweight default.
+    assert ctx["query_intent"] == "learn_current_node"
 
 
 def test_priority_terms_are_deduplicated():
-    board = _board(turn_mode="EXPLORE", active_node="x")
+    board = _board(turn_mode="LEARN", active_node="x")
     ctx = build_retrieval_query_context(
         board=board,
         user_message="x",  # same as active_node label after normalization
@@ -128,7 +128,7 @@ def test_priority_terms_are_deduplicated():
 
 def test_chunk_matching_blocker_text_ranks_first():
     board = _board(
-        turn_mode="EXPLORE",
+        turn_mode="LEARN",
         blockers=[{"id": "b1", "desc": "eigenvalue"}],
     )
     refs = [
@@ -138,7 +138,7 @@ def test_chunk_matching_blocker_text_ranks_first():
     bundle = build_prompt_support_bundle(
         board=board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "EXPLORE"},
+        retrieval_focus={"turn_mode": "LEARN"},
         max_items=2,
     )
     assert bundle[0]["source_ref"] == "blocker_match.md"
@@ -147,7 +147,7 @@ def test_chunk_matching_blocker_text_ranks_first():
 
 def test_chunk_matching_gap_text_gets_bonus():
     board = _board(
-        turn_mode="EXPLORE",
+        turn_mode="LEARN",
         gaps=["determinant"],
     )
     refs = [
@@ -157,7 +157,7 @@ def test_chunk_matching_gap_text_gets_bonus():
     bundle = build_prompt_support_bundle(
         board=board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "EXPLORE"},
+        retrieval_focus={"turn_mode": "LEARN"},
         max_items=2,
     )
     # gap_match should beat the higher-raw-score chunk
@@ -166,7 +166,7 @@ def test_chunk_matching_gap_text_gets_bonus():
 
 
 def test_high_cognitive_load_tightens_to_two_items():
-    board = _board(turn_mode="EXPLORE", cognitive_load="HIGH")
+    board = _board(turn_mode="LEARN", cognitive_load="HIGH")
     refs = [
         {"source_ref": f"r{i}.md", "text": f"chunk {i}", "score": 0.5, "chunk_id": f"c{i}"}
         for i in range(6)
@@ -174,14 +174,14 @@ def test_high_cognitive_load_tightens_to_two_items():
     bundle = build_prompt_support_bundle(
         board=board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "EXPLORE"},
+        retrieval_focus={"turn_mode": "LEARN"},
         max_items=4,  # would normally return 4
     )
     assert len(bundle) == 2
 
 
 def test_normal_cognitive_load_uses_full_max_items():
-    board = _board(turn_mode="EXPLORE", cognitive_load="NORMAL")
+    board = _board(turn_mode="LEARN", cognitive_load="NORMAL")
     refs = [
         {"source_ref": f"r{i}.md", "text": f"chunk {i}", "score": 0.5, "chunk_id": f"c{i}"}
         for i in range(6)
@@ -189,19 +189,19 @@ def test_normal_cognitive_load_uses_full_max_items():
     bundle = build_prompt_support_bundle(
         board=board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "EXPLORE"},
+        retrieval_focus={"turn_mode": "LEARN"},
         max_items=4,
     )
     assert len(bundle) == 4
 
 
 def test_priority_reason_is_set_for_every_chunk():
-    board = _board(turn_mode="EXPLORE")
+    board = _board(turn_mode="LEARN")
     refs = [{"source_ref": "r.md", "text": "raw text", "score": 0.5, "chunk_id": "c1"}]
     bundle = build_prompt_support_bundle(
         board=board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "EXPLORE"},
+        retrieval_focus={"turn_mode": "LEARN"},
         max_items=1,
     )
     assert bundle[0]["priority_reason"] in {"blocker_match", "gap_match", "mode_priority", "raw_score"}

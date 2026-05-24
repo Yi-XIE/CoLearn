@@ -254,6 +254,11 @@
       "send": "发送消息",
       "stop": "停止响应",
       "attachImage": "添加图片",
+      "learningMode": {
+        "toggle": "切换学习模式",
+        "chat": "聊天",
+        "learning": "学习"
+      },
       "imageMode": {
         "label": "图片生成",
         "toggle": "切换图片生成模式",

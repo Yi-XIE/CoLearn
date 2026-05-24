@@ -90,6 +90,16 @@ describe("webui API helpers", () => {
         session: {
           last_turn_result: {
             runtime_v2: {
+              turn_mode: "CHECK",
+              learning_plan: {
+                goal: "Core mechanics",
+                current_node_id: "node-1",
+                plan_nodes: [{ id: "node-1", label: "Forces" }],
+              },
+              learning_board: {
+                current_progress: "Forces",
+                completed_nodes: ["node-0"],
+              },
                 retrieval: {
                   retrieval_active: true,
                   prompt_support_bundle: [
@@ -118,6 +128,46 @@ describe("webui API helpers", () => {
       }),
     );
     expect(support?.prompt_support_bundle[0]?.summary).toBe("Core idea");
+    expect(support?.turn_mode).toBe("CHECK");
+    expect(support?.learning_plan?.goal).toBe("Core mechanics");
+    expect(support?.learning_board?.current_progress).toBe("Forces");
+  });
+
+  it("returns learning support when only plan and board state are present", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        session: {
+          last_turn_result: {
+            runtime_v2: {
+              turn_mode: "LEARN",
+              learning_plan: {
+                goal: "Energy conservation",
+                current_node_id: "node-work",
+                plan_nodes: [{ id: "node-work", label: "Work and energy" }],
+              },
+              learning_board: {
+                current_progress: "Work and energy",
+                completed_nodes: [],
+              },
+              retrieval: {
+                retrieval_active: false,
+                prompt_support_bundle: [],
+                retrieval_hits: [],
+                retrieval_misses: [],
+              },
+            },
+          },
+        },
+      }),
+    } as Response);
+
+    const support = await fetchLearningSupport("tok", "session-board-only");
+
+    expect(support?.retrieval_active).toBe(false);
+    expect(support?.turn_mode).toBe("LEARN");
+    expect(support?.learning_plan?.goal).toBe("Energy conservation");
+    expect(support?.prompt_support_bundle).toEqual([]);
   });
 
   it("returns null when retrieval metadata only exists in deprecated top-level fields", async () => {

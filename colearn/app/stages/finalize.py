@@ -171,6 +171,7 @@ class FinalizeStage:
             "final_text": result.final_text,
             "warnings": warnings,
             "board_patch": result.board_patch,
+            "session_mode": str(getattr(request, "metadata", {}).get("session_mode") or ""),
             **payload,
             "turn_mode_before": result.turn_mode_before,
             "turn_mode_after": result.turn_mode_after,

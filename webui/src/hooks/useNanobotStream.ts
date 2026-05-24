@@ -201,6 +201,7 @@ export interface SendImage {
 
 export interface SendOptions {
   imageGeneration?: OutboundImageGeneration;
+  sessionMode?: "chat" | "learning";
 }
 
 export function useNanobotStream(

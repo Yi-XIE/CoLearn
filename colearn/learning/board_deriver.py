@@ -26,6 +26,7 @@ from colearn.learning.state import (
     ProgressFacts,
     StudentSnapshot,
 )
+from colearn.learning.hook_utils import normalize_turn_mode
 from colearn.logging_config import get_logger
 from colearn.memory.store import MemoryEvent
 
@@ -134,7 +135,7 @@ def _build_board_from_snapshot(snapshot: dict[str, Any], *, fallback: BoardFacts
     return BoardFacts(
         project_id=fallback.project_id,
         session_id=fallback.session_id,
-        current_turn_mode=str(snapshot.get("current_turn_mode") or fallback.current_turn_mode),
+        current_turn_mode=normalize_turn_mode(str(snapshot.get("current_turn_mode") or fallback.current_turn_mode)),
         board_version=int(fallback.board_version or 1) + 1,
         updated_at=fallback.updated_at,
         current_progress=ProgressFacts(

@@ -123,6 +123,8 @@ class WritebackStage:
         session_conflict = current_session_version > base_version and current_session is not session
         if session_conflict and current_session is not None:
             session = current_session
+        request_mode = str(getattr(request, "metadata", {}).get("session_mode") or getattr(session, "mode", "chat") or "chat")
+        session.mode = request_mode
         session.turn_mode = result.turn_mode_after
         warnings = list(result.warnings)
         if session_conflict:
@@ -154,6 +156,7 @@ class WritebackStage:
             project = current_project
         current_project_version = int(getattr(project, "board_version", 1) or 1)
         project.turn_mode = result.turn_mode_after
+        project.mode = request_mode
         if not session_conflict:
             project.board_version = max(current_project_version, int(result.board_after.board_version or 1))
         session.last_turn_result = self._build_last_turn_result(
@@ -207,12 +210,14 @@ class WritebackStage:
             )
         self._append_nanobot_history(project=project, session=session, result=result)
         self._maybe_compact_session(session)
-        self._maybe_consolidate_memory(project, session, result)
+        if request_mode == "learning":
+            self._maybe_consolidate_memory(project, session, result)
         self._sync_memory_documents(
             session=session,
             review_summary=str(getattr(result, "review_summary", "") or ""),
         )
-        self._maybe_derive_board_snapshot(project=project, session=session, result=result)
+        if request_mode == "learning":
+            self._maybe_derive_board_snapshot(project=project, session=session, result=result)
         if not session.source_refs and project.source_refs:
             session.source_refs = list(project.source_refs)
         self.session_store.save_session(session)
@@ -308,6 +313,8 @@ class WritebackStage:
     def _schedule_auxiliary_writeback(self, ctx: TurnContext) -> None:
         # Auxiliary post-turn enrichment must never become part of the main turn
         # completion contract. It always runs after core session/project writeback.
+        if str(getattr(ctx.session, "mode", "") or "chat") != "learning":
+            return
         self.background_finalizer.schedule(
             project=ctx.project,
             session=ctx.session,

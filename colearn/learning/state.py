@@ -40,7 +40,35 @@ class ContinuationFacts:
     last_completed_turn_id: str = ""
 
 
-TurnMode = Literal["ANCHOR", "CORRECTION", "VERIFY", "EXPLORE", "PAUSED"]
+@dataclass
+class LearningPlanNode:
+    id: str = ""
+    label: str = ""
+    status: str = "pending"
+    depth: int = 0
+    summary: str = ""
+
+
+@dataclass
+class LearningPlan:
+    goal: str = ""
+    plan_nodes: list[LearningPlanNode] = field(default_factory=list)
+    current_node_id: str = ""
+    review_queue: list[str] = field(default_factory=list)
+    pending_checks: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LearningBoard:
+    current_progress: str = ""
+    completed_nodes: list[str] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    objections: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    continuation: str = ""
+
+
+TurnMode = Literal["LEARN", "CHECK", "PAUSED"]
 
 
 @dataclass
@@ -49,7 +77,7 @@ class BoardFacts:
 
     project_id: str = ""
     session_id: str = ""
-    current_turn_mode: TurnMode = "EXPLORE"
+    current_turn_mode: TurnMode = "LEARN"
     board_version: int = 1
     updated_at: str = ""
     current_progress: ProgressFacts = field(default_factory=ProgressFacts)
@@ -57,6 +85,40 @@ class BoardFacts:
     gaps_and_blockers: GapsAndBlockers = field(default_factory=GapsAndBlockers)
     continuation: ContinuationFacts = field(default_factory=ContinuationFacts)
     evidence_refs: list[dict[str, Any]] = field(default_factory=list)
+    learning_plan: LearningPlan = field(default_factory=LearningPlan)
+    learning_board: LearningBoard = field(default_factory=LearningBoard)
+
+    def __post_init__(self) -> None:
+        if not self.learning_plan.current_node_id and self.current_progress.active_node_id:
+            self.learning_plan.current_node_id = self.current_progress.active_node_id
+        if not self.learning_plan.goal:
+            self.learning_plan.goal = self.current_progress.active_node_label
+        if not self.learning_plan.plan_nodes and self.current_progress.active_node_id:
+            self.learning_plan.plan_nodes.append(
+                LearningPlanNode(
+                    id=self.current_progress.active_node_id,
+                    label=self.current_progress.active_node_label,
+                    status="current",
+                    depth=0,
+                    summary=self.current_progress.active_node_label,
+                )
+            )
+        if not self.learning_board.current_progress:
+            self.learning_board.current_progress = self.current_progress.active_node_label
+        if not self.learning_board.completed_nodes:
+            self.learning_board.completed_nodes = list(self.current_progress.completed_node_ids)
+        if not self.learning_board.blockers:
+            self.learning_board.blockers = [
+                blocker.desc for blocker in self.gaps_and_blockers.critical_blockers if blocker.desc
+            ]
+        if not self.learning_board.evidence_refs:
+            self.learning_board.evidence_refs = [
+                str(item.get("source_ref") or "")
+                for item in self.evidence_refs
+                if isinstance(item, dict) and str(item.get("source_ref") or "")
+            ]
+        if not self.learning_board.continuation:
+            self.learning_board.continuation = self.continuation.next_prompt_hint
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -73,7 +135,7 @@ class ReplyContract:
 class TurnPolicy:
     """Per-turn projection computed fresh each round."""
 
-    turn_mode: TurnMode = "EXPLORE"
+    turn_mode: TurnMode = "LEARN"
     model_preset: str | None = None
     main_goal: str = ""
     restrictions: list[str] = field(default_factory=list)
@@ -88,7 +150,7 @@ class TurnPolicy:
 
 @dataclass(frozen=True)
 class LearningStateSnapshot:
-    turn_mode: TurnMode = "EXPLORE"
+    turn_mode: TurnMode = "LEARN"
     active_node_id: str = ""
     active_node_label: str = ""
     mastery_level: float = 0.0

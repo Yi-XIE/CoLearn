@@ -21,6 +21,7 @@ from colearn.api.ws import (
     message_event,
     normalize_attachments,
     normalize_turn_frame,
+    mode_from_frame,
     project_id_from_frame,
     project_title_from_frame,
     ready_event,
@@ -115,6 +116,7 @@ async def _handle_start_turn(
         language=str(frame.get("language") or "zh"),
         attachments=normalize_attachments(frame),
         requested_skills=skills_from_frame(frame),
+        requested_mode=mode_from_frame(frame),
     )
 
 
@@ -136,6 +138,9 @@ async def _handle_cancel_turn(
     executor = getattr(orchestrator, "executor", None)
     if executor is not None and hasattr(executor, "cancel_session"):
         executor.cancel_session(turn.session_id)
+    complete_goal = getattr(executor, "complete_sustained_goal", None)
+    if callable(complete_goal):
+        complete_goal(session_id=turn.session_id, recap="Learning turn cancelled.")
 
 
 async def _handle_subscribe_turn(

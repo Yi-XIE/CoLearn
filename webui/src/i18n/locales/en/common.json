@@ -255,6 +255,11 @@
       "send": "Send message",
       "stop": "Stop response",
       "attachImage": "Attach image",
+      "learningMode": {
+        "toggle": "Toggle learning mode",
+        "chat": "Chat",
+        "learning": "Learning"
+      },
       "imageMode": {
         "label": "Image Generation",
         "toggle": "Toggle image generation mode",

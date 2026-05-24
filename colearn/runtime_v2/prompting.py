@@ -96,6 +96,11 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
     if retrieval_reason:
         lines.append(f"Retrieval reason: {retrieval_reason}")
 
+    external_web_fallback = dict(retrieval_metadata.get("external_web_fallback") or {})
+    if external_web_fallback.get("recommended"):
+        reason = str(external_web_fallback.get("reason") or "external_web_fallback").strip()
+        lines.append(f"External web fallback: {reason}")
+
     support_bundle = list(
         retrieval_metadata.get("prompt_support_bundle")
         or request.metadata.get("prompt_support_bundle")

@@ -19,8 +19,8 @@ class LearningTurnResult:
     learning_events: list[LearningEvent] = field(default_factory=list)
     continuation_prompt: str = ""
     review_summary: str = ""
-    turn_mode_before: str = "EXPLORE"
-    turn_mode_after: str = "EXPLORE"
+    turn_mode_before: str = "LEARN"
+    turn_mode_after: str = "LEARN"
     review_to_persist: dict[str, Any] = field(default_factory=dict)
     board_patch: dict[str, Any] = field(default_factory=dict)
     memory_events: list[dict[str, Any]] = field(default_factory=list)

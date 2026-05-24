@@ -330,6 +330,8 @@ def register_colearn_tools(
     enabled = set(normalize_enabled_tools(request.enabled_tools or DEFAULT_ENABLED_TOOLS))
     if not enabled:
         return
+    if not {"memory", "lightrag"} & enabled:
+        return
 
     registry = _resolve_tool_registry(bot=bot, request=request)
 
@@ -386,6 +388,8 @@ def bind_colearn_tools(
 ) -> None:
     enabled = set(normalize_enabled_tools(request.enabled_tools or DEFAULT_ENABLED_TOOLS))
     if not enabled:
+        return
+    if not {"memory", "lightrag"} & enabled:
         return
 
     registry = _resolve_tool_registry(bot=bot, request=request)

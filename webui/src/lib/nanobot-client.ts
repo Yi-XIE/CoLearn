@@ -4,6 +4,7 @@ import type {
   Outbound,
   OutboundImageGeneration,
   OutboundMedia,
+  SessionMode,
   GoalStateWsPayload,
 } from "./types";
 export { ColearnWsClient } from "./colearn-ws-client";
@@ -99,7 +100,7 @@ export interface NanobotClientLike {
     chatId: string,
     content: string,
     media?: OutboundMedia[],
-    options?: { imageGeneration?: OutboundImageGeneration },
+    options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void;
 }
 
@@ -312,7 +313,7 @@ export class NanobotClient implements NanobotClientLike {
     chatId: string,
     content: string,
     media?: OutboundMedia[],
-    options?: { imageGeneration?: OutboundImageGeneration },
+    options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void {
     this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -321,6 +322,7 @@ export class NanobotClient implements NanobotClientLike {
       content,
       ...(media && media.length > 0 ? { media } : {}),
       ...(options?.imageGeneration ? { image_generation: options.imageGeneration } : {}),
+      ...(options?.sessionMode ? { mode: options.sessionMode } : {}),
       webui: true,
     };
     this.queueSend(frame);
@@ -579,7 +581,7 @@ export class OfflineNanobotClient implements NanobotClientLike {
     _chatId: string,
     _content: string,
     _media?: OutboundMedia[],
-    _options?: { imageGeneration?: OutboundImageGeneration },
+    _options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void {}
 
   private setStatus(status: ConnectionStatus): void {

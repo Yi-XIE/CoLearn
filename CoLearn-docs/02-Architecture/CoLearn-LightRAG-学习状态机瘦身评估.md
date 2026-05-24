@@ -330,6 +330,26 @@ Agent 负责：
 
 下面这份计划是后续施工的唯一编码清单。目标不是一次性做完所有增强，而是先把新版学习模式骨架搭稳，再逐步补齐。
 
+### 12.0 当前施工进度
+
+更新于 2026-05-24。
+
+已落地：
+
+- Phase 1 双模式入口：session/project 已支持 `chat` 与 `learning`，普通聊天默认轻链路，Learning Mode 可由前端开关或明确学习意图进入。
+- Phase 2 能力：CoLearn WebSocket 已输出 `goal_state`，前端已接入现有 goal 展示链路；当前实际加载的 `third_party/nanobot-core` 已补入 nanobot 原生 `long_task / complete_goal` 工具、`goal_state` metadata helper 与 active goal runtime context 注入。CoLearn 学习主链进入 Learning Mode 且已有学习计划目标时，会自动同步 nanobot active goal；目标不变时复用，目标变更时先完成旧目标再登记新目标。学习结果显示计划全部完成，或学习状态回到 `PAUSED` 时，会自动完成 nanobot 原生 goal；用户 pause、WebSocket cancel 与话题切换也已有回归覆盖。
+- Phase 3 最小模型：`LearningPlan`、`LearningBoard`、`LearningPlanNode` 已进入 `BoardFacts`，并兼容旧会话字段自动派生。
+- Phase 4 最小 PlanStage：已新增 `PlanStage`，首次进入 Learning Mode 或计划缺失时生成四步结构化计划；已有计划时不每轮重算。
+- Phase 5 三状态学习状态机：新版 Learning Mode 从 `LEARN` 开始，普通聊天为 `PAUSED`，检查/纠错语义收口到 `CHECK`；新主链已删除旧五态分支，旧值只在读取历史会话或兼容旧 LLM 输出时归一化到三状态。
+- Phase 6 retrieval 护栏：首次学习会取证，已有 evidence 的 `LEARN` 后续轮次跳过预取；`CHECK` 按需取证。外部资料、最新资料或本地检索不足时，通过 metadata/prompt 启用 nanobot 原生 `web_search / web_fetch` 兜底。
+- Phase 7 部分 writeback 与状态收口：Chat Mode 不再调度学习型后台压缩、dream consolidation 和 board derivation；Learning Mode 仍保留必要的异步后处理与 stale write 防护。HTTP session 创建与 pause/resume 入口已按三状态收口，Chat 默认 `PAUSED`，Learning 与 resume 默认 `LEARN`。
+- Phase 8 前端黑板展示：Learning support 侧栏已消费 `learning_plan` 与 `learning_board`，显示目标、当前节点、已完成数、待检查数和 blocker/objection 数量；即使本轮没有 retrieval evidence，只要有学习计划或黑板状态也会展示，并明确标出 `LEARN / CHECK / PAUSED` 当前模式。
+- Phase 9 收尾：已补学习取消、HTTP pause、话题切换与 WebSocket `goal_state` 端到端回归；后端与前端核心回归已通过。
+
+当前状态：
+
+- 本轮计划项已补齐；代码里旧五态只剩历史数据兼容归一化入口，不再作为新主链分支、默认值或 prompt schema。
+
 ### 12.1 总目标
 
 完成一个新的 Learning Mode 主链，使其满足以下条件：
@@ -574,6 +594,10 @@ Agent 负责：
 - 三状态流转测试
 - 条件 retrieval 测试
 - writeback 最小化测试
+- HTTP pause 完成 native goal 测试
+- WebSocket cancel 完成 native goal 测试
+- WebSocket `execute_turn` 输出 `goal_state` 帧测试
+- 话题切换触发 replan 与新 native goal 同步测试
 
 前端测试：
 

@@ -16,7 +16,7 @@ def build_learning_turn_request(
     language: str = "zh",
     project_id: str = "",
     project_title: str = "",
-    turn_mode: str = "EXPLORE",
+    turn_mode: str = "LEARN",
     board_facts: BoardFacts | None = None,
     turn_policy: TurnPolicy | None = None,
     anchor: dict[str, Any] | None = None,

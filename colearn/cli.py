@@ -81,7 +81,7 @@ def cmd_get_board(session_id: str = "") -> None:
     bf = session.board_facts or {}
     _out({
         "session_id": session.session_id,
-        "turn_mode": session.turn_mode or bf.get("current_turn_mode", "EXPLORE"),
+        "turn_mode": session.turn_mode or bf.get("current_turn_mode", "LEARN"),
         "board_version": session.board_version,
         "mastery_level": (bf.get("student_snapshot") or {}).get("mastery_level", 0),
         "cognitive_load": (bf.get("student_snapshot") or {}).get("cognitive_load", "NORMAL"),

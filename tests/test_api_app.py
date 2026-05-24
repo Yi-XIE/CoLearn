@@ -33,6 +33,8 @@ async def _run_http_checks() -> None:
         assert response.status_code == 200
         payload = response.json()["session"]
         assert payload["project_id"] == "proj-api"
+        assert payload["mode"] == "chat"
+        assert payload["turn_mode"] == "PAUSED"
 
         fetched = await client.get(f"/api/v1/sessions/{payload['session_id']}")
         assert fetched.status_code == 200
@@ -56,6 +58,50 @@ async def _run_http_checks() -> None:
         assert renamed.status_code == 200
         assert renamed.json()["session"]["title"] == "用户输入的第一句话"
 
+        learning = await client.post(
+            "/api/v1/sessions",
+            json={
+                "project_id": "proj-api-learning",
+                "project_title": "API Learning Project",
+                "mode": "learning",
+            },
+        )
+        assert learning.status_code == 200
+        learning_payload = learning.json()["session"]
+        assert learning_payload["mode"] == "learning"
+        assert learning_payload["turn_mode"] == "LEARN"
+
+        sessions_route = importlib.import_module("colearn.api.routes.sessions")
+
+        class FakeExecutor:
+            def __init__(self) -> None:
+                self.completed_goal: dict[str, str] | None = None
+
+            def complete_sustained_goal(self, *, session_id: str, recap: str = "") -> dict[str, str]:
+                self.completed_goal = {"session_id": session_id, "recap": recap}
+                return {"status": "completed"}
+
+        fake_executor = FakeExecutor()
+        original_orchestrator = sessions_route.orchestrator
+        sessions_route.orchestrator = SimpleNamespace(executor=fake_executor)
+        try:
+            paused = await client.post(f"/api/v1/sessions/{learning_payload['session_id']}/pause")
+            assert paused.status_code == 200
+            assert paused.json()["session"]["turn_mode"] == "PAUSED"
+            assert fake_executor.completed_goal == {
+                "session_id": learning_payload["session_id"],
+                "recap": "Learning session paused.",
+            }
+        finally:
+            sessions_route.orchestrator = original_orchestrator
+
+        resumed = await client.post(f"/api/v1/sessions/{learning_payload['session_id']}/resume")
+        assert resumed.status_code == 200
+        resumed_payload = resumed.json()["session"]
+        assert resumed_payload["mode"] == "learning"
+        assert resumed_payload["turn_mode"] == "LEARN"
+        assert resumed_payload["board_facts"]["current_turn_mode"] == "LEARN"
+
 
 def test_http_session_endpoints() -> None:
     anyio.run(_run_http_checks)
@@ -76,7 +122,7 @@ def test_session_summary_uses_first_user_message_as_default_title() -> None:
 
     summary = serialize_session_summary(session, project_service=app_module.project_service)
 
-    assert summary["title"] == "This is the first user sentence used as the default se..."
+    assert summary["title"] == "This is the first user sentence used as the default sessi..."
     assert summary["last_message"] == "This is the first user sentence used as the default session title."
 
 
@@ -377,10 +423,15 @@ async def _run_ws_cancel_bridge_check() -> None:
     class FakeExecutor:
         def __init__(self) -> None:
             self.cancelled_session_id: str | None = None
+            self.completed_goal: dict[str, str] | None = None
 
         def cancel_session(self, session_id: str) -> bool:
             self.cancelled_session_id = session_id
             return True
+
+        def complete_sustained_goal(self, *, session_id: str, recap: str = "") -> dict[str, str]:
+            self.completed_goal = {"session_id": session_id, "recap": recap}
+            return {"status": "completed"}
 
     executor = FakeExecutor()
     turn = ws_handler.ActiveTurn(turn_id="turn-1", session_id="session-1", started_at=1.0)
@@ -391,6 +442,7 @@ async def _run_ws_cancel_bridge_check() -> None:
         await ws_handler._handle_cancel_turn(frame={"turn_id": "turn-1"}, send_event=send_event)
         assert turn.cancel_requested is True
         assert executor.cancelled_session_id == "session-1"
+        assert executor.completed_goal == {"session_id": "session-1", "recap": "Learning turn cancelled."}
         assert sent == []
     finally:
         ws_handler._deps.orchestrator = original
@@ -398,6 +450,73 @@ async def _run_ws_cancel_bridge_check() -> None:
 
 def test_ws_cancel_turn_bridges_to_executor() -> None:
     anyio.run(_run_ws_cancel_bridge_check)
+
+
+async def _run_ws_execute_turn_goal_state_check() -> None:
+    from colearn.api.ws import service
+    from colearn.learning.response_contract import LearningTurnResult
+
+    sent: list[dict[str, object]] = []
+
+    async def send_event(event: dict[str, object]) -> None:
+        sent.append(event)
+
+    class FakeOrchestrator:
+        async def run_turn_async(self, **kwargs):
+            kwargs["stream_emit"](
+                {
+                    "type": "content_delta",
+                    "content": "live",
+                    "metadata": {"phase": "content_delta"},
+                }
+            )
+            return LearningTurnResult(
+                final_text="done",
+                raw_learning_result={
+                    "runtime_v2": {
+                        "goal_state": {
+                            "active": True,
+                            "objective": "WS Goal",
+                            "ui_summary": "WS Summary",
+                        }
+                    }
+                },
+            )
+
+    turn = service.ActiveTurn(turn_id="turn-goal-1", session_id="session-goal-1", started_at=1.0)
+    turn.add_subscriber("test", send_event)
+    original = getattr(service._deps, "orchestrator", None)
+    service._deps.orchestrator = FakeOrchestrator()
+    try:
+        await service.execute_turn(
+            turn=turn,
+            user_message="learn websockets",
+            project_id="project-goal-1",
+            project_title="Project Goal",
+            language="zh-CN",
+            attachments=[],
+            requested_skills=[],
+            requested_mode="learning",
+        )
+    finally:
+        service._deps.orchestrator = original
+
+    turn_frames = [item for item in sent if "type" in item]
+    frame_types = [item["type"] for item in turn_frames]
+    assert frame_types == ["content_delta", "content", "goal_state", "turn_state", "done"]
+    goal_frames = [item for item in turn_frames if item["type"] == "goal_state"]
+    assert goal_frames[0]["metadata"]["goal_state"] == {
+        "active": True,
+        "objective": "WS Goal",
+        "ui_summary": "WS Summary",
+    }
+    assert turn_frames[-2]["metadata"]["status"] == "completed"
+    assert turn_frames[-1]["metadata"]["status"] == "completed"
+    assert sent[-1] == {"event": "session_updated", "chat_id": "session-goal-1"}
+
+
+def test_ws_execute_turn_emits_goal_state_frame() -> None:
+    anyio.run(_run_ws_execute_turn_goal_state_check)
 
 
 

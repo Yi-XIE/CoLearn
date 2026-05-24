@@ -46,9 +46,29 @@ class RetrievalStage:
         ctx.retrieval_reason = retrieval_context["retrieval_reason"]
         ctx.retrieval_query_context = retrieval_context["retrieval_query_context"]
         ctx.parallel_support = retrieval_context["parallel_support"]
+        ctx.external_web_fallback = retrieval_context["external_web_fallback"]
         ctx.retrieval_bundle = retrieval_context["retrieval_bundle"]
         ctx.prefetched_references = retrieval_context["prefetched_references"]
         ctx.prompt_support_bundle = retrieval_context["prompt_support_bundle"]
+        return ctx
+
+    def skip(self, ctx: TurnContext, *, reason: str) -> TurnContext:
+        from colearn.learning.retrieval_bundle import empty_retrieval_bundle
+
+        query = str(ctx.user_message or "")
+        ctx.retrieval_focus = {"turn_mode": "PAUSED", "default_query": query}
+        ctx.retrieval_reason = reason
+        ctx.retrieval_query_context = {"final_query": query, "skipped": True, "reason": reason}
+        ctx.parallel_support = {"status": "skipped", "reason": reason, "queries": [], "results": []}
+        ctx.external_web_fallback = {"recommended": False, "reason": reason}
+        ctx.retrieval_bundle = empty_retrieval_bundle(
+            query=query,
+            status="skipped",
+            fallback_reason=reason,
+            warning="learning retrieval skipped in chat mode",
+        )
+        ctx.prefetched_references = []
+        ctx.prompt_support_bundle = []
         return ctx
 
     async def _prepare_retrieval_context_async(
@@ -76,6 +96,7 @@ class RetrievalStage:
             session=session,
             retrieval_query_context=retrieval_query_context,
             turn_mode=board.current_turn_mode,
+            board=board,
         )
         retrieval_bundle = await self._build_prefetch_bundle(
             project=project,
@@ -84,6 +105,7 @@ class RetrievalStage:
             retrieval_focus=retrieval_focus,
             retrieval_query_context=retrieval_query_context,
             user_message=user_message,
+            board=board,
         )
         prefetched_references = self._prefetched_references_from_bundle(retrieval_bundle)
         parallel_references = self._prefetched_references_from_parallel_support(parallel_support)
@@ -93,11 +115,17 @@ class RetrievalStage:
             prefetched_references=prompt_references,
             retrieval_focus=retrieval_focus,
         )
+        external_web_fallback = self._external_web_fallback(
+            user_message=user_message,
+            retrieval_bundle=retrieval_bundle,
+            prompt_support_bundle=prompt_support_bundle,
+        )
         return {
             "retrieval_focus": retrieval_focus,
             "retrieval_reason": retrieval_reason,
             "retrieval_query_context": retrieval_query_context,
             "parallel_support": parallel_support,
+            "external_web_fallback": external_web_fallback,
             "retrieval_bundle": retrieval_bundle,
             "prefetched_references": prefetched_references,
             "prompt_support_bundle": prompt_support_bundle,
@@ -112,6 +140,7 @@ class RetrievalStage:
         retrieval_focus: dict[str, Any],
         retrieval_query_context: dict[str, Any],
         user_message: str,
+        board=None,
     ):
         from colearn.learning.retrieval_bundle import empty_retrieval_bundle
 
@@ -121,7 +150,7 @@ class RetrievalStage:
             or user_message
             or ""
         )
-        if not self._should_prefetch_retrieval(turn_mode=turn_mode):
+        if not self._should_prefetch_retrieval(turn_mode=turn_mode, board=board):
             return empty_retrieval_bundle(
                 query=query,
                 status="skipped",
@@ -169,10 +198,11 @@ class RetrievalStage:
         session: LearningSession,
         retrieval_query_context: dict[str, Any],
         turn_mode: str,
+        board=None,
     ) -> dict[str, Any]:
         queries = self._parallel_support_queries(retrieval_query_context)
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
-        if not self._should_prefetch_retrieval(turn_mode=turn_mode):
+        if not self._should_prefetch_retrieval(turn_mode=turn_mode, board=board):
             return {"status": "skipped", "reason": f"turn_mode:{turn_mode.lower()}", "queries": queries, "results": []}
         if not source_refs:
             return {"status": "skipped", "reason": "no_source_refs", "queries": queries, "results": []}
@@ -194,8 +224,60 @@ class RetrievalStage:
             status = "error" if "error" in statuses else "empty"
         return {"status": status, "reason": "", "queries": queries, "results": results}
 
-    def _should_prefetch_retrieval(self, *, turn_mode: str) -> bool:
-        return str(turn_mode or "").upper() != "PAUSED"
+    def _should_prefetch_retrieval(self, *, turn_mode: str, board=None) -> bool:
+        mode = str(turn_mode or "").upper()
+        if mode == "PAUSED":
+            return False
+        if mode == "CHECK":
+            return True
+        if mode != "LEARN" or board is None:
+            return True
+        if int(getattr(board, "board_version", 1) or 1) <= 1:
+            return True
+        if board.gaps_and_blockers.critical_blockers or board.gaps_and_blockers.unverified_gaps:
+            return True
+        return not bool(board.evidence_refs or board.learning_board.evidence_refs)
+
+    def _external_web_fallback(
+        self,
+        *,
+        user_message: str,
+        retrieval_bundle,
+        prompt_support_bundle: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        lowered = str(user_message or "").strip().lower()
+        explicit = any(
+            marker in lowered
+            for marker in (
+                "latest",
+                "current",
+                "today",
+                "news",
+                "web",
+                "internet",
+                "online",
+                "search",
+                "browse",
+                "最新",
+                "今天",
+                "新闻",
+                "网页",
+                "网上",
+                "互联网",
+                "搜索",
+                "公开资料",
+                "外部资料",
+            )
+        )
+        status = str(getattr(retrieval_bundle, "retrieval_status", "") or "").lower()
+        no_local_support = status in {"empty", "unavailable", "error"} or not prompt_support_bundle
+        recommended = bool(explicit or no_local_support)
+        reason = "explicit_external_source_request" if explicit else "local_retrieval_insufficient"
+        return {
+            "recommended": recommended,
+            "reason": reason if recommended else "",
+            "retrieval_status": status,
+        }
 
     def _prefetched_references_from_bundle(self, bundle) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = [dict(item) for item in list(getattr(bundle, "references", []) or [])]

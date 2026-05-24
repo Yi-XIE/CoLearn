@@ -40,12 +40,15 @@ def list_sessions(limit: int = 50, offset: int = 0, project_id: str | None = Non
 
 @router.post("/api/v1/sessions")
 def create_session(payload: SessionCreatePayload) -> dict[str, Any]:
+    requested_turn_mode = str(payload.turn_mode or "").strip().upper()
+    initial_turn_mode = requested_turn_mode or ("LEARN" if payload.mode == "learning" else "PAUSED")
     session = session_store.create_session(
         session_id=str(uuid4()),
         project_id=payload.project_id,
         title=(payload.title or "").strip(),
-        turn_mode=payload.turn_mode,
+        turn_mode=initial_turn_mode,
     )
+    session.mode = payload.mode
     session.source_refs = list(payload.source_refs)
     session.memory_refs = list(payload.memory_refs)
     touch_session(session)
@@ -101,6 +104,10 @@ def pause_session(session_id: str) -> dict[str, Any]:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     session.turn_mode = "PAUSED"
+    executor = getattr(orchestrator, "executor", None)
+    complete_goal = getattr(executor, "complete_sustained_goal", None)
+    if callable(complete_goal):
+        complete_goal(session_id=session_id, recap="Learning session paused.")
     session.board_facts = {
         **dict(session.board_facts or {}),
         "current_turn_mode": "PAUSED",
@@ -116,10 +123,11 @@ def resume_session(session_id: str) -> dict[str, Any]:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.turn_mode == "PAUSED":
-        session.turn_mode = "EXPLORE"
+        session.mode = "learning"
+        session.turn_mode = "LEARN"
         session.board_facts = {
             **dict(session.board_facts or {}),
-            "current_turn_mode": "EXPLORE",
+            "current_turn_mode": "LEARN",
         }
     touch_session(session)
     session_store.save_session(session)

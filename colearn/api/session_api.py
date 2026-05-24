@@ -31,6 +31,7 @@ def serialize_session_summary(
         "title_is_custom": bool(getattr(session, "title_is_custom", False)),
         "project_id": session.project_id,
         "project_title": project.title if project else session.project_id,
+        "mode": str(getattr(session, "mode", "") or "chat"),
         "turn_mode": session.turn_mode,
         "board_facts": board_facts,
         "board_version": int(session.board_version or 1),

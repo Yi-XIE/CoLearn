@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from colearn.knowledge import KnowledgeWorkspaceService
@@ -13,6 +14,31 @@ from colearn.sessions.store import LearningSession, SessionStore
 
 from ..source_preflight import SourceReadinessPreflight
 from .context import TurnContext
+
+
+LEARNING_INTENT_KEYWORDS = (
+    "学",
+    "学习",
+    "讲讲",
+    "讲解",
+    "带我学",
+    "课程",
+    "知识点",
+    "复习",
+    "练习",
+    "learn",
+    "study",
+    "lesson",
+)
+
+
+def _normalize_session_mode(value: str | None) -> str:
+    return "learning" if str(value or "").strip().lower() == "learning" else "chat"
+
+
+def _looks_like_learning_intent(message: str) -> bool:
+    lowered = str(message or "").strip().lower()
+    return bool(lowered) and any(keyword in lowered for keyword in LEARNING_INTENT_KEYWORDS)
 
 
 class PreflightStage:
@@ -44,12 +70,15 @@ class PreflightStage:
         prepared = await self._prepare_turn_context(
             session_id=ctx.session_id,
             project_id=ctx.project_id,
+            requested_mode=ctx.requested_mode,
+            user_message=ctx.user_message,
         )
         ctx.session = prepared["session"]
         ctx.project = prepared["project"]
         ctx.board = prepared["board"]
         ctx.snapshot = prepared["snapshot"]
         ctx.source_profile = prepared["source_profile"]
+        ctx.session_mode = prepared["session_mode"]
         return ctx
 
     def sync_project_retrieval_profile(self, ctx: TurnContext) -> None:
@@ -75,9 +104,18 @@ class PreflightStage:
         *,
         session_id: str,
         project_id: str,
+        requested_mode: str | None = None,
+        user_message: str = "",
     ) -> dict[str, Any]:
         session = self._get_or_create_session(session_id=session_id, project_id=project_id)
         project = self._get_or_create_project(project_id=project_id, session=session)
+        prior_mode = _normalize_session_mode(getattr(session, "mode", "chat"))
+        requested = _normalize_session_mode(requested_mode) if requested_mode else None
+        session_mode = requested or prior_mode
+        if requested is None and prior_mode == "chat" and _looks_like_learning_intent(user_message):
+            session_mode = "learning"
+        session.mode = session_mode
+        project.mode = session_mode
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         source_profile = await self.source_preflight.run_async(
             project_id=project.project_id,
@@ -93,12 +131,16 @@ class PreflightStage:
             session=session,
             latest_review=project.latest_review,
         )
+        if session_mode == "chat":
+            board = replace(board, current_turn_mode="PAUSED")
+            snapshot = replace(snapshot, turn_mode="PAUSED")
         return {
             "session": session,
             "project": project,
             "source_profile": source_profile,
             "board": board,
             "snapshot": snapshot,
+            "session_mode": session_mode,
         }
 
     def _sync_project_retrieval_profile(

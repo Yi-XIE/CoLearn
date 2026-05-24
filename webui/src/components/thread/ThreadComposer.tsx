@@ -71,6 +71,8 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   imageMode?: boolean;
   onImageModeChange?: (enabled: boolean) => void;
+  sessionMode?: "chat" | "learning";
+  onSessionModeChange?: (mode: "chat" | "learning") => void;
   onStop?: () => void;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
@@ -380,6 +382,8 @@ export function ThreadComposer({
   slashCommands = [],
   imageMode: controlledImageMode,
   onImageModeChange,
+  sessionMode = "chat",
+  onSessionModeChange,
   onStop,
   runStartedAt = null,
   goalState,
@@ -400,6 +404,7 @@ export function ThreadComposer({
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
   const imageMode = controlledImageMode ?? uncontrolledImageMode;
+  const learningMode = sessionMode === "learning";
   const setImageMode = useCallback(
     (enabled: boolean) => {
       if (controlledImageMode === undefined) {
@@ -409,6 +414,10 @@ export function ThreadComposer({
     },
     [controlledImageMode, onImageModeChange],
   );
+  const toggleLearningMode = useCallback(() => {
+    onSessionModeChange?.(learningMode ? "chat" : "learning");
+    textareaRef.current?.focus();
+  }, [learningMode, onSessionModeChange]);
   const placeholderItems = Array.isArray(placeholder) ? placeholder.filter(Boolean) : [];
 
   useEffect(() => {
@@ -880,14 +889,33 @@ export function ThreadComposer({
               onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "rounded-full text-muted-foreground hover:text-foreground",
-                isHero
-                  ? "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
-                  : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+                isHero ? "h-9 w-9 bg-card hover:bg-card" : "h-9 w-9 bg-card hover:bg-card",
               )}
             >
               <Plus className={cn(isHero ? "h-5 w-5" : "h-5 w-5")} />
             </Button>
             <div ref={aspectControlRef} className="relative flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={disabled}
+                aria-pressed={learningMode}
+                aria-label={t("thread.composer.learningMode.toggle")}
+                title={t("thread.composer.learningMode.toggle")}
+                onClick={toggleLearningMode}
+                className={cn(
+                  "rounded-full px-2.5 font-medium",
+                  isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  learningMode
+                    ? "bg-emerald-500/12 text-emerald-700 hover:bg-emerald-500/16 dark:text-emerald-300"
+                    : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                )}
+              >
+                <BookOpen className={cn("mr-1.5", isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
+                {learningMode
+                  ? t("thread.composer.learningMode.learning")
+                  : t("thread.composer.learningMode.chat")}
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
@@ -900,7 +928,7 @@ export function ThreadComposer({
                   textareaRef.current?.focus();
                 }}
                 className={cn(
-                  "rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
+                  "rounded-full px-2.5 font-medium",
                   isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
                   imageMode
                     ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
@@ -920,7 +948,7 @@ export function ThreadComposer({
                   aria-label={t("thread.composer.imageMode.aspectAria")}
                   onClick={() => setAspectMenuOpen((open) => !open)}
                   className={cn(
-                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
+                    "rounded-full bg-card px-2.5 font-medium text-foreground/80 hover:bg-card",
                     isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
                   )}
                 >
@@ -957,27 +985,28 @@ export function ThreadComposer({
             ) : null}
             <Button
               type={showStopButton ? "button" : "submit"}
+              variant="ghost"
               size="icon"
               disabled={showStopButton ? disabled : !canSend}
               aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
               onClick={showStopButton ? onStop : undefined}
               className={cn(
-                "rounded-full transition-transform",
+                "rounded-full transition-transform disabled:opacity-100",
                 showStopButton
-                  ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
-                  : isHero
-                    ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
-                    : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
-                isHero ? "" : "h-9 w-9",
+                  ? "bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
+                  : canSend
+                    ? "!bg-[#1A1C1F] text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:!bg-[#1A1C1F]/90 disabled:!bg-[#1A1C1F]/35 disabled:text-background/80"
+                    : "!bg-[#8C8D8F] text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:!bg-[#8C8D8F]/90 disabled:!bg-[#8C8D8F]/35 disabled:text-background/80",
+                isHero ? "" : "h-8 w-8",
                 (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
               )}
             >
               {showStopButton ? (
                 <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3 w-3")} />
               ) : isStreaming ? (
-                <Loader2 className={cn(isHero ? "h-4.5 w-4.5" : "h-4.5 w-4.5", "animate-spin")} />
+                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
               ) : (
-                <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4.5 w-4.5")} />
+                <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
               )}
             </Button>
           </div>

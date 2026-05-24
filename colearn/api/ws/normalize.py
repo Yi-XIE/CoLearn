@@ -37,6 +37,13 @@ def skills_from_frame(frame: dict[str, Any]) -> list[str]:
     return skills
 
 
+def mode_from_frame(frame: dict[str, Any]) -> str | None:
+    mode = str(frame.get("mode") or frame.get("session_mode") or "").strip().lower()
+    if mode in {"chat", "learning"}:
+        return mode
+    return None
+
+
 def ready_event() -> dict[str, Any]:
     session_id = str(uuid4())
     return {
@@ -60,4 +67,5 @@ def normalize_turn_frame(frame: dict[str, Any]) -> dict[str, Any]:
         "attachments": list(frame.get("media") or []),
         "language": str(frame.get("language") or "zh"),
         "skills": list(frame.get("skills") or []),
+        "mode": mode_from_frame(frame),
     }

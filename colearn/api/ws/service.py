@@ -79,6 +79,34 @@ async def broadcast_stream_event(turn: ActiveTurn, payload: dict[str, Any]) -> d
     return await broadcast_turn_frame(turn, stream_event_to_frame(turn.session_id, turn.turn_id, payload))
 
 
+def _result_goal_state(result: Any, *, requested_mode: str | None, project_title: str) -> dict[str, Any] | None:
+    raw_result = getattr(result, "raw_learning_result", None)
+    runtime_v2 = dict(raw_result.get("runtime_v2") or {}) if isinstance(raw_result, dict) else {}
+    raw_goal_state = runtime_v2.get("goal_state")
+    if isinstance(raw_goal_state, dict):
+        return {
+            "active": bool(raw_goal_state.get("active")),
+            "objective": str(raw_goal_state.get("objective") or project_title or ""),
+            "ui_summary": str(raw_goal_state.get("ui_summary") or raw_goal_state.get("objective") or project_title or ""),
+        }
+    board = getattr(result, "board_after", None)
+    plan = getattr(board, "learning_plan", None)
+    learning_board = getattr(board, "learning_board", None)
+    if board is None and str(requested_mode or "").lower() != "learning":
+        return None
+    objective = str(getattr(plan, "goal", "") or project_title or "")
+    ui_summary = str(
+        getattr(learning_board, "current_progress", "")
+        or getattr(getattr(board, "current_progress", None), "active_node_label", "")
+        or objective
+    )
+    return {
+        "active": str(requested_mode or "").lower() == "learning",
+        "objective": objective,
+        "ui_summary": ui_summary,
+    }
+
+
 def _run_orchestrator_turn(
     *,
     turn: ActiveTurn,
@@ -88,6 +116,7 @@ def _run_orchestrator_turn(
     language: str,
     attachments: list[dict[str, Any]],
     requested_skills: list[str],
+    requested_mode: str | None,
     emit_stream_event: Callable[[dict[str, Any]], None],
     cancel_check: Callable[[], bool],
 ) -> Any:
@@ -105,6 +134,7 @@ def _run_orchestrator_turn(
         language=language,
         attachments=attachments,
         requested_skills=requested_skills,
+        requested_mode=requested_mode,
         stream_emit=emit_stream_event,
         cancel_check=cancel_check,
     )
@@ -119,6 +149,7 @@ async def _run_orchestrator_turn_async(
     language: str,
     attachments: list[dict[str, Any]],
     requested_skills: list[str],
+    requested_mode: str | None,
     emit_stream_event: Callable[[dict[str, Any]], None],
     cancel_check: Callable[[], bool],
 ) -> Any:
@@ -135,6 +166,7 @@ async def _run_orchestrator_turn_async(
             language=language,
             attachments=attachments,
             requested_skills=requested_skills,
+            requested_mode=requested_mode,
             stream_emit=emit_stream_event,
             cancel_check=cancel_check,
         )
@@ -147,6 +179,7 @@ async def _run_orchestrator_turn_async(
         language=language,
         attachments=attachments,
         requested_skills=requested_skills,
+        requested_mode=requested_mode,
         emit_stream_event=emit_stream_event,
         cancel_check=cancel_check,
     )
@@ -166,6 +199,7 @@ async def execute_turn(
     language: str,
     attachments: list[dict[str, Any]],
     requested_skills: list[str],
+    requested_mode: str | None = None,
 ) -> None:
     loop = asyncio.get_running_loop()
     wake_signal = asyncio.Event()
@@ -189,6 +223,7 @@ async def execute_turn(
                 language=language,
                 attachments=attachments,
                 requested_skills=requested_skills,
+                requested_mode=requested_mode,
                 emit_stream_event=emit_stream_event,
                 cancel_check=cancel_check,
             )
@@ -248,6 +283,21 @@ async def execute_turn(
                     "phase": "final",
                     "latency_ms": latency_ms,
                     "tool_events": tool_events,
+                },
+            ),
+        )
+    goal_state = _result_goal_state(result, requested_mode=requested_mode, project_title=project_title)
+    if goal_state is not None:
+        await broadcast_turn_frame(
+            turn,
+            colearn_frame(
+                frame_type="goal_state",
+                session_id=turn.session_id,
+                turn_id=turn.turn_id,
+                metadata={
+                    "status": "completed",
+                    "phase": "goal_state",
+                    "goal_state": goal_state,
                 },
             ),
         )

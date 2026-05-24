@@ -13,7 +13,8 @@ class LearningProject:
     goal: str = ""
     source_refs: list[str] = field(default_factory=list)
     memory_refs: list[str] = field(default_factory=list)
-    turn_mode: str = "EXPLORE"
+    mode: str = "chat"
+    turn_mode: str = "PAUSED"
     board_facts: dict[str, Any] = field(default_factory=dict)
     board_version: int = 1
     anchor: dict[str, str] = field(default_factory=dict)

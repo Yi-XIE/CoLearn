@@ -295,6 +295,45 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("records goal_state from Colearn WS frames", () => {
+    const client = new ColearnWsClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onChat("session-goal", handler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      type: "goal_state",
+      session_id: "session-goal",
+      metadata: {
+        goal_state: {
+          active: true,
+          objective: "Learn vectors",
+          ui_summary: "Dot products",
+        },
+      },
+    });
+
+    expect(client.getGoalState("session-goal")).toEqual({
+      active: true,
+      objective: "Learn vectors",
+      ui_summary: "Dot products",
+    });
+    expect(handler).toHaveBeenCalledWith({
+      event: "goal_state",
+      chat_id: "session-goal",
+      goal_state: {
+        active: true,
+        objective: "Learn vectors",
+        ui_summary: "Dot products",
+      },
+    });
+  });
+
   it("resumes Colearn WS turns from the next sequence after reconnect", async () => {
     const client = new ColearnWsClient({
       url: "ws://test",

@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpenCheck, Link2, Search, Target } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, CheckCircle2, ClipboardCheck, Link2, Search, Target } from "lucide-react";
 
 import type { LucideIcon } from "lucide-react";
 
@@ -59,6 +59,12 @@ function nextRetrievalHint(support: LearningSupportPayload | null): string {
   return finalQuery;
 }
 
+function modeLabel(value?: string): string {
+  const mode = String(value || "").toUpperCase();
+  if (mode === "LEARN" || mode === "CHECK" || mode === "PAUSED") return mode;
+  return "";
+}
+
 export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
   const items = support?.prompt_support_bundle?.length
     ? support.prompt_support_bundle
@@ -66,6 +72,16 @@ export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
   const visibleItems = items.slice(0, 4);
   const misses = support?.retrieval_misses ?? [];
   const nextHint = nextRetrievalHint(support);
+  const plan = support?.learning_plan;
+  const board = support?.learning_board;
+  const mode = modeLabel(support?.turn_mode);
+  const currentNode = plan?.plan_nodes?.find((node) => node.id === plan.current_node_id);
+  const goal = plan?.goal?.trim();
+  const currentProgress = board?.current_progress?.trim() || currentNode?.label?.trim();
+  const completedCount = board?.completed_nodes?.length ?? 0;
+  const pendingChecks = plan?.pending_checks?.length ?? 0;
+  const blockerCount = (board?.blockers?.length ?? 0) + (board?.objections?.length ?? 0);
+  const hasBoardSummary = Boolean(goal || currentProgress || completedCount || pendingChecks || blockerCount);
   const notices: LearningSupportNotice[] = [];
 
   if (misses.length > 0) {
@@ -86,7 +102,7 @@ export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
     });
   }
 
-  if (visibleItems.length === 0 && notices.length === 0) return null;
+  if (visibleItems.length === 0 && notices.length === 0 && !hasBoardSummary) return null;
 
   return (
     <aside
@@ -101,10 +117,47 @@ export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
           <BookOpenCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
           <span className="truncate">本轮依据</span>
         </div>
-        <div className="shrink-0 text-[11px] tabular-nums">
-          {visibleItems.length} 条资料
+        <div className="flex shrink-0 items-center gap-2 text-[11px]">
+          {mode ? (
+            <span className="rounded-sm border border-border/70 px-1.5 py-0.5 font-medium text-foreground/80">
+              {mode}
+            </span>
+          ) : null}
+          <span className="tabular-nums">
+            {visibleItems.length} 条资料
+          </span>
         </div>
       </div>
+
+      {hasBoardSummary ? (
+        <div className="mb-2 grid gap-2 rounded-md border border-border/70 bg-background/75 px-2.5 py-2 sm:grid-cols-[1fr_auto]">
+          <div className="min-w-0">
+            {goal ? (
+              <div className="truncate text-[11px] font-medium text-foreground/90">{goal}</div>
+            ) : null}
+            {currentProgress ? (
+              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+                <Target className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{currentProgress}</span>
+              </div>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-3 gap-1 text-[11px] text-muted-foreground sm:w-[10rem]">
+            <div className="flex items-center justify-center gap-1 rounded-sm border border-border/60 px-1.5 py-1">
+              <CheckCircle2 className="h-3 w-3" aria-hidden />
+              <span className="tabular-nums">{completedCount}</span>
+            </div>
+            <div className="flex items-center justify-center gap-1 rounded-sm border border-border/60 px-1.5 py-1">
+              <ClipboardCheck className="h-3 w-3" aria-hidden />
+              <span className="tabular-nums">{pendingChecks}</span>
+            </div>
+            <div className="flex items-center justify-center gap-1 rounded-sm border border-border/60 px-1.5 py-1">
+              <AlertTriangle className="h-3 w-3" aria-hidden />
+              <span className="tabular-nums">{blockerCount}</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {visibleItems.length > 0 ? (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -147,7 +200,7 @@ export function LearningSupportPanel({ support }: LearningSupportPanelProps) {
             return (
               <div
                 key={notice.key}
-                className="rounded-lg border border-border/60 bg-background/88 px-3 py-2.5 shadow-sm"
+                className="rounded-[18px] border border-border/60 bg-background/88 px-3 py-2.5 shadow-sm"
               >
                 <div className="flex items-start gap-2">
                   <div className="mt-0.5 rounded-md border border-border/50 bg-muted/35 p-1 text-foreground/75">

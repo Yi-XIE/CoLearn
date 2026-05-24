@@ -29,8 +29,8 @@ def build_learning_closure(
         tool_events=merged_tool_events,
     )
     return {
-        **base_payload,
         **closure_payload,
+        **base_payload,
         "warnings": [
             *list(base_payload.get("warnings") or []),
             *list(warnings or []),

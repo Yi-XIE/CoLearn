@@ -12,7 +12,10 @@ from colearn.learning.state import (
     BoardFacts,
     ContinuationFacts,
     GapsAndBlockers,
+    LearningBoard,
     LearningEvent,
+    LearningPlan,
+    LearningPlanNode,
     LearningStateSnapshot,
     ProgressFacts,
     StudentSnapshot,
@@ -27,7 +30,7 @@ def extract_board_facts(
     session_id: str,
     continuation_hint: str = "",
     board_version: int = 1,
-    turn_mode: str = "EXPLORE",
+    turn_mode: str = "LEARN",
 ) -> BoardFacts:
     gaps = list(project.latest_review.get("confusion_points") or [])
     blockers = [
@@ -38,6 +41,29 @@ def extract_board_facts(
         )
         for idx, gap in enumerate(gaps)
     ]
+    active_node_id = project.project_id
+    active_node_label = project.title
+    evidence_refs = [{"source_ref": item} for item in (project.source_refs or [])]
+    learning_plan = LearningPlan(
+        goal=str(getattr(project, "goal", "") or project.title or ""),
+        plan_nodes=[
+            LearningPlanNode(
+                id=active_node_id,
+                label=active_node_label,
+                status="current",
+                depth=0,
+                summary=active_node_label,
+            )
+        ],
+        current_node_id=active_node_id,
+    )
+    learning_board = LearningBoard(
+        current_progress=active_node_label,
+        completed_nodes=[],
+        blockers=[blocker.desc for blocker in blockers if blocker.desc],
+        evidence_refs=[str(item.get("source_ref") or "") for item in evidence_refs if item.get("source_ref")],
+        continuation=continuation_hint,
+    )
     return BoardFacts(
         project_id=project.project_id,
         session_id=session_id,
@@ -45,8 +71,8 @@ def extract_board_facts(
         board_version=board_version,
         updated_at="",
         current_progress=ProgressFacts(
-            active_node_id=project.project_id,
-            active_node_label=project.title,
+            active_node_id=active_node_id,
+            active_node_label=active_node_label,
         ),
         student_snapshot=StudentSnapshot(
             mastery_level=0.0,
@@ -59,7 +85,72 @@ def extract_board_facts(
         continuation=ContinuationFacts(
             next_prompt_hint=continuation_hint,
         ),
-        evidence_refs=[{"source_ref": item} for item in (project.source_refs or [])],
+        evidence_refs=evidence_refs,
+        learning_plan=learning_plan,
+        learning_board=learning_board,
+    )
+
+
+def _coerce_learning_plan(raw: Any, *, project: LearningProject, progress: ProgressFacts) -> LearningPlan:
+    data = dict(raw or {})
+    nodes = [
+        LearningPlanNode(
+            id=str(item.get("id") or ""),
+            label=str(item.get("label") or ""),
+            status=str(item.get("status") or "pending"),
+            depth=int(item.get("depth") or 0),
+            summary=str(item.get("summary") or ""),
+        )
+        for item in list(data.get("plan_nodes") or [])
+        if isinstance(item, dict)
+    ]
+    current_node_id = str(data.get("current_node_id") or progress.active_node_id or "")
+    if not nodes and current_node_id:
+        nodes.append(
+            LearningPlanNode(
+                id=current_node_id,
+                label=str(progress.active_node_label or project.title or ""),
+                status="current",
+                depth=0,
+                summary=str(progress.active_node_label or project.title or ""),
+            )
+        )
+    return LearningPlan(
+        goal=str(data.get("goal") or getattr(project, "goal", "") or project.title or ""),
+        plan_nodes=nodes,
+        current_node_id=current_node_id,
+        review_queue=[str(item) for item in list(data.get("review_queue") or [])],
+        pending_checks=[str(item) for item in list(data.get("pending_checks") or [])],
+    )
+
+
+def _coerce_learning_board(
+    raw: Any,
+    *,
+    progress: ProgressFacts,
+    gaps: GapsAndBlockers,
+    continuation: ContinuationFacts,
+    evidence_refs: list[dict[str, Any]],
+) -> LearningBoard:
+    data = dict(raw or {})
+    return LearningBoard(
+        current_progress=str(data.get("current_progress") or progress.active_node_label or ""),
+        completed_nodes=[str(item) for item in list(data.get("completed_nodes") or progress.completed_node_ids or [])],
+        blockers=[
+            str(item)
+            for item in list(
+                data.get("blockers") or [blocker.desc for blocker in gaps.critical_blockers if blocker.desc]
+            )
+        ],
+        objections=[str(item) for item in list(data.get("objections") or [])],
+        evidence_refs=[
+            str(item)
+            for item in list(
+                data.get("evidence_refs")
+                or [ref.get("source_ref") for ref in evidence_refs if isinstance(ref, dict) and ref.get("source_ref")]
+            )
+        ],
+        continuation=str(data.get("continuation") or continuation.next_prompt_hint or ""),
     )
 
 
@@ -71,23 +162,35 @@ def build_learning_board(
 ) -> BoardFacts:
     raw = dict(getattr(session, "board_facts", None) or {})
     if raw:
+        progress = ProgressFacts(**dict(raw.get("current_progress") or {}))
+        gaps = GapsAndBlockers(
+            critical_blockers=[
+                Blocker(**dict(item))
+                for item in list((raw.get("gaps_and_blockers") or {}).get("critical_blockers") or [])
+            ],
+            unverified_gaps=list((raw.get("gaps_and_blockers") or {}).get("unverified_gaps") or []),
+        )
+        continuation = ContinuationFacts(**dict(raw.get("continuation") or {}))
+        evidence_refs = list(raw.get("evidence_refs") or [])
         return BoardFacts(
             project_id=str(raw.get("project_id") or project.project_id),
             session_id=str(raw.get("session_id") or getattr(session, "session_id", "")),
             current_turn_mode=normalize_turn_mode(raw.get("current_turn_mode")),
             board_version=int(raw.get("board_version") or getattr(session, "board_version", 1) or 1),
             updated_at=str(raw.get("updated_at") or ""),
-            current_progress=ProgressFacts(**dict(raw.get("current_progress") or {})),
+            current_progress=progress,
             student_snapshot=StudentSnapshot(**dict(raw.get("student_snapshot") or {})),
-            gaps_and_blockers=GapsAndBlockers(
-                critical_blockers=[
-                    Blocker(**dict(item))
-                    for item in list((raw.get("gaps_and_blockers") or {}).get("critical_blockers") or [])
-                ],
-                unverified_gaps=list((raw.get("gaps_and_blockers") or {}).get("unverified_gaps") or []),
+            gaps_and_blockers=gaps,
+            continuation=continuation,
+            evidence_refs=evidence_refs,
+            learning_plan=_coerce_learning_plan(raw.get("learning_plan"), project=project, progress=progress),
+            learning_board=_coerce_learning_board(
+                raw.get("learning_board"),
+                progress=progress,
+                gaps=gaps,
+                continuation=continuation,
+                evidence_refs=evidence_refs,
             ),
-            continuation=ContinuationFacts(**dict(raw.get("continuation") or {})),
-            evidence_refs=list(raw.get("evidence_refs") or []),
         )
     continuation_hint = str((latest_review or {}).get("continuation_prompt") or "")
     return extract_board_facts(
@@ -95,7 +198,7 @@ def build_learning_board(
         session_id=getattr(session, "session_id", ""),
         continuation_hint=continuation_hint,
         board_version=int(getattr(session, "board_version", 1) or 1),
-        turn_mode=getattr(session, "turn_mode", getattr(project, "turn_mode", "EXPLORE")),
+        turn_mode=getattr(session, "turn_mode", getattr(project, "turn_mode", "LEARN")),
     )
 
 
@@ -122,25 +225,22 @@ def build_state_snapshot(
 
 def determine_turn_mode(board: BoardFacts, user_message: str) -> TurnMode:
     _ = user_message
-    if board.current_turn_mode == "PAUSED":
+    current = normalize_turn_mode(board.current_turn_mode)
+    if current == "PAUSED":
         return "PAUSED"
-    if board.current_turn_mode in {"ANCHOR", "CORRECTION", "VERIFY"}:
-        return board.current_turn_mode
-    if not board.current_progress.active_node_id:
-        return "ANCHOR"
+    if current == "CHECK":
+        return "CHECK"
     if board.gaps_and_blockers.critical_blockers:
-        return "CORRECTION"
+        return "CHECK"
     if board.gaps_and_blockers.unverified_gaps:
-        return "VERIFY"
-    return "EXPLORE"
+        return "CHECK"
+    return "LEARN"
 
 
 def resolve_model_preset(turn_mode: TurnMode) -> str | None:
     return {
-        "EXPLORE": "explore",
-        "ANCHOR": "deep",
-        "CORRECTION": "deep",
-        "VERIFY": "deep",
+        "LEARN": "explore",
+        "CHECK": "deep",
         "PAUSED": None,
     }.get(turn_mode)
 
@@ -265,15 +365,15 @@ def resolve_turn_mode_after(
     unverified_gaps = list(board_after.gaps_and_blockers.unverified_gaps or [])
 
     if "BLOCKER_FOUND" in event_types or blockers:
-        return "CORRECTION"
-    if "NODE_STARTED" in event_types and not board_before.current_progress.active_node_id:
-        return "ANCHOR"
+        return "CHECK"
+    if board_before.current_turn_mode == "LEARN" and "NODE_COMPLETED" in event_types:
+        return "CHECK"
+    if board_before.current_turn_mode == "CHECK" and "NODE_COMPLETED" in event_types:
+        return "LEARN"
     if unverified_gaps:
-        return "VERIFY"
+        return "CHECK"
     if "NODE_COMPLETED" in event_types and board_after.current_progress.active_node_id:
-        return "EXPLORE"
-    if not board_after.current_progress.active_node_id:
-        return "ANCHOR"
+        return "LEARN"
     return normalize_turn_mode(board_before.current_turn_mode)
 
 
@@ -285,6 +385,7 @@ def apply_events(
     blockers = list(board.gaps_and_blockers.critical_blockers)
     continuation = board.continuation
     evidence_refs = list(board.evidence_refs)
+    plan = board.learning_plan
 
     for event in events:
         if event.type == "NODE_COMPLETED":
@@ -330,6 +431,54 @@ def apply_events(
                 if signature not in existing:
                     evidence_refs.append(evidence)
 
+    plan_nodes: list[LearningPlanNode] = []
+    for node in list(plan.plan_nodes or []):
+        status = node.status
+        if node.id and node.id in completed_node_ids:
+            status = "completed"
+        elif node.id and node.id == board.current_progress.active_node_id:
+            status = "current"
+        plan_nodes.append(
+            LearningPlanNode(
+                id=node.id,
+                label=node.label,
+                status=status,
+                depth=node.depth,
+                summary=node.summary,
+            )
+        )
+    if board.current_progress.active_node_id and not any(
+        node.id == board.current_progress.active_node_id for node in plan_nodes
+    ):
+        plan_nodes.append(
+            LearningPlanNode(
+                id=board.current_progress.active_node_id,
+                label=board.current_progress.active_node_label,
+                status="current",
+                depth=0,
+                summary=board.current_progress.active_node_label,
+            )
+        )
+    updated_plan = LearningPlan(
+        goal=plan.goal,
+        plan_nodes=plan_nodes,
+        current_node_id=board.current_progress.active_node_id or plan.current_node_id,
+        review_queue=list(plan.review_queue or []),
+        pending_checks=list(plan.pending_checks or board.gaps_and_blockers.unverified_gaps or []),
+    )
+    updated_learning_board = LearningBoard(
+        current_progress=board.current_progress.active_node_label,
+        completed_nodes=completed_node_ids,
+        blockers=[blocker.desc for blocker in blockers if blocker.desc],
+        objections=list(board.learning_board.objections or []),
+        evidence_refs=[
+            str(item.get("source_ref") or "")
+            for item in evidence_refs
+            if isinstance(item, dict) and str(item.get("source_ref") or "")
+        ],
+        continuation=continuation.next_prompt_hint,
+    )
+
     updated = BoardFacts(
         project_id=board.project_id,
         session_id=board.session_id,
@@ -349,6 +498,8 @@ def apply_events(
         ),
         continuation=continuation,
         evidence_refs=evidence_refs,
+        learning_plan=updated_plan,
+        learning_board=updated_learning_board,
     )
     next_mode = resolve_turn_mode_after(
         board_before=board,

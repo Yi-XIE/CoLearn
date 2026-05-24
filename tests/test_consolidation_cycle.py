@@ -73,6 +73,7 @@ async def test_board_snapshot_event_appended_after_turn(tmp_path: Path):
         session_id="sess-1",
         project_id="proj-1",
         user_message="explain matrices",
+        requested_mode="learning",
     )
     events = orchestrator.memory_store.list_events_for_session("sess-1")
     derived = [e for e in events if e.kind == "board_snapshot_derived"]
@@ -86,6 +87,7 @@ async def test_board_snapshot_failed_when_llm_returns_garbage(tmp_path: Path):
         session_id="sess-1",
         project_id="proj-1",
         user_message="hi",
+        requested_mode="learning",
     )
     events = orchestrator.memory_store.list_events_for_session("sess-1")
     failed = [e for e in events if e.kind == "board_snapshot_failed"]

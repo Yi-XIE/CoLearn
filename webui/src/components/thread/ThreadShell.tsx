@@ -77,6 +77,10 @@ interface PendingFirstMessage {
   images?: SendImage[];
 }
 
+function sendOptionsForMode(mode: "chat" | "learning") {
+  return mode === "learning" ? { sessionMode: mode } : undefined;
+}
+
 const HERO_PLACEHOLDERS = [
   "\u5148\u544a\u8bc9\u6211\u4f60\u60f3\u4ece\u54ea\u91cc\u5f00\u59cb",
   "\u628a\u4f60\u7684\u5b66\u4e60\u76ee\u6807\u53d1\u7ed9\u6211",
@@ -108,6 +112,7 @@ export function ThreadShell({
   } = useSessionHistory(historyKey);
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
+  const [sessionMode, setSessionMode] = useState<"chat" | "learning">("chat");
   const [learningSupport, setLearningSupport] = useState<LearningSupportPayload | null>(null);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -156,6 +161,10 @@ export function ThreadShell({
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
   }, [chatId, historyKey]);
+
+  useEffect(() => {
+    setSessionMode(session?.mode === "learning" ? "learning" : "chat");
+  }, [session?.chatId, session?.mode]);
 
   useEffect(() => {
     void refreshLearningSupport();
@@ -252,9 +261,9 @@ export function ThreadShell({
     if (!pending) return;
     pendingFirstRef.current = null;
     setScrollToBottomSignal((value) => value + 1);
-    send(pending.content, pending.images);
+    send(pending.content, pending.images, sendOptionsForMode(sessionMode));
     setBooting(false);
-  }, [chatId, send]);
+  }, [chatId, send, sessionMode]);
 
   const slashCommands = useMemo(() => [], []);
 
@@ -275,10 +284,10 @@ export function ThreadShell({
   const handleThreadSend = useCallback(
     async (content: string, images?: SendImage[]) => {
       setScrollToBottomSignal((value) => value + 1);
-      send(content, images);
+      send(content, images, sendOptionsForMode(sessionMode));
       await Promise.resolve();
     },
-    [send],
+    [send, sessionMode],
   );
 
   const composer = (
@@ -298,6 +307,8 @@ export function ThreadShell({
           onStop={stop}
           runStartedAt={runStartedAt}
           goalState={goalState}
+          sessionMode={sessionMode}
+          onSessionModeChange={setSessionMode}
         />
       ) : (
         <ThreadComposer
@@ -310,6 +321,8 @@ export function ThreadShell({
           slashCommands={slashCommands}
           runStartedAt={runStartedAt}
           goalState={goalState}
+          sessionMode={sessionMode}
+          onSessionModeChange={setSessionMode}
         />
       )}
     </>

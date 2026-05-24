@@ -19,7 +19,8 @@ class LearningSession:
     title_is_custom: bool = False
     created_at: int = 0
     updated_at: int = 0
-    turn_mode: str = "EXPLORE"
+    mode: str = "chat"
+    turn_mode: str = "PAUSED"
     board_facts: dict[str, Any] = field(default_factory=dict)
     board_version: int = 1
     status: str = "idle"
@@ -69,7 +70,7 @@ class SessionStore:
         session_id: str,
         project_id: str = "",
         title: str = "",
-        turn_mode: str = "EXPLORE",
+        turn_mode: str = "PAUSED",
     ) -> LearningSession:
         self._evict_idle()
         session = LearningSession(

@@ -15,6 +15,7 @@ import os
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 from colearn.nanobot_bootstrap import ensure_nanobot_on_path
 from colearn.paths import colearn_repo_root
@@ -52,6 +53,61 @@ def _hydrate_provider_env_aliases() -> None:
             os.environ["DEEPSEEK_API_KEY"] = legacy_openai_key
 
 
+def _sync_runtime_from_settings(repo_root: Path) -> None:
+    """Prefer the persisted active settings profile when hydrating runtime env."""
+    try:
+        from colearn.api.state import SettingsStateService, _provider_env_key
+        from colearn.storage.json_store import JsonStateStore
+    except Exception:
+        return
+
+    state_root = repo_root / ".colearn" / "state"
+    service = SettingsStateService(
+        state_store=JsonStateStore(root=state_root),
+        env_path=repo_root / ".env",
+    )
+    catalog = service.catalog()
+    service.apply_catalog(catalog)
+
+    services = dict(catalog.get("services") or {})
+    llm_profile, llm_model = service._resolve_active_selection(services.get("llm"))
+    provider_name = service._provider_name(llm_profile)
+    provider_env_key = _provider_env_key(provider_name)
+    provider_api_key = service._provider_api_key(llm_profile)
+    provider_api_base = service._string_or_none(llm_profile.get("base_url"))
+    provider_model = (
+        service._string_or_none(llm_model.get("model"))
+        or service._string_or_none(llm_model.get("name"))
+    )
+
+    if provider_env_key and provider_api_key:
+        os.environ[provider_env_key] = provider_api_key
+    if provider_name == "deepseek":
+        if provider_api_key:
+            os.environ["DEEPSEEK_API_KEY"] = provider_api_key
+        if provider_api_base:
+            os.environ["DEEPSEEK_API_BASE"] = provider_api_base
+        if provider_model:
+            os.environ["DEEPSEEK_MODEL"] = provider_model
+
+    embedding_profile, embedding_model = service._resolve_active_selection(services.get("embedding"))
+    embedding_api_key = service._string_or_none(embedding_profile.get("api_key"))
+    embedding_api_base = service._string_or_none(embedding_profile.get("base_url"))
+    embedding_model_name = (
+        service._string_or_none(embedding_model.get("model"))
+        or service._string_or_none(embedding_model.get("name"))
+    )
+    embedding_send_dimensions = embedding_model.get("send_dimensions", False)
+
+    if embedding_api_key:
+        os.environ["EMBEDDING_API_KEY"] = embedding_api_key
+    if embedding_api_base:
+        os.environ["EMBEDDING_BASE_URL"] = embedding_api_base
+    if embedding_model_name:
+        os.environ["EMBEDDING_MODEL"] = embedding_model_name
+    os.environ["EMBEDDING_SEND_DIMENSIONS"] = "true" if bool(embedding_send_dimensions) else "false"
+
+
 def main():
     parser = argparse.ArgumentParser(description="CoLearn unified server")
     parser.add_argument("--port", type=int, default=8001)
@@ -66,6 +122,7 @@ def main():
 
     _load_repo_env(repo_root)
     _hydrate_provider_env_aliases()
+    _sync_runtime_from_settings(repo_root)
     os.environ.setdefault("COLEARN_NANOBOT_TOKEN_ISSUE_SECRET", "")
     os.environ.setdefault("COLEARN_REPO_ROOT", str(repo_root))
     os.environ.setdefault("COLEARN_NANOBOT_WORKSPACE", str(workspace))
