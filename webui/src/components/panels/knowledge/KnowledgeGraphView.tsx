@@ -5,6 +5,13 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  forceCenter,
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+} from "d3-force";
 
 import type {
   KnowledgeBaseSummary,
@@ -52,6 +59,16 @@ type KnowledgeGraphVisualEdge = {
   to: string;
   kind: ApiKnowledgeGraphEdge["kind"];
   metadata?: Record<string, unknown>;
+};
+
+type ForceLayoutNode = KnowledgeGraphVisualNode & {
+  vx?: number;
+  vy?: number;
+};
+
+type ForceLayoutEdge = KnowledgeGraphVisualEdge & {
+  source: string;
+  target: string;
 };
 
 const GRAPH_WIDTH = 1160;
@@ -120,15 +137,8 @@ function buildKnowledgeGraph(libraries: KnowledgeBaseSummary[], _settings?: Know
   const nodes: KnowledgeGraphVisualNode[] = [];
   const edges: KnowledgeGraphVisualEdge[] = [];
   const conceptIndex = new Map<string, string>();
-  const centerX = 580;
-  const centerY = 320;
-  const libraryRadius = 210;
-  const fileRadius = 150;
 
   libraries.forEach((library, libraryIndex) => {
-    const angle = (Math.PI * 2 * libraryIndex) / Math.max(libraries.length, 1) - Math.PI / 2;
-    const libraryX = centerX + Math.cos(angle) * libraryRadius;
-    const libraryY = centerY + Math.sin(angle) * libraryRadius;
     const libraryNodeId = `library:${library.id}`;
     nodes.push({
       id: libraryNodeId,
@@ -139,19 +149,15 @@ function buildKnowledgeGraph(libraries: KnowledgeBaseSummary[], _settings?: Know
         status: library.status,
         provider: library.provider,
       },
-      x: libraryX,
-      y: libraryY,
+      x: GRAPH_CENTER_X + Math.cos(libraryIndex * 1.7) * 80,
+      y: GRAPH_CENTER_Y + Math.sin(libraryIndex * 1.7) * 80,
       size: graphNodeSize("library"),
       libraryId: library.id,
     });
 
     const files = (library.files ?? []).slice(0, 7);
     files.forEach((file, fileIndex) => {
-      const fileAngle =
-        angle + (files.length === 1 ? 0 : (fileIndex - (files.length - 1) / 2) * 0.46);
       const fileNodeId = `file:${library.id}:${file.path}`;
-      const fileX = libraryX + Math.cos(fileAngle) * fileRadius;
-      const fileY = libraryY + Math.sin(fileAngle) * fileRadius;
       nodes.push({
         id: fileNodeId,
         label: file.name,
@@ -163,8 +169,8 @@ function buildKnowledgeGraph(libraries: KnowledgeBaseSummary[], _settings?: Know
           modified: file.modified,
           mime_type: file.mime_type,
         },
-        x: fileX,
-        y: fileY,
+        x: GRAPH_CENTER_X + Math.cos((libraryIndex + 1) * 0.9 + fileIndex * 0.6) * 140,
+        y: GRAPH_CENTER_Y + Math.sin((libraryIndex + 1) * 0.9 + fileIndex * 0.6) * 140,
         size: graphNodeSize("file"),
         libraryId: library.id,
       });
@@ -182,15 +188,13 @@ function buildKnowledgeGraph(libraries: KnowledgeBaseSummary[], _settings?: Know
         if (!conceptNodeId) {
           conceptNodeId = `concept:${conceptKey}`;
           conceptIndex.set(conceptKey, conceptNodeId);
-          const conceptAngle =
-            fileAngle + 0.72 + conceptIndexForFile * 0.36 + conceptIndex.size * 0.17;
           nodes.push({
             id: conceptNodeId,
             label: concept,
             kind: "concept",
             metadata: { source: "frontend-fallback" },
-            x: centerX + Math.cos(conceptAngle) * 345,
-            y: centerY + Math.sin(conceptAngle) * 235,
+            x: GRAPH_CENTER_X + Math.cos(conceptIndex.size * 0.73 + conceptIndexForFile * 0.4) * 220,
+            y: GRAPH_CENTER_Y + Math.sin(conceptIndex.size * 0.73 + conceptIndexForFile * 0.4) * 220,
             size: graphNodeSize("concept"),
           });
         }
@@ -205,7 +209,7 @@ function buildKnowledgeGraph(libraries: KnowledgeBaseSummary[], _settings?: Know
     });
   });
 
-  return { nodes: resolveNodeCollisions(nodes), edges };
+  return runForceLayout(nodes, edges);
 }
 
 function graphNodeSize(kind: ApiKnowledgeGraphNode["kind"]): number {
@@ -268,100 +272,95 @@ function layoutKnowledgeGraphPayload(payload: KnowledgeGraphPayload, _settings?:
   nodes: KnowledgeGraphVisualNode[];
   edges: KnowledgeGraphVisualEdge[];
 } {
-  const centerX = GRAPH_CENTER_X;
-  const centerY = GRAPH_CENTER_Y;
-  const libraryRadius = 180;
-  const fileRadius = 155;
-  const relatedRadius = 92;
-  const placed = new Set<string>();
-  const visualById = new Map<string, KnowledgeGraphVisualNode>();
+  const nodes = payload.nodes.map((node, index) => ({
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    metadata: node.metadata,
+    x: GRAPH_CENTER_X + Math.cos(index * 0.85) * (120 + (index % 5) * 18),
+    y: GRAPH_CENTER_Y + Math.sin(index * 0.85) * (90 + (index % 7) * 14),
+    size: graphNodeSize(node.kind),
+    libraryId: graphLibraryIdForNode(node),
+  }));
 
-  payload.nodes.forEach((node, index) => {
-    const angle = (Math.PI * 2 * index) / Math.max(payload.nodes.length, 1) - Math.PI / 2;
-    visualById.set(node.id, {
-      id: node.id,
-      label: node.label,
-      kind: node.kind,
-      metadata: node.metadata,
-      x: centerX + Math.cos(angle) * 360,
-      y: centerY + Math.sin(angle) * 245,
-      size: graphNodeSize(node.kind),
-      libraryId: graphLibraryIdForNode(node),
-    });
-  });
+  const edges = payload.edges.map((edge) => ({
+    id: edge.id,
+    from: edge.source,
+    to: edge.target,
+    kind: edge.kind,
+    metadata: edge.metadata,
+  }));
 
-  const outgoing = new Map<string, ApiKnowledgeGraphEdge[]>();
-  payload.edges.forEach((edge) => {
-    const edges = outgoing.get(edge.source) ?? [];
-    edges.push(edge);
-    outgoing.set(edge.source, edges);
-  });
+  return runForceLayout(nodes, edges);
+}
 
-  const place = (id: string, x: number, y: number) => {
-    const node = visualById.get(id);
-    if (!node) return;
-    node.x = Math.max(48, Math.min(GRAPH_WIDTH - 48, x));
-    node.y = Math.max(54, Math.min(GRAPH_HEIGHT - 54, y));
-    placed.add(id);
-  };
+function runForceLayout(
+  nodes: KnowledgeGraphVisualNode[],
+  edges: KnowledgeGraphVisualEdge[],
+): {
+  nodes: KnowledgeGraphVisualNode[];
+  edges: KnowledgeGraphVisualEdge[];
+} {
+  const simulationNodes: ForceLayoutNode[] = nodes.map((node) => ({ ...node }));
+  const simulationEdges: ForceLayoutEdge[] = edges.map((edge) => ({
+    ...edge,
+    source: edge.from,
+    target: edge.to,
+  }));
 
-  const libraryNodes = payload.nodes.filter((node) => node.kind === "library");
-  libraryNodes.forEach((library, libraryIndex) => {
-    const libraryAngle =
-      libraryNodes.length === 1
-        ? -Math.PI / 2
-        : (Math.PI * 2 * libraryIndex) / libraryNodes.length - Math.PI / 2;
-    const libraryX =
-      libraryNodes.length === 1 ? centerX : centerX + Math.cos(libraryAngle) * libraryRadius;
-    const libraryY =
-      libraryNodes.length === 1 ? centerY : centerY + Math.sin(libraryAngle) * libraryRadius;
-    place(library.id, libraryX, libraryY);
+  const simulation = forceSimulation(simulationNodes)
+    .force("center", forceCenter(GRAPH_CENTER_X, GRAPH_CENTER_Y).strength(0.08))
+    .force(
+      "charge",
+      forceManyBody<ForceLayoutNode>().strength((node: ForceLayoutNode) => {
+        if (node.kind === "library") return -560;
+        if (node.kind === "file") return -180;
+        return -110;
+      }),
+    )
+    .force(
+      "link",
+      forceLink<ForceLayoutNode, ForceLayoutEdge>(simulationEdges)
+        .id((node: ForceLayoutNode) => node.id)
+        .distance((edge: ForceLayoutEdge) => {
+          if (edge.kind === "contains") return 88;
+          if (edge.kind === "mentions") return 62;
+          return 72;
+        })
+        .strength((edge: ForceLayoutEdge) => {
+          if (edge.kind === "contains") return 0.72;
+          if (edge.kind === "mentions") return 0.48;
+          return 0.4;
+        }),
+    )
+    .force(
+      "collide",
+      forceCollide<ForceLayoutNode>().radius((node: ForceLayoutNode) => {
+        if (node.kind === "library") return 46;
+        if (node.kind === "file") return 24;
+        return 20;
+      }).strength(0.95),
+    )
+    .stop();
 
-    const files = (outgoing.get(library.id) ?? [])
-      .filter((edge) => edge.kind === "contains")
-      .map((edge) => edge.target)
-      .filter((target) => visualById.get(target)?.kind === "file");
-    files.forEach((fileId, fileIndex) => {
-      const fileAngle =
-        libraryAngle + (files.length === 1 ? 0 : (fileIndex - (files.length - 1) / 2) * 0.55);
-      const fileNode = visualById.get(fileId);
-      if (!fileNode) return;
-      const fileX = libraryX + Math.cos(fileAngle) * fileRadius;
-      const fileY = libraryY + Math.sin(fileAngle) * fileRadius;
-      fileNode.libraryId = graphLibraryIdForNode(library);
-      place(fileId, fileX, fileY);
-
-      const related = (outgoing.get(fileId) ?? []).map((edge) => edge.target);
-      related.forEach((relatedId, relatedIndex) => {
-        const relatedNode = visualById.get(relatedId);
-        if (!relatedNode) return;
-        const relatedAngle =
-          fileAngle + 0.78 + (related.length === 1 ? 0 : (relatedIndex - (related.length - 1) / 2) * 0.42);
-        relatedNode.libraryId = fileNode.libraryId;
-        place(
-          relatedId,
-          fileX + Math.cos(relatedAngle) * relatedRadius,
-          fileY + Math.sin(relatedAngle) * relatedRadius,
-        );
-      });
-    });
-  });
-
-  const unplaced = Array.from(visualById.values()).filter((node) => !placed.has(node.id));
-  unplaced.forEach((node, index) => {
-    const angle = (Math.PI * 2 * index) / Math.max(unplaced.length, 1) - Math.PI / 2;
-    place(node.id, centerX + Math.cos(angle) * 395, centerY + Math.sin(angle) * 255);
-  });
+  for (let step = 0; step < 220; step += 1) {
+    simulation.tick();
+  }
 
   return {
-    nodes: resolveNodeCollisions(Array.from(visualById.values())),
-    edges: payload.edges.map((edge) => ({
-      id: edge.id,
-      from: edge.source,
-      to: edge.target,
-      kind: edge.kind,
-      metadata: edge.metadata,
-    })),
+    nodes: resolveNodeCollisions(
+      simulationNodes.map((node) => ({
+        id: node.id,
+        label: node.label,
+        kind: node.kind,
+        metadata: node.metadata,
+        x: Math.max(48, Math.min(GRAPH_WIDTH - 48, node.x ?? GRAPH_CENTER_X)),
+        y: Math.max(54, Math.min(GRAPH_HEIGHT - 54, node.y ?? GRAPH_CENTER_Y)),
+        size: node.size,
+        libraryId: node.libraryId,
+      })),
+    ),
+    edges,
   };
 }
 

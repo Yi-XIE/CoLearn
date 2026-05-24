@@ -344,6 +344,13 @@ describe("App layout", () => {
                   status: "ready",
                   provider: "lightrag",
                 },
+                {
+                  id: "kb-physics",
+                  name: "物理资料库",
+                  source_count: 1,
+                  status: "pending",
+                  provider: "lightrag",
+                },
               ],
             }),
           };
@@ -355,6 +362,17 @@ describe("App layout", () => {
             json: async () => ({
               files: [
                 { name: "notes.md", path: "/tmp/notes.md", size: 2048, modified: 1 },
+              ],
+            }),
+          };
+        }
+        if (url.includes("/api/v1/knowledge/kb-physics/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              files: [
+                { name: "force.md", path: "/tmp/force.md", size: 1024, modified: 1 },
               ],
             }),
           };
@@ -414,6 +432,8 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "知识花园" }));
 
     expect(await screen.findAllByText("线性代数资料库")).not.toHaveLength(0);
+    expect(await screen.findByRole("region", { name: "已完成文件" })).toHaveTextContent("1 个文件");
+    expect(await screen.findByRole("region", { name: "待处理文件" })).toHaveTextContent("1 个文件");
     expect(await screen.findByText("矩阵概念")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "展开 线性代数资料库" }));
     expect((await screen.findAllByText("notes.md")).length).toBeGreaterThan(0);

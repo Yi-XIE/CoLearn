@@ -53,6 +53,11 @@ function statusLabel(status: string): "已完成" | "待处理" {
   return "待处理";
 }
 
+function libraryFileCount(library: KnowledgeBaseSummary): number {
+  const files = (library.files ?? []).filter((file) => file.name);
+  return files.length || library.source_count || 0;
+}
+
 function buildNodeMarkdown(
   node: KnowledgeGraphPreviewNode,
   libraries: KnowledgeBaseSummary[],
@@ -266,6 +271,14 @@ export function KnowledgeGardenPanel({
     () => libraries.filter((library) => statusLabel(library.status) === "待处理"),
     [libraries],
   );
+  const completedFileCount = useMemo(
+    () => completedLibraries.reduce((sum, library) => sum + libraryFileCount(library), 0),
+    [completedLibraries],
+  );
+  const pendingFileCount = useMemo(
+    () => pendingLibraries.reduce((sum, library) => sum + libraryFileCount(library), 0),
+    [pendingLibraries],
+  );
 
   const handlePickFiles = () => {
     fileInputRef.current?.click();
@@ -406,6 +419,31 @@ export function KnowledgeGardenPanel({
       </div>
     );
   };
+
+  const renderStatusCard = (
+    label: "已完成" | "待处理",
+    fileCount: number,
+    items: KnowledgeBaseSummary[],
+  ) => (
+    <section aria-label={`${label}文件`} className="space-y-2">
+      <div className="flex items-center justify-between gap-3 px-1">
+        <div className="flex min-w-0 items-center gap-2 font-medium text-slate-900">
+          <FileText className="h-4 w-4 shrink-0" aria-hidden />
+          <span className="truncate">{label}文件</span>
+        </div>
+        <div className="shrink-0 text-[13px] text-slate-500 tabular-nums">{fileCount} 个文件</div>
+      </div>
+      <div className="scrollbar-none max-h-[360px] overflow-y-auto rounded-[18px] border border-slate-200/80 bg-white/90 px-2.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.07)]">
+        {items.length ? (
+          <div className="space-y-1">{items.map(renderLibraryItem)}</div>
+        ) : (
+          <div className="px-3 py-2 text-[13px] leading-6 text-slate-400">
+            还没有{label === "已完成" ? "完成" : "待处理"}文件
+          </div>
+        )}
+      </div>
+    </section>
+  );
 
   const graphToolbar = (
     <div className="relative flex items-center gap-3 rounded-full border border-slate-200 bg-white/96 px-3 py-2 shadow-[0_6px_18px_rgba(15,23,42,0.06)] backdrop-blur">
@@ -635,21 +673,10 @@ export function KnowledgeGardenPanel({
             </div>
 
             {!previewNode ? (
-              <aside className="fixed inset-y-0 right-0 z-30 w-[320px] border-l border-slate-200/90 bg-white">
-                <div className="scrollbar-none h-full overflow-y-auto px-3 pb-3 pt-10">
-                  {completedLibraries.length ? (
-                    <div>
-                      <div className="px-3 pb-2 text-[13px] font-medium text-slate-400">已完成</div>
-                      <div className="space-y-1">{completedLibraries.map(renderLibraryItem)}</div>
-                    </div>
-                  ) : null}
-
-                  {pendingLibraries.length ? (
-                    <div className={completedLibraries.length ? "mt-5" : ""}>
-                      <div className="px-3 pb-2 text-[13px] font-medium text-slate-400">待处理</div>
-                      <div className="space-y-1">{pendingLibraries.map(renderLibraryItem)}</div>
-                    </div>
-                  ) : null}
+              <aside className="fixed inset-y-0 right-0 z-30 w-[320px] bg-white">
+                <div className="scrollbar-none h-full space-y-4 overflow-y-auto px-4 pb-4 pt-[112px] text-[13px] text-slate-500">
+                  {renderStatusCard("已完成", completedFileCount, completedLibraries)}
+                  {renderStatusCard("待处理", pendingFileCount, pendingLibraries)}
                 </div>
               </aside>
             ) : (
