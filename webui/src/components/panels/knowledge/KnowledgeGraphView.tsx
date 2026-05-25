@@ -507,19 +507,19 @@ export function KnowledgeGraphView({
 
   return (
     <div className={cn("relative min-h-[620px] overflow-hidden bg-white", minimal ? "rounded-none border-0 shadow-none" : "rounded-lg border border-slate-200 shadow-[0_18px_50px_rgba(15,23,42,0.08)]")}>
-      {!minimal ? <div className="absolute inset-x-0 top-0 z-10 flex h-10 items-center justify-center border-b border-slate-200/80 bg-white/88 text-[12px] text-slate-500 backdrop-blur">
+      {!minimal ? <div className="absolute inset-x-0 top-0 z-10 flex h-10 items-center justify-center border-b border-slate-200/80 bg-white/88 text-sm text-slate-500 backdrop-blur">
         <div className="absolute left-4 flex items-center gap-2">
           <button
             type="button"
             onClick={resetGraphView}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 shadow-sm hover:bg-slate-50"
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-600 shadow-sm hover:bg-slate-50"
           >
             复位
           </button>
-          <span className="text-[11px] text-slate-400">拖拽移动 · 滚轮缩放 · 点击聚焦</span>
+          <span className="text-sm text-slate-400">拖拽移动 · 滚轮缩放 · 点击聚焦</span>
         </div>
         <span className="font-medium tracking-[0.02em] text-slate-700">关系图谱</span>
-        <div className="absolute right-4 flex items-center gap-3 text-[11px] text-slate-500">
+        <div className="absolute right-4 flex items-center gap-3 text-sm text-slate-500">
           <span>{libraryCount} 库</span>
           <span>{fileCount} 文件</span>
           <span>{relatedCount} 线索</span>

@@ -91,7 +91,7 @@ export function AgentActivityCluster({
         onClick={toggleOuter}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
-          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
+          "text-sm text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={outerExpanded}
       >

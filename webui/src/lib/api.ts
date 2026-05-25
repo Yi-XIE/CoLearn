@@ -14,6 +14,7 @@ import type {
   SettingsPayload,
   SettingsUpdate,
   SlashCommand,
+  SkillDetail,
   SkillSummary,
   WebSearchSettingsUpdate,
   WebuiThreadPersistedPayload,
@@ -98,6 +99,10 @@ async function request<T>(
     throw new ApiError(res.status, `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
+}
+
+function encodePathForRoute(path: string): string {
+  return path.split(/[\\/]+/).map(encodeURIComponent).join("/");
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
@@ -419,6 +424,42 @@ export async function fetchLearningSupport(
   };
 }
 
+export async function setSessionMode(
+  token: string,
+  sessionId: string,
+  mode: "chat" | "learning",
+  base: string = "",
+): Promise<ChatSummary> {
+  const endpoint = mode === "learning" ? "resume" : "pause";
+  const body = await request<{
+    session: {
+      session_id?: string;
+      created_at?: string | number | null;
+      updated_at?: string | number | null;
+      title?: string;
+      title_is_custom?: boolean;
+      last_message?: string;
+      mode?: "chat" | "learning";
+    };
+  }>(
+    `${base}/api/v1/sessions/${encodeURIComponent(sessionId)}/${endpoint}`,
+    token,
+    { method: "POST" },
+  );
+  const session = body.session ?? {};
+  const sessionKey = String(session.session_id ?? sessionId);
+  return {
+    key: sessionKey,
+    ...splitKey(sessionKey),
+    createdAt: normalizeSessionDate(session.created_at),
+    updatedAt: normalizeSessionDate(session.updated_at),
+    title: String(session.title ?? ""),
+    titleIsCustom: Boolean(session.title_is_custom),
+    preview: String(session.last_message ?? ""),
+    mode: session.mode === "learning" ? "learning" : "chat",
+  };
+}
+
 export async function deleteSession(
   token: string,
   key: string,
@@ -627,8 +668,9 @@ export async function fetchKnowledgeFilePreview(
   filePath: string,
   base: string = "",
 ): Promise<KnowledgeFilePreview> {
+  const encodedFilePath = encodePathForRoute(filePath);
   return request<KnowledgeFilePreview>(
-    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/files/${encodeURIComponent(filePath)}/preview`,
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/files/${encodedFilePath}/preview`,
     token,
   );
 }
@@ -754,5 +796,24 @@ export async function listSkills(
     name: String(skill.name ?? "").trim() || "unknown",
     description: String(skill.description ?? "").trim(),
     tags: Array.isArray(skill.tags) ? skill.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    always: Boolean(skill.always),
   }));
+}
+
+export async function fetchSkillDetail(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SkillDetail> {
+  const skill = await request<Partial<SkillDetail> & { name?: string; description?: string; content?: string; tags?: string[] }>(
+    `${base}/api/v1/skills/${encodeURIComponent(name)}`,
+    token,
+  );
+  return {
+    name: String(skill.name ?? name).trim() || name,
+    description: String(skill.description ?? "").trim(),
+    content: String(skill.content ?? "").trim(),
+    tags: Array.isArray(skill.tags) ? skill.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    always: Boolean(skill.always),
+  };
 }

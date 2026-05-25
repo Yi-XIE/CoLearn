@@ -178,6 +178,12 @@
   },
   "thread": {
     "loadingConversation": "正在加载对话…",
+    "learningPrompt": {
+      "title": "要打开学习模式吗？",
+      "body": "打开后会按计划推进这段对话。",
+      "accept": "打开",
+      "dismiss": "忽略"
+    },
     "empty": {
       "greeting": "今天想学什么？",
       "quickActions": {

@@ -73,6 +73,9 @@ interface ThreadComposerProps {
   onImageModeChange?: (enabled: boolean) => void;
   sessionMode?: "chat" | "learning";
   onSessionModeChange?: (mode: "chat" | "learning") => void;
+  learningPromptVisible?: boolean;
+  onLearningPromptAccept?: () => void;
+  onLearningPromptDismiss?: () => void;
   onStop?: () => void;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
@@ -99,6 +102,29 @@ const SLASH_PALETTE_GAP_PX = 8;
 const SLASH_PALETTE_MAX_HEIGHT_PX = 288;
 const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 64;
+const HERO_TOPIC_SUGGESTIONS = [
+  {
+    title: "人工智能是什么？",
+    emoji: "🤖",
+    prompt: "人工智能是什么？",
+  },
+  {
+    title: "大语言模型是怎么工作的？",
+    emoji: "🧠",
+    prompt: "大语言模型是怎么工作的？",
+  },
+  {
+    title: "RAG 和知识库有什么关系？",
+    emoji: "📚",
+    prompt: "RAG 和知识库有什么关系？",
+  },
+  {
+    title: "AI Agent 怎么执行任务？",
+    emoji: "✨",
+    prompt: "AI Agent 怎么执行任务？",
+  },
+] as const;
+
 
 type SlashPalettePlacement = "above" | "below";
 
@@ -295,7 +321,7 @@ function RunElapsedStrip({
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
             <h2
               id="nanobot-goal-panel-title"
-              className="min-w-0 truncate text-[13px] font-semibold tracking-tight text-foreground"
+              className="min-w-0 truncate text-sm font-semibold tracking-tight text-foreground"
             >
               {t("thread.composer.goalStateSheetTitle")}
             </h2>
@@ -316,7 +342,7 @@ function RunElapsedStrip({
             id="nanobot-goal-panel-scroll"
             className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
           >
-            <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
+            <MarkdownText className="max-w-none text-sm leading-relaxed text-foreground/90">
               {markdownBody}
             </MarkdownText>
           </div>
@@ -332,7 +358,7 @@ function RunElapsedStrip({
         ) : (
           <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
         )}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium text-foreground/75">
           {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
           {timerTitle && showGoal ? (
             <span className="shrink-0 text-muted-foreground/45" aria-hidden>
@@ -372,6 +398,53 @@ function RunElapsedStrip({
   );
 }
 
+function LearningPromptStrip({
+  onAccept,
+  onDismiss,
+}: {
+  onAccept?: () => void;
+  onDismiss?: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      className="flex min-h-[42px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+      role="status"
+      aria-live="polite"
+    >
+      <Sparkles className="h-4 w-4 shrink-0 text-foreground/75" aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground/75">
+        {t("thread.learningPrompt.title")} CoLearn将和你一起学习
+      </span>
+      <button
+        type="button"
+        aria-label={t("thread.learningPrompt.dismiss")}
+        onClick={onDismiss}
+        className={cn(
+          "shrink-0 rounded-[10px] px-2.5 py-1.5 text-sm text-muted-foreground",
+          "transition-colors hover:bg-muted/65 hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        {t("thread.learningPrompt.dismiss")}
+      </button>
+      <button
+        type="button"
+        aria-label={t("thread.learningPrompt.accept")}
+        onClick={onAccept}
+        className={cn(
+          "shrink-0 rounded-[10px] bg-[#013FF8] px-3 py-1.5 text-sm font-medium text-white",
+          "transition-colors hover:bg-[#0137d8]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        {t("thread.learningPrompt.accept")}
+      </button>
+    </div>
+  );
+}
+
 export function ThreadComposer({
   onSend,
   disabled,
@@ -384,6 +457,9 @@ export function ThreadComposer({
   onImageModeChange,
   sessionMode = "chat",
   onSessionModeChange,
+  learningPromptVisible = false,
+  onLearningPromptAccept,
+  onLearningPromptDismiss,
   onStop,
   runStartedAt = null,
   goalState,
@@ -686,6 +762,16 @@ export function ThreadComposer({
     }
   }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
+  const insertHeroTopic = useCallback((topic: string) => {
+    setValue(topic);
+    setSlashMenuDismissed(false);
+    setInlineError(null);
+    requestAnimationFrame(() => {
+      resizeTextarea();
+      textareaRef.current?.focus();
+    });
+  }, [resizeTextarea]);
+
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlashMenu) {
       if (e.key === "ArrowDown") {
@@ -775,9 +861,9 @@ export function ThreadComposer({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
-    >
-      {showSlashMenu ? (
-        <SlashCommandPalette
+      >
+        {showSlashMenu ? (
+          <SlashCommandPalette
           commands={filteredSlashCommands}
           selectedIndex={selectedCommandIndex}
           layout={slashPaletteLayout}
@@ -795,10 +881,16 @@ export function ThreadComposer({
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
-          goalState?.active &&
-            "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
+          (learningMode || goalState?.active)
+            && "goal-shell-glow ring-1 ring-[#013FF8]/35 motion-reduce:ring-[#013FF8]/25 dark:ring-[#013FF8]/45",
         )}
       >
+        {learningPromptVisible ? (
+          <LearningPromptStrip
+            onAccept={onLearningPromptAccept}
+            onDismiss={onLearningPromptDismiss}
+          />
+        ) : null}
         {images.length > 0 ? (
           <div
             className="flex flex-wrap gap-2 px-3 pt-3"
@@ -848,7 +940,7 @@ export function ThreadComposer({
             "w-full resize-none bg-transparent",
             isHero
               ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
-              : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
+              : "min-h-[50px] px-4 pb-1.5 pt-3 text-sm leading-5",
             "placeholder:text-muted-foreground/70",
             "focus:outline-none focus-visible:outline-none",
             "disabled:cursor-not-allowed",
@@ -859,7 +951,7 @@ export function ThreadComposer({
             role="alert"
             className={cn(
               "mx-3 mb-1 rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive",
+              "text-sm font-medium text-destructive",
             )}
           >
             {inlineError}
@@ -905,9 +997,9 @@ export function ThreadComposer({
                 onClick={toggleLearningMode}
                 className={cn(
                   "rounded-full px-2.5 font-medium",
-                  isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  "h-9 text-sm",
                   learningMode
-                    ? "bg-emerald-500/12 text-emerald-700 hover:bg-emerald-500/16 dark:text-emerald-300"
+                    ? "bg-[#013FF8]/10 text-[#013FF8] hover:bg-[#013FF8]/14 dark:bg-[#013FF8]/16 dark:text-[#7DA0FF] dark:hover:bg-[#013FF8]/22"
                     : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
                 )}
               >
@@ -929,7 +1021,7 @@ export function ThreadComposer({
                 }}
                 className={cn(
                   "rounded-full px-2.5 font-medium",
-                  isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  "h-9 text-sm",
                   imageMode
                     ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
                     : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
@@ -949,7 +1041,7 @@ export function ThreadComposer({
                   onClick={() => setAspectMenuOpen((open) => !open)}
                   className={cn(
                     "rounded-full bg-card px-2.5 font-medium text-foreground/80 hover:bg-card",
-                    isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                    "h-9 text-sm",
                   )}
                 >
                   <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
@@ -976,8 +1068,8 @@ export function ThreadComposer({
                 className={cn(
                   "inline-flex min-w-0 font-medium text-foreground/72",
                   isHero
-                    ? "max-w-[13rem] text-[12px]"
-                    : "max-w-[12rem] text-[12px]",
+                    ? "max-w-[13rem] text-sm"
+                    : "max-w-[12rem] text-sm",
                 )}
               >
                 <span className="truncate">{modelLabel}</span>
@@ -1012,6 +1104,38 @@ export function ThreadComposer({
           </div>
         </div>
       </div>
+      {isHero ? (
+        <div className="mt-3 grid w-full max-w-[48rem] grid-cols-4 gap-3">
+          {HERO_TOPIC_SUGGESTIONS.map((topic) => {
+            return (
+              <button
+                key={topic.title}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertHeroTopic(topic.prompt);
+                }}
+                className={cn(
+                  "flex min-h-[108px] w-full min-w-0 flex-col items-start gap-3 rounded-[18px] border border-black/[0.05] bg-card p-4 text-left",
+                  "transition-all",
+                  "hover:-translate-y-0.5 hover:border-black/[0.09] hover:shadow-[0_10px_24px_rgba(15,23,42,0.05)]",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "dark:border-white/[0.08] dark:hover:border-white/[0.12] dark:hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]",
+                )}
+              >
+                <span className="flex h-10 w-10 items-center justify-center text-[26px] leading-none">
+                  {topic.emoji}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12px] font-medium leading-5 text-foreground">
+                    {topic.title}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -1044,7 +1168,7 @@ function ImageAspectMenu({
         isHero ? "top-full mt-2" : "bottom-full mb-2",
         "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_16px_45px_rgba(15,23,42,0.16)]",
         "dark:border-white/10 dark:shadow-[0_18px_45px_rgba(0,0,0,0.42)]",
-        isHero ? "text-[12px]" : "text-[11.5px]",
+        "text-sm",
       )}
     >
       <div className="px-2 pb-1 pt-1 font-medium text-muted-foreground/70">
@@ -1104,7 +1228,7 @@ function SlashCommandPalette({
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >
-      <div className="px-2 pb-1 pt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground/70">
+      <div className="px-2 pb-1 pt-1 text-sm font-medium tracking-[0.08em] text-muted-foreground/70">
         {t("thread.composer.slash.label")}
       </div>
       <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
@@ -1148,19 +1272,19 @@ function SlashCommandPalette({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="font-mono text-[13px] font-semibold text-foreground">
+                  <span className="font-mono text-sm font-semibold text-foreground">
                     {command.command}
                   </span>
                   {command.argHint ? (
-                    <span className="font-mono text-[12px] text-muted-foreground">
+                    <span className="font-mono text-sm text-muted-foreground">
                       {command.argHint}
                     </span>
                   ) : null}
-                  <span className="truncate text-[13px] font-medium">
+                  <span className="truncate text-sm font-medium">
                     {title}
                   </span>
                 </span>
-                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                <span className="mt-0.5 block truncate text-sm text-muted-foreground">
                   {description}
                 </span>
               </span>
@@ -1168,7 +1292,7 @@ function SlashCommandPalette({
           );
         })}
       </div>
-      <div className="flex items-center gap-2 px-2 pt-1.5 text-[10.5px] text-muted-foreground/70">
+      <div className="flex items-center gap-2 px-2 pt-1.5 text-sm text-muted-foreground/70">
         <span>{t("thread.composer.slash.navigateHint")}</span>
         <span>{t("thread.composer.slash.selectHint")}</span>
         <span>{t("thread.composer.slash.closeHint")}</span>
@@ -1240,7 +1364,7 @@ function AttachmentChip({
           </div>
         ) : null}
       </div>
-      <div className="flex min-w-0 flex-col text-[11.5px] leading-4">
+      <div className="flex min-w-0 flex-col text-sm leading-4">
         <span className="truncate max-w-[14rem] font-medium" title={image.file.name}>
           {image.file.name}
         </span>

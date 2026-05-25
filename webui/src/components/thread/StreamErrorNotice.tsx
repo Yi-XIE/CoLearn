@@ -27,7 +27,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
       aria-live="assertive"
       className={cn(
         "mb-2 flex items-start gap-2 rounded-lg border border-destructive/30",
-        "bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive",
+        "bg-destructive/10 px-3 py-2 text-sm leading-5 text-destructive",
         "animate-in fade-in-0 slide-in-from-bottom-1",
       )}
     >

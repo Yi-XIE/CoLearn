@@ -33,7 +33,7 @@ export function LanguageSwitcher() {
           variant="ghost"
           size="sm"
           aria-label={t("sidebar.language.ariaLabel")}
-          className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="h-7 gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
         >
           <Globe className="h-3.5 w-3.5" />
           <span className="max-w-[7rem] truncate">{selected.nativeLabel}</span>
@@ -53,7 +53,7 @@ export function LanguageSwitcher() {
               <span className="flex min-w-0 items-center gap-2">
                 <span>{option.nativeLabel}</span>
                 {option.nativeLabel !== option.label ? (
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate text-sm text-muted-foreground">
                     {option.label}
                   </span>
                 ) : null}

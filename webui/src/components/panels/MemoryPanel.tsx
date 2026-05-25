@@ -1,5 +1,12 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, Save, Trash2 } from "lucide-react";
+import {
+  FileText,
+  Loader2,
+  RefreshCw,
+  Save,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,9 +42,20 @@ function memoryDocumentLabel(file: MemoryDocumentName): string {
   return file === "summary" ? "学习摘要" : "个人画像";
 }
 
-function MemorySectionTitle({ children }: { children: ReactNode }) {
+function MemorySectionTitle({
+  children,
+  icon,
+}: {
+  children: ReactNode;
+  icon?: ReactNode;
+}) {
   return (
-    <h2 className="px-1 font-sans text-[14px] font-semibold tracking-normal text-foreground/92">
+    <h2 className="flex items-center gap-2 px-1 font-sans text-[14px] font-semibold tracking-normal text-foreground/92">
+      {icon ? (
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-900 shadow-[0_1px_4px_rgba(15,23,42,0.045)]">
+          {icon}
+        </span>
+      ) : null}
       {children}
     </h2>
   );
@@ -45,7 +63,7 @@ function MemorySectionTitle({ children }: { children: ReactNode }) {
 
 function MemorySectionHint({ children }: { children: ReactNode }) {
   return (
-    <p className="px-1 font-sans text-[13px] leading-5 text-muted-foreground">
+    <p className="px-1 font-sans text-[14px] leading-5 text-muted-foreground">
       {children}
     </p>
   );
@@ -61,11 +79,11 @@ function MemoryGroup({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border border-border/60 bg-card/88 font-sans shadow-[0_16px_48px_rgba(15,23,42,0.055)]",
+        "overflow-hidden rounded-xl border border-slate-200 bg-white font-sans shadow-[0_10px_32px_rgba(15,23,42,0.06)]",
         className,
       )}
     >
-      <div className="divide-y divide-border/50">{children}</div>
+      <div className="divide-y divide-slate-100">{children}</div>
     </div>
   );
 }
@@ -97,7 +115,7 @@ function MemoryDocumentEditor({
         onChange={(event) => onChange(event.target.value)}
         placeholder={copy.placeholder}
         disabled={disabled}
-        className="min-h-[184px] resize-y rounded-lg border border-border/80 bg-card/90 px-3 py-3 text-[13px] leading-6 shadow-none focus-visible:border-border focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
+        className="scrollbar-none min-h-[184px] resize-y rounded-xl border border-slate-200 bg-white px-4 py-4 text-[14px] leading-7 text-slate-800 shadow-[0_10px_32px_rgba(15,23,42,0.045)] placeholder:text-slate-400 focus-visible:border-slate-300 focus-visible:ring-1 focus-visible:ring-slate-300 focus-visible:ring-offset-0"
       />
       <div className="flex justify-end">
         <Button
@@ -106,7 +124,7 @@ function MemoryDocumentEditor({
           variant="secondary"
           onClick={onSave}
           disabled={isBusy || disabled || !dirty}
-          className="h-8 rounded-full px-3 text-[12px] font-medium"
+          className="h-9 shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-[14px] font-medium text-slate-800 shadow-[0_1px_3px_rgba(15,23,42,0.04)] hover:bg-slate-50"
         >
           {saving ? (
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -132,8 +150,8 @@ function MemorySettingRow({
   return (
     <div className="flex min-h-[78px] flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div className="min-w-0 flex-1">
-        <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
-        <div className="mt-1 max-w-[34rem] text-[12px] leading-5 text-muted-foreground">
+        <div className="text-[14px] font-semibold leading-5 text-slate-900">{title}</div>
+        <div className="mt-1 max-w-[34rem] text-[14px] leading-5 text-muted-foreground">
           {description}
         </div>
       </div>
@@ -161,7 +179,7 @@ function MemorySwitch({
       className={cn(
         "relative inline-flex h-7 w-12 items-center rounded-full p-1 transition-[background-color,transform,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98]",
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
-        active ? "bg-[#4a4a4a]" : "bg-[#7a7a7a]",
+        active ? "bg-slate-950" : "bg-slate-300",
       )}
     >
       <span
@@ -322,14 +340,18 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
         {notice ? (
           <div
             role="status"
-            className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2.5 text-[13px] text-emerald-700 dark:text-emerald-300"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-[14px] leading-6 text-slate-600 shadow-[0_10px_32px_rgba(15,23,42,0.05)]"
           >
             {notice}
           </div>
         ) : null}
 
         <section className="space-y-2">
-          <MemorySectionTitle>学习摘要</MemorySectionTitle>
+          <MemorySectionTitle
+            icon={<FileText className="h-4 w-4" strokeWidth={1.8} aria-hidden />}
+          >
+            学习摘要
+          </MemorySectionTitle>
           <MemorySectionHint>
             跨会话保留的稳定学习背景和结论。
           </MemorySectionHint>
@@ -345,7 +367,11 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
         </section>
 
         <section className="space-y-2">
-          <MemorySectionTitle>个人画像</MemorySectionTitle>
+          <MemorySectionTitle
+            icon={<UserRound className="h-4 w-4" strokeWidth={1.8} aria-hidden />}
+          >
+            个人画像
+          </MemorySectionTitle>
           <MemorySectionHint>
             记录学习目标、偏好和已经确认的协作方式。
           </MemorySectionHint>
@@ -384,7 +410,7 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
                 variant="secondary"
                 onClick={() => void refreshSummary()}
                 disabled={!!busy || !memoryEnabled}
-                className="h-8 rounded-full px-3 text-[12px] font-medium"
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-[14px] font-medium text-slate-800 shadow-[0_1px_3px_rgba(15,23,42,0.04)] hover:bg-slate-50"
               >
                 {busy === "refresh" ? (
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -405,7 +431,7 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
                   variant="secondary"
                   onClick={() => void clearDocument("summary")}
                   disabled={!!busy || !drafts.summary}
-                  className="h-8 rounded-full px-3 text-[12px] font-medium text-destructive hover:text-destructive"
+                  className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-[14px] font-medium text-destructive shadow-[0_1px_3px_rgba(15,23,42,0.04)] hover:bg-slate-50 hover:text-destructive"
                 >
                   {busy === "clear-summary" ? (
                     <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -420,7 +446,7 @@ export function MemoryPanel({ token, ...panelProps }: MemoryPanelProps) {
                   variant="secondary"
                   onClick={() => void clearDocument("profile")}
                   disabled={!!busy || !drafts.profile}
-                  className="h-8 rounded-full px-3 text-[12px] font-medium text-destructive hover:text-destructive"
+                  className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-[14px] font-medium text-destructive shadow-[0_1px_3px_rgba(15,23,42,0.04)] hover:bg-slate-50 hover:text-destructive"
                 >
                   {busy === "clear-profile" ? (
                     <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />

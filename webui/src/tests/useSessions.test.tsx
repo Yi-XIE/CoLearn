@@ -148,7 +148,7 @@ describe("useSessions", () => {
           chatId: "chat-new",
           createdAt: "2026-04-16T10:00:00Z",
           updatedAt: "2026-04-16T10:00:00Z",
-          title: "latest session",
+          title: "",
           preview: "first message",
         },
       ]);
@@ -180,7 +180,7 @@ describe("useSessions", () => {
       await result.current.refresh();
     });
 
-    await waitFor(() => expect(result.current.sessions[0]?.title).toBe("latest session"));
+    await waitFor(() => expect(result.current.sessions[0]?.preview).toBe("first message"));
   });
 
   it("keeps the newest persisted session at the top even if the backend returns insertion order", async () => {
@@ -214,6 +214,69 @@ describe("useSessions", () => {
       "chat-new",
       "chat-old",
     ]);
+  });
+
+  it("moves a resumed older session to the top when its updatedAt becomes newer", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([
+        {
+          key: "chat-old",
+          channel: "",
+          chatId: "chat-old",
+          createdAt: "2026-05-22T10:00:00.000Z",
+          updatedAt: "2026-05-22T10:01:00.000Z",
+          title: "",
+          preview: "older first message",
+        },
+        {
+          key: "chat-new",
+          channel: "",
+          chatId: "chat-new",
+          createdAt: "2026-05-22T10:20:00.000Z",
+          updatedAt: "2026-05-22T10:21:00.000Z",
+          title: "",
+          preview: "newer first message",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          key: "chat-old",
+          channel: "",
+          chatId: "chat-old",
+          createdAt: "2026-05-22T10:00:00.000Z",
+          updatedAt: "2026-05-24T09:30:00.000Z",
+          title: "",
+          preview: "older first message",
+        },
+        {
+          key: "chat-new",
+          channel: "",
+          chatId: "chat-new",
+          createdAt: "2026-05-22T10:20:00.000Z",
+          updatedAt: "2026-05-22T10:21:00.000Z",
+          title: "",
+          preview: "newer first message",
+        },
+      ]);
+
+    const client = fakeClient();
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.sessions.map((session) => session.key)).toEqual([
+      "chat-new",
+      "chat-old",
+    ]));
+
+    act(() => {
+      client.emitSessionUpdate("chat-old");
+    });
+
+    await waitFor(() => expect(result.current.sessions.map((session) => session.key)).toEqual([
+      "chat-old",
+      "chat-new",
+    ]));
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {

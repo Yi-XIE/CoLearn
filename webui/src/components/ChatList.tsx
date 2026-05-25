@@ -33,7 +33,7 @@ export function ChatList({
   const { t } = useTranslation();
   if (loading && sessions.length === 0) {
     return (
-      <div className="px-3 py-4 text-[12px] text-muted-foreground">
+      <div className="px-3 py-4 text-sm text-muted-foreground">
         {t("chat.loading")}
       </div>
     );
@@ -41,7 +41,7 @@ export function ChatList({
 
   if (sessions.length === 0) {
     return (
-      <div className="px-3 py-4 text-[12px] leading-5 text-muted-foreground/80">
+      <div className="px-3 py-4 text-sm leading-5 text-muted-foreground/80">
         {emptyLabel ?? t("chat.noSessions")}
       </div>
     );
@@ -58,7 +58,7 @@ export function ChatList({
       <div className="min-w-0 space-y-2 px-2 py-1">
         {groups.map((group) => (
           <section key={group.label} aria-label={group.label}>
-            <div className="px-3 pb-0.5 text-[12px] font-medium text-muted-foreground/65">
+            <div className="px-3 pb-0.5 text-sm font-medium text-muted-foreground/65">
               {group.label}
             </div>
             <ul className="space-y-0.5">
@@ -76,7 +76,7 @@ export function ChatList({
                   <li key={s.key} className="min-w-0">
                     <div
                       className={cn(
-                        "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-3 text-[15px] transition-colors",
+                        "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-3 text-sm transition-colors",
                         active
                           ? "bg-sidebar-accent/70 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.28)]"
                           : "text-sidebar-foreground/82 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",

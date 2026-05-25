@@ -99,7 +99,7 @@ export function Sidebar(props: SidebarProps) {
             aria-label={t("sidebar.searchAria")}
             className={cn(
               "h-8 w-full rounded-full border border-transparent bg-sidebar-accent/45",
-              "pl-8 pr-3 text-[15px] text-sidebar-foreground outline-none",
+              "pl-8 pr-3 text-sm text-sidebar-foreground outline-none",
               "placeholder:text-muted-foreground/75",
               "transition-colors hover:bg-sidebar-accent/65",
               "focus:border-sidebar-border/80 focus:bg-sidebar-accent/70",
@@ -109,7 +109,7 @@ export function Sidebar(props: SidebarProps) {
         </label>
         <Button
           onClick={props.onNewChat}
-          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[15px] font-medium leading-none text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-sm font-medium leading-none text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
           variant="ghost"
         >
           <SquarePen className="h-3.5 w-3.5" />
@@ -125,7 +125,7 @@ export function Sidebar(props: SidebarProps) {
                 variant="ghost"
                 onClick={onClick}
                 className={cn(
-                  "h-8 w-full justify-start gap-2 rounded-full px-3 text-[15px] font-medium",
+                  "h-8 w-full justify-start gap-2 rounded-full px-3 text-sm font-medium",
                   active
                     ? "bg-sidebar-accent/80 text-sidebar-foreground"
                     : "text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
@@ -153,12 +153,12 @@ export function Sidebar(props: SidebarProps) {
         />
       </div>
 
-      <div className="shrink-0 space-y-1 px-2.5 py-2 text-xs">
+      <div className="shrink-0 space-y-1 px-2.5 py-2 text-sm">
         <Button
           type="button"
           variant="ghost"
           onClick={props.onOpenSettings}
-          className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-[15px] font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-sm font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
         >
           <Settings className="h-3.5 w-3.5" aria-hidden />
           {t("sidebar.settings")}

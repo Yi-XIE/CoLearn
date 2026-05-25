@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteSession,
   fetchLearningSupport,
+  fetchKnowledgeFilePreview,
   fetchSettings,
   fetchWebuiThread,
   listSessions,
@@ -43,6 +44,22 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/v1/sessions/chat-1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("keeps knowledge preview path separators while encoding each segment", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ name: "note.md", path: "folder/note one.md", kind: "markdown", content: "# Note" }),
+    } as Response);
+
+    await fetchKnowledgeFilePreview("tok", "kb alpha", "folder/note one.md");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/knowledge/kb%20alpha/files/folder/note%20one.md/preview",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -472,7 +489,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("maps generated session titles from the sessions list", async () => {
+  it("preserves only custom titles from the sessions list", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -481,7 +498,9 @@ describe("webui API helpers", () => {
             session_id: "websocket:chat-1",
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
-            title: "Generated title",
+            title: "",
+            title_is_custom: false,
+            last_message: "First user sentence",
           },
         ],
       }),
@@ -492,8 +511,9 @@ describe("webui API helpers", () => {
         key: "websocket:chat-1",
         channel: "websocket",
         chatId: "chat-1",
-        title: "Generated title",
-        preview: "",
+        title: "",
+        titleIsCustom: false,
+        preview: "First user sentence",
       },
     ]);
   });

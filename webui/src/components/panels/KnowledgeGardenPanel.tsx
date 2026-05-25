@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -35,6 +35,59 @@ import { EmptyHint, InfoCard } from "./knowledge/KnowledgePanelPrimitives";
 import { PanelView, type PanelShellProps } from "./PanelView";
 
 type PreviewDocument = KnowledgeFilePreview & { sourceLabel?: string };
+
+function normalizePreviewPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function buildFolderMarkdown(
+  library: KnowledgeBaseSummary | null,
+  folderPath: string,
+): PreviewDocument {
+  const normalizedFolder = normalizePreviewPath(folderPath).replace(/\/+$/, "");
+  const files = (library?.files ?? []).filter((file) => {
+    const filePath = normalizePreviewPath(file.path || file.name);
+    if (!normalizedFolder) return !filePath.includes("/");
+    return filePath.startsWith(`${normalizedFolder}/`);
+  });
+  const directChildren = files
+    .map((file) => normalizePreviewPath(file.path || file.name).slice(normalizedFolder ? normalizedFolder.length + 1 : 0))
+    .filter((name) => name && !name.includes("/"))
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    name: normalizedFolder || library?.name || "资料库",
+    path: normalizedFolder,
+    kind: "markdown",
+    content: `# ${normalizedFolder || library?.name || "资料库"}
+
+${directChildren.length ? directChildren.map((name) => `- ${name}`).join("\n") : "这一层暂时没有可预览的文件。"}`,
+    sourceLabel: library?.id,
+  };
+}
+
+function buildMockPreviewMarkdown(title: string): string {
+  return `# ${title}
+
+这是临时的 Markdown 预览内容，用来确认知识花园的前端渲染链路是否正常。
+
+## 渲染检查
+
+- **粗体**、*斜体*、\`inline code\`
+- 列表、引用、表格、代码块
+
+> 如果这段内容可以正常排版，说明 Markdown 渲染是正常的，当前问题更可能来自预览接口加载失败。
+
+| 项目 | 状态 |
+| --- | --- |
+| 标题 | 正常 |
+| 列表 | 正常 |
+| 表格 | 正常 |
+
+\`\`\`ts
+const preview = "mock markdown";
+\`\`\``;
+}
 
 const DEFAULT_GRAPH_SETTINGS: KnowledgeGraphSettings = {
   showLabels: true,
@@ -331,11 +384,11 @@ export function KnowledgeGardenPanel({
         }
       } catch (err) {
         setPreviewDocument({
-          name: node.label,
+          name: `${node.label}（Mock）`,
           path: node.id,
           kind: "markdown",
-          content: `# ${node.label}\n\n预览加载失败。\n\n${(err as Error).message}`,
-          sourceLabel: "预览",
+          content: buildMockPreviewMarkdown(node.label),
+          sourceLabel: "Mock 预览",
         });
       } finally {
         setPreviewLoading(false);
@@ -343,6 +396,66 @@ export function KnowledgeGardenPanel({
     },
     [libraries, token],
   );
+
+  const handlePreviewFolder = useCallback(
+    (libraryId: string | undefined, folderPath: string) => {
+      if (!libraryId) return;
+      const library = libraries.find((item) => item.id === libraryId) ?? null;
+      setPreviewNode({
+        id: folderPath ? `folder:${libraryId}:${folderPath}` : `library:${libraryId}`,
+        label: folderPath || library?.name || libraryId,
+        kind: "library",
+        metadata: { library_id: libraryId, path: folderPath },
+        libraryId,
+      });
+      setPreviewDocument(buildFolderMarkdown(library, folderPath));
+      setPreviewLoading(false);
+    },
+    [libraries],
+  );
+
+  const renderPreviewBreadcrumb = () => {
+    if (!previewDocument) return null;
+    const libraryId = previewNode?.libraryId || previewDocument.sourceLabel;
+    const library = libraries.find((item) => item.id === libraryId) ?? null;
+    const path = normalizePreviewPath(previewDocument.path || previewDocument.name);
+    const parts = path ? path.split("/").filter(Boolean) : [];
+    const folderParts = previewNode?.kind === "file" ? parts.slice(0, -1) : parts;
+    const currentLabel = previewNode?.kind === "file" ? parts.at(-1) || previewDocument.name : previewDocument.name;
+
+    return (
+      <nav aria-label="预览位置" className="mb-6 flex min-h-8 w-full max-w-[calc(100%-48px)] items-center justify-start gap-1 overflow-hidden border-b border-slate-200/80 pb-3 text-left text-sm text-slate-500">
+        <button
+          type="button"
+          onClick={() => handlePreviewFolder(libraryId, "")}
+          className="max-w-[160px] truncate rounded-md px-1.5 py-1 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+        >
+          {library?.name || libraryId || "资料库"}
+        </button>
+        {folderParts.map((part, index) => {
+          const folderPath = folderParts.slice(0, index + 1).join("/");
+          return (
+            <span key={folderPath} className="flex min-w-0 items-center gap-1">
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
+              <button
+                type="button"
+                onClick={() => handlePreviewFolder(libraryId, folderPath)}
+                className="max-w-[150px] truncate rounded-md px-1.5 py-1 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              >
+                {part}
+              </button>
+            </span>
+          );
+        })}
+        {currentLabel ? (
+          <span className="flex min-w-0 items-center gap-1">
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
+            <span className="truncate px-1.5 py-1 font-medium text-slate-900">{currentLabel}</span>
+          </span>
+        ) : null}
+      </nav>
+    );
+  };
 
   const renderLibraryItem = (library: KnowledgeBaseSummary) => {
     const active = library.id === selectedId;
@@ -694,13 +807,16 @@ export function KnowledgeGardenPanel({
                   <X className="h-4 w-4" aria-hidden />
                 </button>
 
-                <div className="h-full overflow-y-auto px-8 py-6">
+                <div className="h-full overflow-y-auto px-8 pb-8 pt-14">
                   {previewLoading ? (
                     <div className="pt-10 text-[15px] leading-7 text-slate-500">正在加载预览...</div>
                   ) : previewDocument ? (
-                    <MarkdownText className="pr-10 text-[16px] leading-8 text-slate-700">
-                      {previewDocument.content}
-                    </MarkdownText>
+                    <>
+                      {renderPreviewBreadcrumb()}
+                      <MarkdownText className="pr-10 text-[16px] leading-8 text-slate-700">
+                        {previewDocument.content}
+                      </MarkdownText>
+                    </>
                   ) : (
                     <div className="pt-10 text-[15px] leading-7 text-slate-500">暂无预览内容。</div>
                   )}

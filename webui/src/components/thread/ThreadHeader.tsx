@@ -88,7 +88,7 @@ export function ThreadHeader({
           </span>
           {titleActions ? <div className="mt-4 flex items-center gap-3">{titleActions}</div> : null}
           {subtitle ? (
-            <span className="mt-1 max-w-[min(70vw,42rem)] truncate text-[12px] text-foreground/68">
+            <span className="mt-1 max-w-[min(70vw,42rem)] truncate text-sm text-foreground/68">
               {subtitle}
             </span>
           ) : null}

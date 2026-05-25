@@ -104,6 +104,23 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-[#8C8D8F]");
   });
 
+  it("uses CoLearn blue for the active learning mode affordance", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        sessionMode="learning"
+      />,
+    );
+
+    const input = screen.getByPlaceholderText("Type your message...");
+    expect(input.parentElement?.className).toContain("goal-shell-glow");
+    expect(input.parentElement?.className).toContain("ring-[#013FF8]/35");
+    expect(screen.getByRole("button", { name: "Toggle learning mode" }).className).toContain(
+      "text-[#013FF8]",
+    );
+  });
+
   it("shows turn run timer when runStartedAt is set", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date((1_000 + 125) * 1000));

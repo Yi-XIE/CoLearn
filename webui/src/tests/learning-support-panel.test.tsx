@@ -9,14 +9,15 @@ describe("LearningSupportPanel", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders references plus stacked notification cards", () => {
+  it("renders references with knowledge garden cards", () => {
     render(
       <LearningSupportPanel
+        focusLabel="我想学决策树"
         support={{
           retrieval_active: true,
           turn_mode: "CHECK",
           learning_plan: {
-            goal: "Newtonian mechanics",
+            goal: "我是Yi，是AI产品经理，colearn是我做的第一个理想化产品",
             current_node_id: "node-force",
             plan_nodes: [{ id: "node-force", label: "Force and acceleration", status: "current" }],
             pending_checks: ["node-check"],
@@ -44,7 +45,7 @@ describe("LearningSupportPanel", () => {
           retrieval_evidence_map: {},
           retrieval_query_context: { final_query: "牛顿第二定律 反例" },
           continuation_retrieval_hint: {
-            retrieval_query_context: { final_query: "继续查受力分析步骤" },
+            retrieval_query_context: { final_query: "我是Yi colearn 决策树" },
           },
         }}
       />,
@@ -52,14 +53,15 @@ describe("LearningSupportPanel", () => {
 
     expect(screen.getByText("本轮依据")).toBeInTheDocument();
     expect(screen.getByText("CHECK")).toBeInTheDocument();
-    expect(screen.getByText("Newtonian mechanics")).toBeInTheDocument();
+    expect(screen.getByText("目标：我想学决策树")).toBeInTheDocument();
+    expect(screen.queryByText(/我是Yi/)).not.toBeInTheDocument();
     expect(screen.getByText("Force and acceleration")).toBeInTheDocument();
     expect(screen.getByText("力会改变物体运动状态。")).toBeInTheDocument();
     expect(screen.getByText("牛顿第二定律")).toBeInTheDocument();
-    expect(screen.getByText("资料补证提醒")).toBeInTheDocument();
+    expect(screen.getByText("资料缺口")).toBeInTheDocument();
     expect(screen.getByText(/仍有 1 个资料缺口/)).toBeInTheDocument();
-    expect(screen.getByText("下一轮计划")).toBeInTheDocument();
-    expect(screen.getByText(/继续检索：继续查受力分析步骤/)).toBeInTheDocument();
+    expect(screen.getByText("下轮检索")).toBeInTheDocument();
+    expect(screen.getByText(/围绕“我想学决策树”继续补资料依据。/)).toBeInTheDocument();
   });
 
   it("renders learning board state without retrieval evidence", () => {
@@ -91,7 +93,7 @@ describe("LearningSupportPanel", () => {
     );
 
     expect(screen.getByText("LEARN")).toBeInTheDocument();
-    expect(screen.getByText("Energy conservation")).toBeInTheDocument();
+    expect(screen.getByText("目标：Energy conservation")).toBeInTheDocument();
     expect(screen.getByText("Work and energy")).toBeInTheDocument();
     expect(screen.getByText("0 条资料")).toBeInTheDocument();
   });

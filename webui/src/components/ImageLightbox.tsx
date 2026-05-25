@@ -142,7 +142,7 @@ export function ImageLightbox({
                   go(1);
                 }}
               />
-              <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-medium text-white/90 tabular-nums">
+              <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-sm font-medium text-white/90 tabular-nums">
                 {counter}
               </div>
             </>

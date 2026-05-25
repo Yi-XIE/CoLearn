@@ -194,6 +194,7 @@ export interface ProviderSettingsUpdate {
 export interface KnowledgeFileSummary {
   name: string;
   path: string;
+  source_path?: string;
   size: number;
   modified: number;
   mime_type?: string | null;
@@ -295,6 +296,11 @@ export interface SkillSummary {
   name: string;
   description: string;
   tags: string[];
+  always?: boolean;
+}
+
+export interface SkillDetail extends SkillSummary {
+  content: string;
 }
 
 export interface WebSearchSettingsUpdate {

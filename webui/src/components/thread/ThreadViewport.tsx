@@ -24,6 +24,7 @@ interface ThreadViewportProps {
   scrollToBottomSignal?: number;
   conversationKey?: string | null;
   learningSupport?: LearningSupportPayload | null;
+  learningFocusLabel?: string | null;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -39,6 +40,7 @@ export function ThreadViewport({
   scrollToBottomSignal = 0,
   conversationKey = null,
   learningSupport = null,
+  learningFocusLabel = null,
 }: ThreadViewportProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -254,8 +256,8 @@ export function ThreadViewport({
             </div>
           ) : (
             <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[72rem] flex-col px-4">
-              <div className="flex w-full flex-1 items-center justify-center pb-[7vh] pt-8">
-                <div className="flex w-full max-w-[58rem] flex-col gap-6">
+              <div className="flex w-full flex-1 items-start justify-center pt-[20vh]">
+                <div className="flex w-full max-w-[48rem] flex-col gap-6">
                   {emptyState}
                   <div className="w-full">{composer}</div>
                 </div>
@@ -308,11 +310,11 @@ export function ThreadViewport({
           </button>
 
           <aside
-            className="hidden h-full shrink-0 bg-background/95 lg:flex lg:flex-col"
+            className="hidden h-full min-w-0 shrink-0 overflow-hidden bg-background/95 lg:flex lg:flex-col"
             style={{ width: learningPanelWidth }}
           >
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-              <LearningSupportPanel support={learningSupport} />
+            <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3">
+              <LearningSupportPanel support={learningSupport} focusLabel={learningFocusLabel} />
             </div>
           </aside>
         </>
