@@ -13,10 +13,13 @@ import {
   Activity,
   ArrowUp,
   BookOpen,
+  Bot,
+  BrainCircuit,
   Check,
   ChevronDown,
   ChevronUp,
   CircleHelp,
+  Database,
   History,
   ImageIcon,
   Loader2,
@@ -27,6 +30,7 @@ import {
   SquarePen,
   Target,
   Undo2,
+  Workflow,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -104,24 +108,28 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 64;
 const HERO_TOPIC_SUGGESTIONS = [
   {
-    title: "人工智能是什么？",
-    emoji: "🤖",
-    prompt: "人工智能是什么？",
+    title: "\u4eba\u5de5\u667a\u80fd",
+    subtitle: "\u4ece\u57fa\u7840\u6982\u5ff5\u5f00\u59cb\uff0c\u5feb\u901f\u5efa\u7acb\u6574\u4f53\u8ba4\u77e5",
+    prompt: "\u4ec0\u4e48\u662f\u4eba\u5de5\u667a\u80fd\uff1f",
+    icon: BrainCircuit,
   },
   {
-    title: "大语言模型是怎么工作的？",
-    emoji: "🧠",
-    prompt: "大语言模型是怎么工作的？",
+    title: "\u5927\u8bed\u8a00\u6a21\u578b",
+    subtitle: "\u7406\u89e3\u6a21\u578b\u5982\u4f55\u8bfb\u61c2\u3001\u9884\u6d4b\u548c\u751f\u6210\u5185\u5bb9",
+    prompt: "\u5927\u8bed\u8a00\u6a21\u578b\u662f\u600e\u4e48\u5de5\u4f5c\u7684\uff1f",
+    icon: Workflow,
   },
   {
-    title: "RAG 和知识库有什么关系？",
-    emoji: "📚",
-    prompt: "RAG 和知识库有什么关系？",
+    title: "RAG \u4e0e\u77e5\u8bc6\u5e93",
+    subtitle: "\u770b\u6e05\u68c0\u7d22\u3001\u77e5\u8bc6\u5e93\u548c\u56de\u7b54\u6548\u679c\u4e4b\u95f4\u7684\u5173\u7cfb",
+    prompt: "RAG \u548c\u77e5\u8bc6\u5e93\u6709\u4ec0\u4e48\u5173\u7cfb\uff1f",
+    icon: Database,
   },
   {
-    title: "AI Agent 怎么执行任务？",
-    emoji: "✨",
-    prompt: "AI Agent 怎么执行任务？",
+    title: "AI Agent \u4efb\u52a1\u6267\u884c",
+    subtitle: "\u4e86\u89e3\u4efb\u52a1\u62c6\u89e3\u3001\u5de5\u5177\u8c03\u7528\u548c\u6267\u884c\u95ed\u73af",
+    prompt: "AI Agent \u600e\u4e48\u6267\u884c\u4efb\u52a1\uff1f",
+    icon: Bot,
   },
 ] as const;
 
@@ -318,7 +326,7 @@ function RunElapsedStrip({
           )}
           style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
         >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
+          <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
             <h2
               id="nanobot-goal-panel-title"
               className="min-w-0 truncate text-sm font-semibold tracking-tight text-foreground"
@@ -349,7 +357,7 @@ function RunElapsedStrip({
         </div>
       ) : null}
       <div
-        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+        className="flex min-h-[36px] items-center gap-2 px-3 py-2"
         role="status"
         aria-label={ariaLabel}
       >
@@ -367,7 +375,7 @@ function RunElapsedStrip({
           ) : null}
           {showGoal ? (
             <span className="truncate">
-              {t("thread.composer.goalStateStrip", { label: stripLabel })}
+              {stripLabel}
             </span>
           ) : null}
         </span>
@@ -1107,6 +1115,7 @@ export function ThreadComposer({
       {isHero ? (
         <div className="mt-3 grid w-full max-w-[48rem] grid-cols-4 gap-3">
           {HERO_TOPIC_SUGGESTIONS.map((topic) => {
+            const Icon = topic.icon;
             return (
               <button
                 key={topic.title}
@@ -1116,19 +1125,22 @@ export function ThreadComposer({
                   insertHeroTopic(topic.prompt);
                 }}
                 className={cn(
-                  "flex min-h-[108px] w-full min-w-0 flex-col items-start gap-3 rounded-[18px] border border-black/[0.05] bg-card p-4 text-left",
+                  "flex w-full min-w-0 flex-col gap-3 rounded-[18px] border border-black/[0.08] bg-card p-3 text-left",
                   "transition-all",
-                  "hover:-translate-y-0.5 hover:border-black/[0.09] hover:shadow-[0_10px_24px_rgba(15,23,42,0.05)]",
+                  "hover:-translate-y-0.5 hover:border-black/[0.16] hover:shadow-[0_10px_24px_rgba(15,23,42,0.05)]",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "dark:border-white/[0.08] dark:hover:border-white/[0.12] dark:hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]",
+                  "dark:border-white/[0.1] dark:hover:border-white/[0.18] dark:hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]",
                 )}
               >
-                <span className="flex h-10 w-10 items-center justify-center text-[26px] leading-none">
-                  {topic.emoji}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] font-medium leading-5 text-foreground">
+                <div className="flex h-9 w-9 items-center justify-center bg-white text-black dark:bg-white dark:text-black">
+                  <Icon className="h-4.5 w-4.5" aria-hidden />
+                </div>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-bold leading-5 text-foreground">
                     {topic.title}
+                  </span>
+                  <span className="mt-1 block text-[12px] leading-4 text-muted-foreground">
+                    {topic.subtitle}
                   </span>
                 </span>
               </button>
