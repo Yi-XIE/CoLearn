@@ -14,7 +14,6 @@ import {
   ArrowRight,
   ArrowUp,
   BookOpen,
-  Bot,
   BrainCircuit,
   Check,
   ChevronDown,
@@ -111,24 +110,19 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 64;
 const HERO_TOPIC_SUGGESTIONS = [
   {
-    label: "AI \u5230\u5e95\u662f\u4ec0\u4e48\uff1f",
+    label: "\u6211\u4e00\u76f4\u542c\u4eba\u8bf4 AI\uff0c\u5b83\u5230\u5e95\u662f\u4e2a\u4ec0\u4e48\u4e1c\u897f\uff1f",
     prompt: "\u7528\u6700\u7b80\u5355\u7684\u8bdd\u8bb2\u8bb2\uff0cAI \u5230\u5e95\u662f\u4ec0\u4e48\uff1f",
     icon: BrainCircuit,
   },
   {
-    label: "\u5927\u8bed\u8a00\u6a21\u578b\u600e\u4e48\u4f1a\u8bf4\u8bdd\uff1f",
+    label: "ChatGPT \u4e3a\u4ec0\u4e48\u80fd\u542c\u61c2\u6211\u8bf4\u8bdd\uff0c\u80cc\u540e\u662f\u600e\u4e48\u56de\u4e8b\uff1f",
     prompt: "\u5927\u8bed\u8a00\u6a21\u578b\u662f\u600e\u4e48\u5b66\u4f1a\u8bf4\u8bdd\u7684\uff1f",
     icon: Workflow,
   },
   {
-    label: "RAG \u600e\u4e48\u5e2e\u6211\u67e5\u8d44\u6599\uff1f",
+    label: "\u6211\u6709\u4e00\u5806\u8d44\u6599\u60f3\u8ba9 AI \u5e2e\u6211\u67e5\uff0c\u8be5\u600e\u4e48\u5f04\uff1f",
     prompt: "RAG \u662f\u600e\u4e48\u5e2e AI \u67e5\u6211\u7684\u8d44\u6599\u7684\uff1f",
     icon: Database,
-  },
-  {
-    label: "AI Agent \u600e\u4e48\u81ea\u5df1\u5e72\u6d3b\uff1f",
-    prompt: "AI Agent \u662f\u600e\u4e48\u81ea\u5df1\u5b8c\u6210\u4efb\u52a1\u7684\uff1f",
-    icon: Bot,
   },
 ] as const;
 
@@ -359,6 +353,8 @@ function RunElapsedStrip({
         <div
           ref={panelRef}
           id="nanobot-goal-panel-root"
+          role="dialog"
+          aria-label={t("thread.composer.goalPanelLabel")}
           className="border-t border-border/40 px-3 pb-3 pt-2"
           style={{ maxHeight: `${Math.round(panelMaxPx)}px`, overflowY: "auto" }}
         >
@@ -850,8 +846,8 @@ export function ThreadComposer({
         className={cn(
           "relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-[28px] border border-black/[0.14] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.16] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
-            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.14] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.16] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
+            ? "max-w-[58rem] rounded-[28px] border border-black/[0.14] bg-card shadow-[0_4px_16px_rgba(15,23,42,0.06)] dark:border-white/[0.16] dark:shadow-[0_4px_16px_rgba(0,0,0,0.25)]"
+            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.14] bg-card shadow-[0_3px_12px_rgba(15,23,42,0.05)] dark:border-white/[0.16] dark:shadow-[0_3px_12px_rgba(0,0,0,0.2)]",
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
@@ -1082,7 +1078,7 @@ export function ThreadComposer({
         </div>
       </div>
       {isHero ? (
-        <div className="mt-4 w-full max-w-[36rem] overflow-hidden rounded-2xl">
+        <div className="mt-4 w-full max-w-[58rem] overflow-hidden rounded-2xl">
           {HERO_TOPIC_SUGGESTIONS.map((topic, index) => {
             const Icon = topic.icon;
             return (

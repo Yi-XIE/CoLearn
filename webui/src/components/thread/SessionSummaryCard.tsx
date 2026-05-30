@@ -1,4 +1,5 @@
 import { CheckCircle2, AlertCircle, ArrowRight, Clock } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 interface SessionSummaryCardProps {
@@ -13,6 +14,7 @@ interface SessionSummaryCardProps {
 }
 
 export function SessionSummaryCard({ summary, className }: SessionSummaryCardProps) {
+  const { t } = useTranslation();
   const { topics_covered, concepts_mastered, concepts_blocked, duration_minutes, next_focus } = summary;
 
   if (!topics_covered?.length && !concepts_mastered?.length && !concepts_blocked?.length) {
@@ -26,19 +28,19 @@ export function SessionSummaryCard({ summary, className }: SessionSummaryCardPro
     )}>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-200">
-          本次学习总结
+          {t("learning.sessionSummary.title")}
         </h3>
         {duration_minutes != null && duration_minutes > 0 && (
           <span className="inline-flex items-center gap-1 text-xs text-blue-600/70 dark:text-blue-400/70">
             <Clock className="h-3 w-3" />
-            {duration_minutes} 分钟
+            {t("learning.sessionSummary.minutes", { count: duration_minutes })}
           </span>
         )}
       </div>
 
       {topics_covered && topics_covered.length > 0 && (
         <div className="mb-2">
-          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">学习内容</span>
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("learning.sessionSummary.topicsCovered")}</span>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {topics_covered.map((topic) => (
               <span key={topic} className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
@@ -52,7 +54,7 @@ export function SessionSummaryCard({ summary, className }: SessionSummaryCardPro
       {concepts_mastered && concepts_mastered.length > 0 && (
         <div className="mb-2">
           <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
-            <CheckCircle2 className="h-3 w-3" /> 已掌握
+            <CheckCircle2 className="h-3 w-3" /> {t("learning.sessionSummary.mastered")}
           </span>
           <ul className="mt-1 space-y-0.5">
             {concepts_mastered.map((c) => (
@@ -65,7 +67,7 @@ export function SessionSummaryCard({ summary, className }: SessionSummaryCardPro
       {concepts_blocked && concepts_blocked.length > 0 && (
         <div className="mb-2">
           <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-            <AlertCircle className="h-3 w-3" /> 需要巩固
+            <AlertCircle className="h-3 w-3" /> {t("learning.sessionSummary.needsReview")}
           </span>
           <ul className="mt-1 space-y-0.5">
             {concepts_blocked.map((c) => (
@@ -78,7 +80,7 @@ export function SessionSummaryCard({ summary, className }: SessionSummaryCardPro
       {next_focus && (
         <div className="mt-3 flex items-center gap-1.5 rounded-md bg-white/60 px-2.5 py-1.5 text-xs text-indigo-700 dark:bg-white/5 dark:text-indigo-300">
           <ArrowRight className="h-3 w-3" />
-          <span>下次重点：{next_focus}</span>
+          <span>{t("learning.sessionSummary.nextFocus", { focus: next_focus })}</span>
         </div>
       )}
     </div>

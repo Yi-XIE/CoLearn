@@ -5,13 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from colearn.learning.state_hooks import after_turn_payload
+from colearn.learning.turn_contract import LearningTurnRequest
+from colearn.projects.models import LearningProject
+from colearn.sessions.store import LearningSession
 
 
 def build_learning_closure(
     *,
-    project: Any,
-    session: Any,
-    request: Any,
+    project: LearningProject,
+    session: LearningSession,
+    request: LearningTurnRequest,
     final_text: str,
     raw_learning_result: dict[str, Any] | None = None,
     warnings: list[str] | None = None,

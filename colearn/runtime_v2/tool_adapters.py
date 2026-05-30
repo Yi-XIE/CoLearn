@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
 
-
-def normalize_enabled_tools(value: Any) -> list[str]:
+def normalize_enabled_tools(value: list[str] | str | None) -> list[str]:
     if not isinstance(value, list):
         return []
     seen: set[str] = set()

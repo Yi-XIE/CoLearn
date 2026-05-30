@@ -49,17 +49,18 @@ class PlanStage:
 
         plan = self._build_intelligent_plan(ctx) or self._build_plan(ctx)
         first_node = plan.plan_nodes[0] if plan.plan_nodes else LearningPlanNode()
-        learning_board = LearningBoard(
-            current_progress=first_node.label,
-            completed_nodes=list(ctx.board.current_progress.completed_node_ids),
-            blockers=[blocker.desc for blocker in ctx.board.gaps_and_blockers.critical_blockers if blocker.desc],
+        learning_board = LearningBoard.derive(
+            current_progress=ctx.board.current_progress,
+            gaps_and_blockers=ctx.board.gaps_and_blockers,
+            continuation=ctx.board.continuation,
+            evidence_refs=list(ctx.board.evidence_refs or []),
             objections=list(ctx.board.learning_board.objections or []),
-            evidence_refs=[
-                str(item.get("source_ref") or "")
-                for item in list(ctx.board.evidence_refs or [])
-                if isinstance(item, dict) and str(item.get("source_ref") or "")
-            ],
-            continuation=f"Continue with {first_node.label}" if first_node.label else ctx.board.continuation.next_prompt_hint,
+            current_progress_label=first_node.label,
+            continuation_text=(
+                f"Continue with {first_node.label}"
+                if first_node.label
+                else ctx.board.continuation.next_prompt_hint
+            ),
         )
         mastery = ctx.board.student_snapshot.mastery_level
         nodes_to_skip = self._skip_mastered_nodes(plan.plan_nodes, mastery)

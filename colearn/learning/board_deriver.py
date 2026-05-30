@@ -74,7 +74,7 @@ class BoardSnapshotDeriver:
 
         try:
             llm_output = self._llm_call(system=BOARD_CONSOLIDATION_SYSTEM, user=prompt_user)
-        except Exception as exc:
+        except (RuntimeError, ValueError, OSError, TimeoutError) as exc:
             logger.warning("BoardSnapshotDeriver LLM call failed: %s", exc)
             return current_board, {"changes": {}, "event_count": len(recent), "status": "llm_failed", "error": str(exc)}
 
@@ -85,7 +85,7 @@ class BoardSnapshotDeriver:
 
         try:
             new_board = _build_board_from_snapshot(parsed, fallback=current_board)
-        except Exception as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             logger.warning("BoardSnapshotDeriver could not build BoardFacts: %s", exc)
             return current_board, {"changes": {}, "event_count": len(recent), "status": "build_failed", "error": str(exc)}
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BookOpen, MessageCircle, AlertTriangle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 interface ModeIndicatorProps {
@@ -8,39 +9,51 @@ interface ModeIndicatorProps {
   onToggleMode?: () => void;
 }
 
-const PHASE_LABELS: Record<string, string> = {
-  intake: "引导中",
-  diagnose: "诊断中",
-  ready: "",
-  reflect: "总结中",
-  recall: "复习中",
-};
-
 export function ModeIndicator({ mode, learningPhase, onToggleMode }: ModeIndicatorProps) {
+  const { t } = useTranslation();
   const isLearning = mode === "learning";
-  const phaseLabel = learningPhase ? PHASE_LABELS[learningPhase] || "" : "";
+  const phaseLabel = learningPhase
+    ? t(`learning.mode.phase.${learningPhase}`, { defaultValue: "" })
+    : "";
+  const interactive = typeof onToggleMode === "function";
 
-  return (
-    <button
-      type="button"
-      onClick={onToggleMode}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-        isLearning
-          ? "bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
-          : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700",
-      )}
-      title={isLearning ? "切换到聊天模式" : "切换到学习模式"}
-    >
+  const className = cn(
+    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+    isLearning
+      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+    interactive &&
+      (isLearning
+        ? "hover:bg-blue-200 dark:hover:bg-blue-900/50"
+        : "hover:bg-gray-200 dark:hover:bg-gray-700"),
+  );
+
+  const content = (
+    <>
       {isLearning ? (
         <BookOpen className="h-3 w-3" />
       ) : (
         <MessageCircle className="h-3 w-3" />
       )}
-      <span>{isLearning ? "学习" : "聊天"}</span>
+      <span>{isLearning ? t("learning.mode.learning") : t("learning.mode.chat")}</span>
       {phaseLabel && (
         <span className="ml-0.5 text-xs opacity-75">· {phaseLabel}</span>
       )}
+    </>
+  );
+
+  if (!interactive) {
+    return <span className={className}>{content}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onToggleMode}
+      className={className}
+      title={isLearning ? t("learning.mode.switchToChat") : t("learning.mode.switchToLearning")}
+    >
+      {content}
     </button>
   );
 }

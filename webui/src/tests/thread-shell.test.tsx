@@ -117,7 +117,7 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("switches the empty-state penguin when learning mode is enabled", async () => {
+  it("shows the intake questionnaire when learning mode is enabled on an empty session", async () => {
     const client = makeClient();
     const { container } = render(wrap(
       client,
@@ -137,9 +137,9 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Toggle learning mode" }));
     fireEvent.click(await screen.findByRole("button", { name: "Turn on" }));
 
-    expect(container.querySelector("img")?.getAttribute("src")).toBe(
-      "/brand/colearn_penguin_study_transparent.png",
-    );
+    // An empty learning session now opens the intake questionnaire instead of
+    // the study-penguin empty state.
+    expect(await screen.findByText("What's your current background?")).toBeInTheDocument();
   });
 
   it("does not navigate away when clicking the chat title", async () => {

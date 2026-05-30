@@ -36,7 +36,7 @@ def _provider_env_key(name: str) -> str | None:
         spec = find_by_name(provider)
         if spec and spec.env_key:
             return str(spec.env_key).strip() or None
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         pass
     fallback = {
         "deepseek": "DEEPSEEK_API_KEY",

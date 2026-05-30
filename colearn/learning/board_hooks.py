@@ -50,8 +50,14 @@ def extract_board_facts(
     active_node_id = project.project_id
     active_node_label = project.title
     evidence_refs = [{"source_ref": item} for item in (project.source_refs or [])]
+    progress = ProgressFacts(
+        active_node_id=active_node_id,
+        active_node_label=active_node_label,
+    )
+    gaps_and_blockers = GapsAndBlockers(critical_blockers=blockers, unverified_gaps=[])
+    continuation = ContinuationFacts(next_prompt_hint=continuation_hint)
     learning_plan = LearningPlan(
-        goal=str(getattr(project, "goal", "") or project.title or ""),
+        goal=str(project.goal or project.title or ""),
         plan_nodes=[
             LearningPlanNode(
                 id=active_node_id,
@@ -63,12 +69,11 @@ def extract_board_facts(
         ],
         current_node_id=active_node_id,
     )
-    learning_board = LearningBoard(
-        current_progress=active_node_label,
-        completed_nodes=[],
-        blockers=[blocker.desc for blocker in blockers if blocker.desc],
-        evidence_refs=[str(item.get("source_ref") or "") for item in evidence_refs if item.get("source_ref")],
-        continuation=continuation_hint,
+    learning_board = LearningBoard.derive(
+        current_progress=progress,
+        gaps_and_blockers=gaps_and_blockers,
+        continuation=continuation,
+        evidence_refs=evidence_refs,
     )
     return BoardFacts(
         project_id=project.project_id,
@@ -76,21 +81,13 @@ def extract_board_facts(
         current_turn_mode=normalize_turn_mode(turn_mode),
         board_version=board_version,
         updated_at="",
-        current_progress=ProgressFacts(
-            active_node_id=active_node_id,
-            active_node_label=active_node_label,
-        ),
+        current_progress=progress,
         student_snapshot=StudentSnapshot(
             mastery_level=0.0,
             last_user_intent_raw="",
         ),
-        gaps_and_blockers=GapsAndBlockers(
-            critical_blockers=blockers,
-            unverified_gaps=[],
-        ),
-        continuation=ContinuationFacts(
-            next_prompt_hint=continuation_hint,
-        ),
+        gaps_and_blockers=gaps_and_blockers,
+        continuation=continuation,
         evidence_refs=evidence_refs,
         learning_plan=learning_plan,
         learning_board=learning_board,
@@ -472,17 +469,22 @@ def apply_events(
         review_queue=list(plan.review_queue or []),
         pending_checks=list(plan.pending_checks or board.gaps_and_blockers.unverified_gaps or []),
     )
-    updated_learning_board = LearningBoard(
-        current_progress=board.current_progress.active_node_label,
-        completed_nodes=completed_node_ids,
-        blockers=[blocker.desc for blocker in blockers if blocker.desc],
+    updated_progress = ProgressFacts(
+        active_node_id=board.current_progress.active_node_id,
+        active_node_label=board.current_progress.active_node_label,
+        completed_node_ids=completed_node_ids,
+        path_node_ids=list(board.current_progress.path_node_ids),
+    )
+    updated_gaps = GapsAndBlockers(
+        critical_blockers=blockers,
+        unverified_gaps=list(board.gaps_and_blockers.unverified_gaps),
+    )
+    updated_learning_board = LearningBoard.derive(
+        current_progress=updated_progress,
+        gaps_and_blockers=updated_gaps,
+        continuation=continuation,
+        evidence_refs=evidence_refs,
         objections=list(board.learning_board.objections or []),
-        evidence_refs=[
-            str(item.get("source_ref") or "")
-            for item in evidence_refs
-            if isinstance(item, dict) and str(item.get("source_ref") or "")
-        ],
-        continuation=continuation.next_prompt_hint,
     )
 
     updated = BoardFacts(
@@ -491,17 +493,9 @@ def apply_events(
         current_turn_mode=board.current_turn_mode,
         board_version=board.board_version + 1,
         updated_at=utc_now(),
-        current_progress=ProgressFacts(
-            active_node_id=board.current_progress.active_node_id,
-            active_node_label=board.current_progress.active_node_label,
-            completed_node_ids=completed_node_ids,
-            path_node_ids=list(board.current_progress.path_node_ids),
-        ),
+        current_progress=updated_progress,
         student_snapshot=board.student_snapshot,
-        gaps_and_blockers=GapsAndBlockers(
-            critical_blockers=blockers,
-            unverified_gaps=list(board.gaps_and_blockers.unverified_gaps),
-        ),
+        gaps_and_blockers=updated_gaps,
         continuation=continuation,
         evidence_refs=evidence_refs,
         learning_plan=updated_plan,

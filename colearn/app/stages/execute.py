@@ -154,7 +154,7 @@ class ExecuteStage:
             "prefetched_references": retrieval_metadata["prefetched_references"],
             "parallel_support": retrieval_metadata["parallel_support"],
             "prompt_support_bundle": retrieval_metadata["prompt_support_bundle"],
-            "workspace": str(getattr(self.executor, "workspace", None) or colearn_nanobot_workspace()),
+            "workspace": str(self.executor.workspace or colearn_nanobot_workspace()),
         }
 
     async def _execute_turn_async(

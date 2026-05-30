@@ -256,6 +256,7 @@
       "goalStateStrip": "目标 · {{label}}",
       "goalStateFallback": "目标",
       "goalStateExpandAria": "查看完整目标",
+      "goalPanelLabel": "目标",
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
@@ -387,10 +388,72 @@
   "common": {
     "dismiss": "关闭"
   },
+  "learning": {
+    "mastery": {
+      "label": "掌握度",
+      "nodes": "{{completed}}/{{total}} 节点"
+    },
+    "mode": {
+      "learning": "学习",
+      "chat": "聊天",
+      "switchToChat": "切换到聊天模式",
+      "switchToLearning": "切换到学习模式",
+      "phase": {
+        "intake": "引导中",
+        "diagnose": "诊断中",
+        "reflect": "总结中",
+        "recall": "复习中"
+      }
+    },
+    "sessionSummary": {
+      "title": "本次学习总结",
+      "minutes": "{{count}} 分钟",
+      "topicsCovered": "学习内容",
+      "mastered": "已掌握",
+      "needsReview": "需要巩固",
+      "nextFocus": "下次重点：{{focus}}"
+    },
+    "intake": {
+      "confirm": "确定",
+      "questions": {
+        "background": {
+          "question": "你目前的背景是什么？",
+          "options": [
+            "有编程基础（Python/数学等）",
+            "有统计学/线性代数基础",
+            "在校学生/刚入门"
+          ],
+          "placeholder": "其他背景..."
+        },
+        "goal": {
+          "question": "你的学习目标是什么？",
+          "options": [
+            "了解基础概念",
+            "实际项目应用",
+            "工作/转行准备"
+          ],
+          "placeholder": "具体目标..."
+        },
+        "style": {
+          "question": "你更倾向于哪种学习方式？",
+          "options": [
+            "理论 + 数学推导",
+            "动手实践 + 项目驱动",
+            "两者结合"
+          ],
+          "placeholder": "其他偏好..."
+        }
+      }
+    }
+  },
   "errors": {
     "messageTooBig": {
       "title": "消息过大",
       "body": "服务端因超过大小限制拒收了上一条消息。可移除部分图片或使用更小的图片后重试。"
+    },
+    "boundary": {
+      "title": "出错了。",
+      "retry": "重试"
     }
   }
 }

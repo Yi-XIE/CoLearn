@@ -17,15 +17,24 @@ if str(NANOBOT_CORE) not in sys.path:
 
 import pytest
 
+from colearn.learning.constants import CognitiveLoad
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.state import BoardFacts, GapsAndBlockers, ProgressFacts, StudentSnapshot
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.runtime_v2.result_bridge import normalize_learning_turn_result
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    # ``anyio_mode = auto`` (pytest.ini) runs every ``async def`` test through
+    # anyio's pytest plugin; this fixture pins the backend to asyncio.
+    return "asyncio"
+
+
 @dataclass
 class FakeExecutor:
     last_request: Any = None
+    workspace: Any = None
 
     def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
         self.last_request = request
@@ -55,6 +64,12 @@ class FakeExecutor:
             learning_result=learning_result,
         )
 
+    def sync_sustained_goal(self, *, session_id: str, objective: str, ui_summary: str = "") -> dict:
+        return {"status": "active_started", "session_id": session_id, "objective": objective}
+
+    def complete_sustained_goal(self, *, session_id: str, recap: str = "") -> dict:
+        return {"status": "completed", "session_id": session_id, "recap": recap}
+
 
 class FakeRetrievalService:
     def __init__(self) -> None:
@@ -71,6 +86,11 @@ class FakeRetrievalService:
             "warnings": [],
         }
 
+    async def async_sync_source_refs(self, *, project_id: str, source_refs: list[str], libraries=None):
+        return self.sync_source_refs(
+            project_id=project_id, source_refs=source_refs, libraries=libraries
+        )
+
     def build_bundle(self, *, project, session, query: str, libraries=None):
         self.last_bundle_query = query
         return SimpleNamespace(
@@ -84,6 +104,9 @@ class FakeRetrievalService:
             metadata={},
         )
 
+    def build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
+        return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
+
     async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
         return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
@@ -93,9 +116,9 @@ def make_board(**overrides) -> BoardFacts:
     defaults = {
         "board_version": 1,
         "current_turn_mode": "LEARN",
-        "current_progress": ProgressFacts(active_node_id="node-1", mastery_pct=30),
+        "current_progress": ProgressFacts(active_node_id="node-1"),
         "gaps_and_blockers": GapsAndBlockers(critical_blockers=[]),
-        "student_snapshot": StudentSnapshot(cognitive_load="medium"),
+        "student_snapshot": StudentSnapshot(mastery_level=0.3, cognitive_load=CognitiveLoad.NORMAL),
         "evidence_refs": [],
     }
     defaults.update(overrides)

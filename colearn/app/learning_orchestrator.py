@@ -17,7 +17,7 @@ from colearn.memory.store import EventMemoryStore
 from colearn.paths import colearn_nanobot_workspace
 from colearn.projects.service import LearningProjectService
 from colearn.retrieval.service import RetrievalService
-from colearn.runtime_v2.executor import NanobotTurnExecutor
+from colearn.runtime_v2.executor import NanobotTurnExecutor, TurnExecutorProtocol
 from colearn.sessions.store import SessionStore
 from colearn.storage import JsonStateStore
 from .background_finalizer import BackgroundTurnFinalizer
@@ -62,7 +62,7 @@ class LearningOrchestrator:
         memory_store: EventMemoryStore | None = None,
         knowledge_service: KnowledgeWorkspaceService | None = None,
         retrieval_service: RetrievalService | None = None,
-        executor: NanobotTurnExecutor | None = None,
+        executor: TurnExecutorProtocol | None = None,
         runtime_compression: RuntimeCompressionBridge | None = None,
         product_compression: ProductCompressionBridge | None = None,
         board_deriver: BoardSnapshotDeriver | None = None,
@@ -106,7 +106,7 @@ class LearningOrchestrator:
             knowledge_service=self.knowledge_service,
             source_preflight=self.source_preflight,
         )
-        self.plan = PlanStage()
+        self.plan = PlanStage(retrieval_service=self.retrieval_service)
         self.retrieval = RetrievalStage(
             retrieval_service=self.retrieval_service,
             knowledge_service=self.knowledge_service,
@@ -206,13 +206,10 @@ class LearningOrchestrator:
             return ctx
         plan = ctx.board.learning_plan
         board = ctx.board.learning_board
-        objective = str(plan.goal or getattr(ctx.project, "goal", "") or "").strip()
+        project_goal = ctx.project.goal if ctx.project is not None else ""
+        objective = str(plan.goal or project_goal or "").strip()
         ui_summary = str(board.current_progress or objective).strip()
-        sync_goal = getattr(self.executor, "sync_sustained_goal", None)
-        if not callable(sync_goal):
-            ctx.goal_lifecycle = {"status": "skipped", "reason": "executor_goal_sync_unavailable"}
-            return ctx
-        ctx.goal_lifecycle = sync_goal(
+        ctx.goal_lifecycle = self.executor.sync_sustained_goal(
             session_id=ctx.session_id,
             objective=objective,
             ui_summary=ui_summary,
@@ -220,11 +217,7 @@ class LearningOrchestrator:
         return ctx
 
     def _complete_sustained_goal_for_exit(self, ctx: TurnContext, *, reason: str) -> TurnContext:
-        complete_goal = getattr(self.executor, "complete_sustained_goal", None)
-        if not callable(complete_goal):
-            ctx.goal_lifecycle = {"status": "skipped", "reason": "executor_goal_complete_unavailable"}
-            return ctx
-        ctx.goal_lifecycle = complete_goal(
+        ctx.goal_lifecycle = self.executor.complete_sustained_goal(
             session_id=ctx.session_id,
             recap=f"Learning goal closed because {reason}.",
         )
@@ -235,12 +228,8 @@ class LearningOrchestrator:
             return ctx
         if not self._learning_goal_finished(ctx.result):
             return ctx
-        complete_goal = getattr(self.executor, "complete_sustained_goal", None)
-        if not callable(complete_goal):
-            ctx.goal_lifecycle = {"status": "skipped", "reason": "executor_goal_complete_unavailable"}
-            return ctx
         recap = f"Completed learning goal: {ctx.result.board_after.learning_plan.goal or ctx.project.title}"
-        completed = complete_goal(session_id=ctx.session_id, recap=recap)
+        completed = self.executor.complete_sustained_goal(session_id=ctx.session_id, recap=recap)
         ctx.goal_lifecycle = completed
         raw = dict(ctx.result.raw_learning_result or {})
         runtime_v2 = dict(raw.get("runtime_v2") or {})

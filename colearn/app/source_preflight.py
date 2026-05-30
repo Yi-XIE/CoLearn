@@ -69,7 +69,7 @@ class SourceReadinessPreflight:
     ) -> dict[str, Any]:
         try:
             return getter()
-        except Exception as exc:
+        except (RuntimeError, ValueError, OSError, ConnectionError) as exc:
             return self._unavailable_sync_result(exc)
 
     async def _safe_async_sync_result(
@@ -78,7 +78,7 @@ class SourceReadinessPreflight:
     ) -> dict[str, Any]:
         try:
             return await getter()
-        except Exception as exc:
+        except (RuntimeError, ValueError, OSError, ConnectionError) as exc:
             return self._unavailable_sync_result(exc)
 
     def _unavailable_sync_result(self, exc: Exception) -> dict[str, Any]:

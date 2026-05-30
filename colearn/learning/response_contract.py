@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .constants import TurnMode
 from .retrieval_bundle import RetrievalBundle, empty_retrieval_bundle
 from .state import BoardFacts, LearningEvent
 
@@ -19,8 +20,8 @@ class LearningTurnResult:
     learning_events: list[LearningEvent] = field(default_factory=list)
     continuation_prompt: str = ""
     review_summary: str = ""
-    turn_mode_before: str = "LEARN"
-    turn_mode_after: str = "LEARN"
+    turn_mode_before: TurnMode = TurnMode.LEARN
+    turn_mode_after: TurnMode = TurnMode.LEARN
     review_to_persist: dict[str, Any] = field(default_factory=dict)
     board_patch: dict[str, Any] = field(default_factory=dict)
     memory_events: list[dict[str, Any]] = field(default_factory=list)

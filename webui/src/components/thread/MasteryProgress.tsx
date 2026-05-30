@@ -1,4 +1,5 @@
 import { TrendingUp } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 interface MasteryProgressProps {
@@ -9,6 +10,7 @@ interface MasteryProgressProps {
 }
 
 export function MasteryProgress({ level, completedNodes, totalNodes, className }: MasteryProgressProps) {
+  const { t } = useTranslation();
   const percent = Math.round(Math.min(1, Math.max(0, level)) * 100);
 
   return (
@@ -17,7 +19,7 @@ export function MasteryProgress({ level, completedNodes, totalNodes, className }
         <div className="mb-1 flex items-center justify-between">
           <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
             <TrendingUp className="h-3 w-3" />
-            掌握度
+            {t("learning.mastery.label")}
           </span>
           <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">
             {percent}%
@@ -32,7 +34,7 @@ export function MasteryProgress({ level, completedNodes, totalNodes, className }
       </div>
       {totalNodes != null && totalNodes > 0 && (
         <span className="whitespace-nowrap text-xs text-gray-500 dark:text-gray-500">
-          {completedNodes ?? 0}/{totalNodes} 节点
+          {t("learning.mastery.nodes", { completed: completedNodes ?? 0, total: totalNodes })}
         </span>
       )}
     </div>

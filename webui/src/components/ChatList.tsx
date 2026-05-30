@@ -58,7 +58,7 @@ export function ChatList({
       <div className="min-w-0 space-y-2 px-2 py-1">
         {groups.map((group) => (
           <section key={group.label} aria-label={group.label}>
-            <div className="px-3 pb-0.5 text-sm font-medium text-muted-foreground/65">
+            <div className="px-3 pb-0.5 text-sm font-normal text-muted-foreground/65">
               {group.label}
             </div>
             <ul className="space-y-0.5">
@@ -88,7 +88,7 @@ export function ChatList({
                         title={rawLabel || s.preview.trim() || fallbackTitle}
                         className="min-w-0 flex-1 truncate py-1 pl-[22px] pr-1 text-left leading-[1.2]"
                       >
-                        <span className="font-medium">{title}</span>
+                        <span className="font-normal">{title}</span>
                       </button>
                       <DropdownMenu modal={false}>
                         <DropdownMenuTrigger

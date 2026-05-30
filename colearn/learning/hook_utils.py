@@ -4,16 +4,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
-from typing import Any, cast
+from typing import Any
 
-from colearn.learning.state import TurnMode
+from colearn.learning.constants import TurnMode
 
 
 def normalize_turn_mode(raw: str | None) -> TurnMode:
     value = str(raw or "LEARN").upper()
-    if value in {"LEARN", "CHECK", "PAUSED"}:
-        return cast(TurnMode, value)
-    return "LEARN"
+    try:
+        return TurnMode(value)
+    except ValueError:
+        return TurnMode.LEARN
 
 
 def utc_now() -> str:

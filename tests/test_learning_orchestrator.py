@@ -27,6 +27,8 @@ from colearn.storage.json_store import JsonStateStore
 
 @dataclass
 class FakeExecutor:
+    workspace: Path | None = None
+
     def __post_init__(self) -> None:
         self.goal_syncs = []
 
@@ -86,6 +88,11 @@ class FakeRetrievalService:
             "warnings": [],
         }
 
+    async def async_sync_source_refs(self, *, project_id: str, source_refs: list[str], libraries=None):
+        return self.sync_source_refs(
+            project_id=project_id, source_refs=source_refs, libraries=libraries
+        )
+
     def build_bundle(self, *, project, session, query: str, libraries=None):
         _ = (project, session, libraries)
         self.bundle_calls += 1
@@ -107,6 +114,10 @@ class FakeRetrievalService:
             fallback_reason="",
             metadata={},
         )
+
+    def build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
+        _ = (project_id, source_refs)
+        return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
     async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
         _ = (project_id, source_refs)
@@ -655,6 +666,10 @@ async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
 
     session_store = SessionStore(state_store=JsonStateStore(root))
     session = session_store.create_session(session_id="sess-meta", project_id="proj-meta")
+    # Profile + prior message present so preflight resolves to the normal
+    # READY/LEARN path rather than the INTAKE phase (which restricts tools).
+    session.profile = {"background": "has basics"}
+    session.messages = [{"role": "user", "content": "earlier turn"}]
     session.board_facts = {
         "project_id": "proj-meta",
         "session_id": "sess-meta",

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from colearn.nanobot_bootstrap import ensure_nanobot_on_path
 
@@ -17,6 +17,7 @@ ensure_nanobot_on_path()
 
 from nanobot.agent.hook import AgentHook
 
+from colearn.learning.constants import StreamEventType
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.logging_config import get_logger
@@ -37,6 +38,34 @@ class TurnTimeoutError(TimeoutError):
 
 class TurnCancelledError(RuntimeError):
     """Raised when a turn is cancelled cooperatively."""
+
+
+@runtime_checkable
+class TurnExecutorProtocol(Protocol):
+    """Interface the orchestrator relies on for driving a learning turn.
+
+    Both :class:`NanobotTurnExecutor` and the test doubles implement this, so
+    callers can depend on it directly instead of probing methods with
+    ``getattr(..., None)``.
+    """
+
+    workspace: Path | None
+
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult: ...
+
+    def finalize(
+        self,
+        *,
+        request: LearningTurnRequest,
+        final_text: str,
+        learning_result: dict[str, Any] | None = None,
+    ) -> LearningTurnResult: ...
+
+    def sync_sustained_goal(
+        self, *, session_id: str, objective: str, ui_summary: str = ""
+    ) -> dict[str, Any]: ...
+
+    def complete_sustained_goal(self, *, session_id: str, recap: str = "") -> dict[str, Any]: ...
 
 
 @dataclass
@@ -72,23 +101,23 @@ class NanobotTurnExecutor:
 
         async def on_stream(self, ctx, delta: str):
             if delta:
-                self._emit(NanobotTurnExecutor._coerce_stream_event("content_delta", delta))
+                self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.CONTENT_DELTA, delta))
 
         async def emit_reasoning(self, reasoning_content: str | None):
             if reasoning_content:
-                self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning_delta", reasoning_content))
+                self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.REASONING_DELTA, reasoning_content))
 
         async def emit_reasoning_end(self):
-            self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning_end", ""))
+            self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.REASONING_END, ""))
 
         async def on_stream_end(self, ctx, *, resuming: bool):
-            self._emit(NanobotTurnExecutor._coerce_stream_event("stream_end", "", resuming=bool(resuming)))
+            self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.STREAM_END, "", resuming=bool(resuming)))
 
         async def before_execute_tools(self, ctx):
             for tool_call in list(getattr(ctx, "tool_calls", []) or []):
                 self._emit(
                     NanobotTurnExecutor._coerce_stream_event(
-                        "tool_call",
+                        StreamEventType.TOOL_CALL,
                         "",
                         tool_name=str(getattr(tool_call, "name", "") or ""),
                         args=getattr(tool_call, "arguments", {}),
@@ -100,7 +129,7 @@ class NanobotTurnExecutor:
                 for item in list(ctx.tool_events or []):
                     self._emit(
                         NanobotTurnExecutor._coerce_stream_event(
-                            str(item.get("type") or "tool_event"),
+                            str(item.get("type") or StreamEventType.TOOL_EVENT),
                             str(item.get("content") or ""),
                             **{k: v for k, v in item.items() if k not in {"type", "content"}},
                         )
@@ -146,7 +175,7 @@ class NanobotTurnExecutor:
             if request.stream_emit is not None:
                 try:
                     request.stream_emit(dict(payload))
-                except Exception as exc:
+                except (RuntimeError, ConnectionError, OSError) as exc:
                     request.metadata.setdefault("_runtime_warnings", []).append(
                         f"stream_emit_failed:{type(exc).__name__}"
                     )
@@ -228,7 +257,7 @@ class NanobotTurnExecutor:
             return
         try:
             loop.set_model_preset(resolved)
-        except Exception as exc:
+        except (AttributeError, ValueError, RuntimeError) as exc:
             request.metadata.setdefault("_runtime_warnings", []).append(
                 f"model_preset_apply_failed:{resolved}:{type(exc).__name__}"
             )
@@ -291,7 +320,7 @@ class NanobotTurnExecutor:
 
         try:
             from nanobot.session.goal_state import GOAL_STATE_KEY, discard_legacy_goal_state_key, parse_goal_state
-        except Exception as exc:
+        except (ImportError, ModuleNotFoundError) as exc:
             return {"status": "skipped", "reason": f"goal_state_unavailable:{type(exc).__name__}"}
 
         try:
@@ -321,7 +350,7 @@ class NanobotTurnExecutor:
             discard_legacy_goal_state_key(metadata)
             sessions.save(session)
             return {"status": "active_started", "objective": objective}
-        except Exception as exc:
+        except (AttributeError, KeyError, ValueError, RuntimeError) as exc:
             return {"status": "skipped", "reason": f"sync_failed:{type(exc).__name__}"}
 
     def complete_sustained_goal(
@@ -336,7 +365,7 @@ class NanobotTurnExecutor:
 
         try:
             from nanobot.session.goal_state import GOAL_STATE_KEY, discard_legacy_goal_state_key, parse_goal_state
-        except Exception as exc:
+        except (ImportError, ModuleNotFoundError) as exc:
             return {"status": "skipped", "reason": f"goal_state_unavailable:{type(exc).__name__}"}
 
         try:
@@ -358,7 +387,7 @@ class NanobotTurnExecutor:
             discard_legacy_goal_state_key(metadata)
             sessions.save(session)
             return {"status": "completed", "objective": str(prior.get("objective") or "")}
-        except Exception as exc:
+        except (AttributeError, KeyError, ValueError, RuntimeError) as exc:
             return {"status": "skipped", "reason": f"complete_failed:{type(exc).__name__}"}
 
     def _build_prompt(self, request: LearningTurnRequest) -> str:

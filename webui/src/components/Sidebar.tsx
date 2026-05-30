@@ -63,7 +63,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <nav
       aria-label={t("sidebar.navigation")}
-      className="flex h-full w-full min-w-0 flex-col border-r border-sidebar-border/60 bg-sidebar text-sidebar-foreground"
+      className="flex h-full w-full min-w-0 flex-col border-r border-sidebar-border/60 bg-white text-sidebar-foreground shadow-[3px_0_6px_-2px_rgba(1,63,248,0.06)]"
     >
       <div className="relative h-[60px] shrink-0 px-2.5">
         <div className="absolute left-2.5 top-[-4px] flex min-w-0 items-center">
@@ -109,7 +109,7 @@ export function Sidebar(props: SidebarProps) {
         </label>
         <Button
           onClick={props.onNewChat}
-          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-sm font-medium leading-none text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-sm font-normal leading-none text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
           variant="ghost"
         >
           <SquarePen className="h-3.5 w-3.5" />
@@ -125,7 +125,7 @@ export function Sidebar(props: SidebarProps) {
                 variant="ghost"
                 onClick={onClick}
                 className={cn(
-                  "h-8 w-full justify-start gap-2 rounded-full px-3 text-sm font-medium",
+                  "h-8 w-full justify-start gap-2 rounded-full px-3 text-sm font-normal",
                   active
                     ? "bg-sidebar-accent/80 text-sidebar-foreground"
                     : "text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
@@ -158,7 +158,7 @@ export function Sidebar(props: SidebarProps) {
           type="button"
           variant="ghost"
           onClick={props.onOpenSettings}
-          className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-sm font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-sm font-normal text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
         >
           <Settings className="h-3.5 w-3.5" aria-hidden />
           {t("sidebar.settings")}

@@ -41,9 +41,38 @@ if (!("randomUUID" in globalThis.crypto)) {
   });
 }
 
+// happy-dom in this setup doesn't expose a working Storage, so the app's
+// window.localStorage calls throw. Install a minimal in-memory implementation
+// shared by both the global and window bindings.
+function installLocalStoragePolyfill(): void {
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => void store.delete(key),
+    setItem: (key: string, value: string) => void store.set(key, String(value)),
+  };
+  for (const target of [globalThis, globalThis.window]) {
+    if (!target) continue;
+    Object.defineProperty(target, "localStorage", {
+      value: storage,
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
+if (typeof globalThis.localStorage?.setItem !== "function") {
+  installLocalStoragePolyfill();
+}
+
 beforeEach(async () => {
   await i18n.changeLanguage("en");
   document.documentElement.lang = "en";
   document.title = "CoLearn";
-  localStorage.setItem("nanobot.locale", "en");
+  window.localStorage.setItem("nanobot.locale", "en");
 });

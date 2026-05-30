@@ -513,6 +513,7 @@ export function ThreadShell({
           learningPromptVisible={learningPromptVisible && sessionMode === "chat"}
           onLearningPromptAccept={() => handleSessionModeChange("learning")}
           onLearningPromptDismiss={() => setLearningPromptVisible(false)}
+          intakeOverlay={intakeOverlay}
         />
       )}
     </>
@@ -524,7 +525,7 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <h1 className="flex items-center justify-center gap-2 text-balance text-4xl font-normal leading-tight tracking-[0.04em] text-foreground sm:text-4xl">
+      <h1 className="flex items-center justify-center gap-2 text-balance text-4xl font-normal leading-tight tracking-[0.04em] text-foreground">
         <img
           src={emptyPenguinSrc}
           alt=""
@@ -532,8 +533,22 @@ export function ThreadShell({
           aria-hidden
           draggable={false}
         />
-        {t("thread.empty.greeting")}
+        {(() => {
+          const hour = new Date().getHours();
+          if (hour < 6) return "夜深了，学点轻松的？";
+          if (hour < 12) return "早上好，今天想学什么？";
+          if (hour < 18) return "下午好，继续探索吧";
+          return "晚上好，来充充电？";
+        })()}
       </h1>
+      <p className="mt-2 text-sm text-muted-foreground/70">
+        {[
+          "随便聊聊，我帮你理清思路",
+          "说个方向就行，剩下的交给我",
+          "从好奇心开始，没有门槛",
+          "不用想太多，先开口就对了",
+        ][Math.floor(Math.random() * 4)]}
+      </p>
     </div>
   );
 
@@ -542,13 +557,6 @@ export function ThreadShell({
       <ThreadHeader
         title={title}
         subtitle={showIntakeCard ? null : goalHeaderLabel}
-        titleActions={session ? (
-          <ModeIndicator
-            mode={sessionMode}
-            learningPhase={learningSupport?.learning_phase}
-            onToggleMode={() => handleSessionModeChange(sessionMode === "learning" ? "chat" : "learning")}
-          />
-        ) : undefined}
         onToggleSidebar={onToggleSidebar}
         theme={theme}
         onToggleTheme={onToggleTheme}
@@ -557,8 +565,14 @@ export function ThreadShell({
         titleStyle={session ? "chat" : "page"}
       />
       {session && sessionMode === "learning" && (
-        <div className="px-4 pb-1">
-          <LightRAGHealthBanner />
+        <div className="flex items-center gap-2 px-4 pb-1">
+          <ModeIndicator
+            mode={sessionMode}
+            learningPhase={learningSupport?.learning_phase}
+          />
+          <div className="flex-1">
+            <LightRAGHealthBanner />
+          </div>
         </div>
       )}
       <ThreadViewport

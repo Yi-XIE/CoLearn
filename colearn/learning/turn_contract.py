@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from .constants import TurnMode
 from .retrieval_bundle import RetrievalBundle, empty_retrieval_bundle
 from .state import BoardFacts, LearningStateSnapshot, PolicyDecision, TurnPolicy
 
@@ -17,7 +18,7 @@ class LearningTurnRequest:
     language: str = "zh"
     project_id: str = ""
     project_title: str = ""
-    turn_mode: str = "LEARN"
+    turn_mode: TurnMode = TurnMode.LEARN
     model_preset: str | None = None
     board_facts: BoardFacts = field(default_factory=BoardFacts)
     turn_policy: TurnPolicy | None = None
