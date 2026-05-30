@@ -1,5 +1,24 @@
 # CoLearn 学习闭环版本设计
 
+> **实现现状（2026-05-30）**
+>
+> 这份文档是学习闭环的**产品愿景**，保留作为方向参考。实际落地时结构与命名做了收敛，与本文不完全一致：
+>
+> | 本文设想 | 实际落地 |
+> |---|---|
+> | `LearningMap` / `LearningMapNode` | `LearningPlan` / `LearningPlanNode`（`colearn/learning/state.py`），由 `PlanStage` 生成 |
+> | `ConceptCard` | 暂未独立建模；概念掌握度落在 `StudentSnapshot.mastery_level` + `MasteryProgress` 组件 |
+> | `StudyContinuity` | 拆成 session 上的 `continuation` / `next_recall` / `profile` 字段 + `schedule-recall` 技能 |
+> | “开始学习这个资料库”入口 | 由双模式开关（Chat/Learning）+ 学习意图检测进入 Learning Mode |
+> | 每轮课后沉淀 | `REFLECT` phase + `session-reflect` 技能 + `SessionSummaryCard` 组件 |
+> | 下次继续入口 | `RECALL` phase + `next_recall` + 前端召回引导 |
+>
+> 也就是说“持续陪学”的主体验已经通过 **双模式 + 五段 Learning Phase + 黑板计划 + 配套 skills** 实现，只是没有按本文的 `LearningMap / ConceptCard / StudyContinuity` 三结构原样落地。详见 `02-Architecture/CoLearn-LearningState-协议.md`。
+>
+> 本文以下内容是当初的设计意图，作为后续打磨“资料库级学习地图 / 概念卡复习”的北极星保留。
+
+---
+
 ## 一句话目标
 
 下一阶段不再优先扩散功能，而是把知识库、记忆、技能、检索和学习状态收束到一条主路径里：

@@ -1,6 +1,6 @@
 # CoLearn LightRAG 与学习状态机瘦身评估
 
-更新时间：2026-05-24
+更新时间：2026-05-30
 
 这份文档记录当前 CoLearn 主线里 `LightRAG` 和学习状态机的真实接法，说明它们为什么会显得重，以及可以如何分模式、删减或简化。这里的目标不是把学习能力砍薄，而是把它改成“计划驱动、黑板记录、按需进入”的形态。
 
@@ -332,23 +332,36 @@ Agent 负责：
 
 ### 12.0 当前施工进度
 
-更新于 2026-05-24。
+更新于 2026-05-30。
+
+瘦身方案（双模式 + 黑板计划 + 三状态 + Agent 护栏）已全部落地，并在三态学习状态机之上又叠了一层粗粒度的 **Learning Phase**，把学习闭环补成了“进来 → 摸底 → 学 → 收尾 → 回访”的完整路径。
 
 已落地：
 
-- Phase 1 双模式入口：session/project 已支持 `chat` 与 `learning`，普通聊天默认轻链路，Learning Mode 可由前端开关或明确学习意图进入。
-- Phase 2 能力：CoLearn WebSocket 已输出 `goal_state`，前端已接入现有 goal 展示链路；当前实际加载的 `third_party/nanobot-core` 已补入 nanobot 原生 `long_task / complete_goal` 工具、`goal_state` metadata helper 与 active goal runtime context 注入。CoLearn 学习主链进入 Learning Mode 且已有学习计划目标时，会自动同步 nanobot active goal；目标不变时复用，目标变更时先完成旧目标再登记新目标。学习结果显示计划全部完成，或学习状态回到 `PAUSED` 时，会自动完成 nanobot 原生 goal；用户 pause、WebSocket cancel 与话题切换也已有回归覆盖。
-- Phase 3 最小模型：`LearningPlan`、`LearningBoard`、`LearningPlanNode` 已进入 `BoardFacts`，并兼容旧会话字段自动派生。
-- Phase 4 最小 PlanStage：已新增 `PlanStage`，首次进入 Learning Mode 或计划缺失时生成四步结构化计划；已有计划时不每轮重算。
-- Phase 5 三状态学习状态机：新版 Learning Mode 从 `LEARN` 开始，普通聊天为 `PAUSED`，检查/纠错语义收口到 `CHECK`；新主链已删除旧五态分支，旧值只在读取历史会话或兼容旧 LLM 输出时归一化到三状态。
-- Phase 6 retrieval 护栏：首次学习会取证，已有 evidence 的 `LEARN` 后续轮次跳过预取；`CHECK` 按需取证。外部资料、最新资料或本地检索不足时，通过 metadata/prompt 启用 nanobot 原生 `web_search / web_fetch` 兜底。
-- Phase 7 部分 writeback 与状态收口：Chat Mode 不再调度学习型后台压缩、dream consolidation 和 board derivation；Learning Mode 仍保留必要的异步后处理与 stale write 防护。HTTP session 创建与 pause/resume 入口已按三状态收口，Chat 默认 `PAUSED`，Learning 与 resume 默认 `LEARN`。
-- Phase 8 前端黑板展示：Learning support 侧栏已消费 `learning_plan` 与 `learning_board`，显示目标、当前节点、已完成数、待检查数和 blocker/objection 数量；即使本轮没有 retrieval evidence，只要有学习计划或黑板状态也会展示，并明确标出 `LEARN / CHECK / PAUSED` 当前模式。
-- Phase 9 收尾：已补学习取消、HTTP pause、话题切换与 WebSocket `goal_state` 端到端回归；后端与前端核心回归已通过。
+- **双模式入口**：session/project 支持 `chat` 与 `learning`，普通聊天默认轻链路，Learning Mode 可由前端开关或明确学习意图（`PreflightStage` 关键词检测）进入。
+- **黑板计划**：`LearningPlan`、`LearningBoard`、`LearningPlanNode` 已进入 `BoardFacts`，并兼容旧会话字段自动派生。`PlanStage` 首次进入或换题时生成计划（有 LightRAG 时按课程结构生成，否则四步模板），已有计划不每轮重算，并按 mastery 跳过已掌握节点。
+- **三状态学习状态机**：Learning Mode 从 `LEARN` 开始，普通聊天为 `PAUSED`，检查/纠错收口到 `CHECK`，旧五态只在读取历史会话时归一化。
+- **retrieval 护栏**：首次学习取证，已有 evidence 的 `LEARN` 后续轮跳过预取；`web_search / web_fetch` 作兜底层按需启用。
+- **writeback 与后处理收口**：Chat Mode 不调度学习型后台压缩、dream consolidation 和 board derivation；Learning Mode 保留必要异步后处理与 stale write 防护。
+- **nanobot 原生能力**：`long_task / complete_goal / goal_state` 长期目标生命周期、`AgentHook` 真流式、`set_model_preset`、`ContextBuilder`、`AutoCompact`、`Dream` 均已接入。
+- **前端黑板展示**：Learning support 侧栏消费 `learning_plan` 与 `learning_board`，并有 `ModeIndicator` / `MasteryProgress` / `PlanConfirmCard` / `SessionSummaryCard` / `IntakeQuestionnaireCard` 等组件。
+
+#### Learning Phase 层（三态之上的新增）
+
+在 `LEARN / CHECK / PAUSED` 之上，`colearn/learning/constants.py` 定义了 `LearningPhase`，由 `PreflightStage._resolve_learning_phase()` 判定、`turn_hooks.policy()` 分发：
+
+- `INTAKE` — 新用户无 profile 时先做画像采集（`skills/profile-intake`）
+- `DIAGNOSE` — 出诊断题评估基线，只问不教
+- `READY` — 正常学习主链（默认）
+- `REFLECT` — 会话收尾生成总结（`skills/session-reflect`），计划全部完成时自动触发
+- `RECALL` — 用户回访且召回到期时先复习（`skills/schedule-recall`）
+
+配套技能目录（`skills/`）：`profile-intake`、`session-reflect`、`schedule-recall`、`web-search`，以及教学法技能 `pedagogy-methods` / `socratic-questioning` / `feynman-technique` / `deliberate-practice`。
 
 当前状态：
 
-- 本轮计划项已补齐；代码里旧五态只剩历史数据兼容归一化入口，不再作为新主链分支、默认值或 prompt schema。
+- 瘦身方案本身已收口；本轮在其上补完了 Learning Phase 闭环与配套 skills。
+- 下方 7~13 节是设计依据与实施顺序的原始记录，保留作为背景，不再逐条对照当前代码。
 
 ### 12.1 总目标
 
