@@ -565,14 +565,8 @@ export function ThreadShell({
         titleStyle={session ? "chat" : "page"}
       />
       {session && sessionMode === "learning" && (
-        <div className="flex items-center gap-2 px-4 pb-1">
-          <ModeIndicator
-            mode={sessionMode}
-            learningPhase={learningSupport?.learning_phase}
-          />
-          <div className="flex-1">
-            <LightRAGHealthBanner />
-          </div>
+        <div className="px-4 pb-1">
+          <LightRAGHealthBanner />
         </div>
       )}
       <ThreadViewport
