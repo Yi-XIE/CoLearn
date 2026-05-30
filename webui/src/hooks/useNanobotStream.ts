@@ -541,7 +541,7 @@ export function useNanobotStream(
       prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
     );
     suppressStreamUntilTurnEndRef.current = false;
-    client.sendMessage(chatId, "/stop");
+    client.cancelTurn(chatId);
   }, [chatId, client]);
 
   return {

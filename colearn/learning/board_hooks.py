@@ -6,6 +6,13 @@ from dataclasses import replace
 import hashlib
 from typing import Any
 
+from colearn.learning.constants import (
+    BlockerType,
+    LearningEventType,
+    LearningPhase,
+    NodeStatus,
+    TurnMode,
+)
 from colearn.learning.hook_utils import json_safe, normalize_turn_mode, utc_now
 from colearn.learning.state import (
     Blocker,
@@ -19,7 +26,6 @@ from colearn.learning.state import (
     LearningStateSnapshot,
     ProgressFacts,
     StudentSnapshot,
-    TurnMode,
 )
 from colearn.projects.models import LearningProject
 
@@ -30,13 +36,13 @@ def extract_board_facts(
     session_id: str,
     continuation_hint: str = "",
     board_version: int = 1,
-    turn_mode: str = "LEARN",
+    turn_mode: TurnMode | str = TurnMode.LEARN,
 ) -> BoardFacts:
     gaps = list(project.latest_review.get("confusion_points") or [])
     blockers = [
         Blocker(
             id=f"blk_{idx:03d}",
-            type="CONCEPT_MISUNDERSTANDING",
+            type=BlockerType.CONCEPT_MISUNDERSTANDING,
             desc=str(gap),
         )
         for idx, gap in enumerate(gaps)
@@ -50,7 +56,7 @@ def extract_board_facts(
             LearningPlanNode(
                 id=active_node_id,
                 label=active_node_label,
-                status="current",
+                status=NodeStatus.CURRENT,
                 depth=0,
                 summary=active_node_label,
             )
@@ -110,7 +116,7 @@ def _coerce_learning_plan(raw: Any, *, project: LearningProject, progress: Progr
             LearningPlanNode(
                 id=current_node_id,
                 label=str(progress.active_node_label or project.title or ""),
-                status="current",
+                status=NodeStatus.CURRENT,
                 depth=0,
                 summary=str(progress.active_node_label or project.title or ""),
             )
@@ -226,15 +232,15 @@ def build_state_snapshot(
 def determine_turn_mode(board: BoardFacts, user_message: str) -> TurnMode:
     _ = user_message
     current = normalize_turn_mode(board.current_turn_mode)
-    if current == "PAUSED":
-        return "PAUSED"
-    if current == "CHECK":
-        return "CHECK"
+    if current == TurnMode.PAUSED:
+        return TurnMode.PAUSED
+    if current == TurnMode.CHECK:
+        return TurnMode.CHECK
     if board.gaps_and_blockers.critical_blockers:
-        return "CHECK"
+        return TurnMode.CHECK
     if board.gaps_and_blockers.unverified_gaps:
-        return "CHECK"
-    return "LEARN"
+        return TurnMode.CHECK
+    return TurnMode.LEARN
 
 
 def resolve_model_preset(turn_mode: TurnMode) -> str | None:
@@ -255,7 +261,7 @@ def extract_learning_events(
 ) -> list[LearningEvent]:
     events: list[LearningEvent] = [
         LearningEvent(
-            type="CONTINUATION_UPDATED",
+            type=LearningEventType.CONTINUATION_UPDATED,
             payload=json_safe(
                 {
                     "next_prompt_hint": f"Continue from {board.current_progress.active_node_label}",
@@ -277,7 +283,7 @@ def extract_learning_events(
     if any(name == "lightrag" for name in tool_names) and board.current_progress.active_node_id:
         events.append(
             LearningEvent(
-                type="NODE_COMPLETED",
+                type=LearningEventType.NODE_COMPLETED,
                 payload=json_safe(
                     {
                         "node_id": board.current_progress.active_node_id,
@@ -292,7 +298,7 @@ def extract_learning_events(
     ):
         events.append(
             LearningEvent(
-                type="NODE_COMPLETED",
+                type=LearningEventType.NODE_COMPLETED,
                 payload=json_safe(
                     {
                         "node_id": board.current_progress.active_node_id,
@@ -305,7 +311,7 @@ def extract_learning_events(
     elif board.current_progress.active_node_id and not board.current_progress.completed_node_ids:
         events.append(
             LearningEvent(
-                type="NODE_STARTED",
+                type=LearningEventType.NODE_STARTED,
                 payload=json_safe(
                     {
                         "node_id": board.current_progress.active_node_id,
@@ -321,11 +327,11 @@ def extract_learning_events(
         blocker_id = hashlib.sha1(user_message[:240].encode("utf-8")).hexdigest()[:10]
         events.append(
             LearningEvent(
-                type="BLOCKER_FOUND",
+                type=LearningEventType.BLOCKER_FOUND,
                 payload=json_safe(
                     {
                         "id": f"blk_{blocker_id}",
-                        "type": "CONCEPT_MISUNDERSTANDING",
+                        "type": BlockerType.CONCEPT_MISUNDERSTANDING,
                         "desc": user_message[:240],
                         "signal": "user_message",
                     }
@@ -339,7 +345,7 @@ def extract_learning_events(
             continue
         events.append(
             LearningEvent(
-                type="EVIDENCE_ATTACHED",
+                type=LearningEventType.EVIDENCE_ATTACHED,
                 payload=json_safe(
                     {
                         "source_ref": raw_ref,
@@ -364,16 +370,16 @@ def resolve_turn_mode_after(
     blockers = list(board_after.gaps_and_blockers.critical_blockers or [])
     unverified_gaps = list(board_after.gaps_and_blockers.unverified_gaps or [])
 
-    if "BLOCKER_FOUND" in event_types or blockers:
-        return "CHECK"
-    if board_before.current_turn_mode == "LEARN" and "NODE_COMPLETED" in event_types:
-        return "CHECK"
-    if board_before.current_turn_mode == "CHECK" and "NODE_COMPLETED" in event_types:
-        return "LEARN"
+    if LearningEventType.BLOCKER_FOUND in event_types or blockers:
+        return TurnMode.CHECK
+    if board_before.current_turn_mode == TurnMode.LEARN and LearningEventType.NODE_COMPLETED in event_types:
+        return TurnMode.CHECK
+    if board_before.current_turn_mode == TurnMode.CHECK and LearningEventType.NODE_COMPLETED in event_types:
+        return TurnMode.LEARN
     if unverified_gaps:
-        return "CHECK"
-    if "NODE_COMPLETED" in event_types and board_after.current_progress.active_node_id:
-        return "LEARN"
+        return TurnMode.CHECK
+    if LearningEventType.NODE_COMPLETED in event_types and board_after.current_progress.active_node_id:
+        return TurnMode.LEARN
     return normalize_turn_mode(board_before.current_turn_mode)
 
 
@@ -388,26 +394,26 @@ def apply_events(
     plan = board.learning_plan
 
     for event in events:
-        if event.type == "NODE_COMPLETED":
+        if event.type == LearningEventType.NODE_COMPLETED:
             node_id = str(event.payload.get("node_id") or "")
             if node_id and node_id not in completed_node_ids:
                 completed_node_ids.append(node_id)
-        elif event.type == "CONTINUATION_UPDATED":
+        elif event.type == LearningEventType.CONTINUATION_UPDATED:
             continuation = ContinuationFacts(
                 next_prompt_hint=str(event.payload.get("next_prompt_hint") or continuation.next_prompt_hint),
                 last_completed_turn_id=str(
                     event.payload.get("last_completed_turn_id") or continuation.last_completed_turn_id
                 ),
             )
-        elif event.type == "BLOCKER_FOUND":
+        elif event.type == LearningEventType.BLOCKER_FOUND:
             blocker = Blocker(
                 id=str(event.payload.get("id") or f"blk_{len(blockers):03d}"),
-                type=str(event.payload.get("type") or "CONCEPT_MISUNDERSTANDING"),
+                type=BlockerType(str(event.payload.get("type") or BlockerType.CONCEPT_MISUNDERSTANDING)),
                 desc=str(event.payload.get("desc") or ""),
             )
             if blocker.id not in {item.id for item in blockers}:
                 blockers.append(blocker)
-        elif event.type == "EVIDENCE_ATTACHED":
+        elif event.type == LearningEventType.EVIDENCE_ATTACHED:
             source_ref = str(event.payload.get("source_ref") or "")
             if source_ref:
                 evidence = {
@@ -454,7 +460,7 @@ def apply_events(
             LearningPlanNode(
                 id=board.current_progress.active_node_id,
                 label=board.current_progress.active_node_label,
-                status="current",
+                status=NodeStatus.CURRENT,
                 depth=0,
                 summary=board.current_progress.active_node_label,
             )
@@ -506,7 +512,14 @@ def apply_events(
         board_after=updated,
         events=events,
     )
-    return replace(updated, current_turn_mode=next_mode)
+    updated = replace(updated, current_turn_mode=next_mode)
+    all_nodes_done = (
+        len(plan_nodes) > 1
+        and all(node.status == "completed" for node in plan_nodes)
+    )
+    if all_nodes_done and getattr(board, "learning_phase", "ready") == "ready":
+        updated = replace(updated, learning_phase=LearningPhase.REFLECT)
+    return updated
 
 
 def after_turn(

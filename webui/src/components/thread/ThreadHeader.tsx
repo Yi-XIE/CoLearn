@@ -80,8 +80,8 @@ export function ThreadHeader({
             className={cn(
               "max-w-[min(60vw,32rem)] truncate leading-tight",
               titleStyle === "page"
-                ? "text-[22px] font-bold text-black dark:text-white sm:text-[26px]"
-                : "text-[14px] font-medium text-foreground/78 sm:text-[15px]",
+                ? "text-2xl font-bold text-black dark:text-white sm:text-2xl"
+                : "text-[14px] font-medium text-foreground/78 sm:text-sm",
             )}
           >
             {title}

@@ -262,10 +262,7 @@ export class ColearnWsClient implements NanobotClientLike {
   ): void {
     if (!chatId) return;
     if (content.trim() === "/stop") {
-      const activeTurnId = this.activeTurnIdByChatId.get(chatId);
-      if (activeTurnId) {
-        this.queueSend({ type: "cancel_turn", turn_id: activeTurnId });
-      }
+      this.cancelTurn(chatId);
       return;
     }
     const attachments = (media ?? []).map((item) => ({
@@ -289,6 +286,13 @@ export class ColearnWsClient implements NanobotClientLike {
       frame.config = { image_generation: options.imageGeneration };
     }
     this.queueSend(frame);
+  }
+
+  cancelTurn(chatId: string, turnId?: string): void {
+    const resolvedTurnId = turnId || this.activeTurnIdByChatId.get(chatId);
+    if (resolvedTurnId) {
+      this.queueSend({ type: "cancel_turn", turn_id: resolvedTurnId });
+    }
   }
 
   private setStatus(status: ConnectionStatus): void {

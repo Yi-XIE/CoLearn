@@ -209,7 +209,7 @@ function SettingSlider({
 }) {
   return (
     <label className="block space-y-2">
-      <div className="text-[13px] text-slate-700">{label}</div>
+      <div className="text-xs text-slate-700">{label}</div>
       <input
         type="range"
         min={min}
@@ -521,11 +521,11 @@ export function KnowledgeGardenPanel({
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-slate-500 transition hover:bg-[#F2F3F3] hover:text-slate-700"
                 >
                   <FileText className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
-                  <span className="truncate text-[13px] leading-[18px]">{file.name}</span>
+                  <span className="truncate text-xs leading-[18px]">{file.name}</span>
                 </button>
               ))
             ) : (
-              <div className="px-2 py-1 text-[13px] leading-[18px] text-slate-400">暂无文件</div>
+              <div className="px-2 py-1 text-xs leading-[18px] text-slate-400">暂无文件</div>
             )}
           </div>
         ) : null}
@@ -544,13 +544,13 @@ export function KnowledgeGardenPanel({
           <FileText className="h-4 w-4 shrink-0" aria-hidden />
           <span className="truncate">{label}文件</span>
         </div>
-        <div className="shrink-0 text-[13px] text-slate-500 tabular-nums">{fileCount} 个文件</div>
+        <div className="shrink-0 text-xs text-slate-500 tabular-nums">{fileCount} 个文件</div>
       </div>
       <div className="scrollbar-none max-h-[360px] overflow-y-auto rounded-[18px] border border-slate-200/80 bg-white/90 px-2.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.07)]">
         {items.length ? (
           <div className="space-y-1">{items.map(renderLibraryItem)}</div>
         ) : (
-          <div className="px-3 py-2 text-[13px] leading-6 text-slate-400">
+          <div className="px-3 py-2 text-xs leading-6 text-slate-400">
             还没有{label === "已完成" ? "完成" : "待处理"}文件
           </div>
         )}
@@ -603,7 +603,7 @@ export function KnowledgeGardenPanel({
             <div>
               <div className="pb-3 text-sm font-semibold text-slate-900">外观</div>
               <div className="space-y-3">
-                <label className="flex items-center justify-between gap-3 text-[13px] text-slate-700">
+                <label className="flex items-center justify-between gap-3 text-xs text-slate-700">
                   <span>显示标签</span>
                   <button
                     type="button"
@@ -787,7 +787,7 @@ export function KnowledgeGardenPanel({
 
             {!previewNode ? (
               <aside className="fixed inset-y-0 right-0 z-30 w-[320px] bg-white">
-                <div className="scrollbar-none h-full space-y-4 overflow-y-auto px-4 pb-4 pt-[112px] text-[13px] text-slate-500">
+                <div className="scrollbar-none h-full space-y-4 overflow-y-auto px-4 pb-4 pt-[112px] text-xs text-slate-500">
                   {renderStatusCard("已完成", completedFileCount, completedLibraries)}
                   {renderStatusCard("待处理", pendingFileCount, pendingLibraries)}
                 </div>
@@ -809,16 +809,16 @@ export function KnowledgeGardenPanel({
 
                 <div className="h-full overflow-y-auto px-8 pb-8 pt-14">
                   {previewLoading ? (
-                    <div className="pt-10 text-[15px] leading-7 text-slate-500">正在加载预览...</div>
+                    <div className="pt-10 text-sm leading-7 text-slate-500">正在加载预览...</div>
                   ) : previewDocument ? (
                     <>
                       {renderPreviewBreadcrumb()}
-                      <MarkdownText className="pr-10 text-[16px] leading-8 text-slate-700">
+                      <MarkdownText className="pr-10 text-sm leading-8 text-slate-700">
                         {previewDocument.content}
                       </MarkdownText>
                     </>
                   ) : (
-                    <div className="pt-10 text-[15px] leading-7 text-slate-500">暂无预览内容。</div>
+                    <div className="pt-10 text-sm leading-7 text-slate-500">暂无预览内容。</div>
                   )}
                 </div>
               </aside>

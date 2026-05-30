@@ -44,6 +44,9 @@ def session_from_record(record: dict[str, Any]) -> Any:
     payload["pending_review"] = dict(payload.get("pending_review") or {})
     payload["active_turn_id"] = payload.get("active_turn_id")
     payload["active_turns"] = list(payload.get("active_turns") or [])
+    payload["learning_phase"] = str(payload.get("learning_phase") or "ready")
+    payload["next_recall"] = dict(payload.get("next_recall") or {})
+    payload["profile"] = dict(payload.get("profile") or {})
     return LearningSession(**payload)
 
 

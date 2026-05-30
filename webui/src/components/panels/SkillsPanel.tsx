@@ -248,7 +248,7 @@ export function SkillsPanel({ token, ...panelProps }: SkillsPanelProps) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索技能"
-              className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-[15px] shadow-[0_1px_3px_rgba(15,23,42,0.04)] focus-visible:ring-1 focus-visible:ring-slate-300 focus-visible:ring-offset-0"
+              className="h-11 rounded-xl border-slate-200 bg-white pl-10 text-sm shadow-[0_1px_3px_rgba(15,23,42,0.04)] focus-visible:ring-1 focus-visible:ring-slate-300 focus-visible:ring-offset-0"
             />
           </div>
           <DropdownMenu>
@@ -287,7 +287,7 @@ export function SkillsPanel({ token, ...panelProps }: SkillsPanelProps) {
           <div className="flex flex-col gap-8">
             {sections.map((section) => (
               <section key={section.key} className="flex flex-col gap-3">
-                <div className="border-b border-border/50 pb-3 text-base font-semibold text-foreground">
+                <div className="border-b border-border/50 pb-3 text-sm font-semibold text-foreground">
                   {section.title}
                 </div>
                 <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
@@ -314,7 +314,7 @@ export function SkillsPanel({ token, ...panelProps }: SkillsPanelProps) {
                   <DetailIcon className="h-5 w-5" strokeWidth={1.8} aria-hidden />
                 </div>
                 <div className="min-w-0">
-                  <DialogTitle className="truncate text-[20px] leading-7 text-slate-950">
+                  <DialogTitle className="truncate text-2xl leading-7 text-slate-950">
                     {selectedSkill ? toTitle(selectedSkill.name) : "技能"}
                   </DialogTitle>
                   <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
@@ -322,7 +322,7 @@ export function SkillsPanel({ token, ...panelProps }: SkillsPanelProps) {
                   </div>
                 </div>
               </div>
-              <DialogDescription className="text-[15px] leading-6 text-slate-600">
+              <DialogDescription className="text-sm leading-6 text-slate-600">
                 {skillDetail?.description || selectedSkill?.description || "这个技能已接入运行时，可在学习对话里被调用。"}
               </DialogDescription>
             </DialogHeader>

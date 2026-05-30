@@ -174,7 +174,7 @@ class ColearnMemoryTool(Tool):
                 "evidence_map": {},
                 "message": "No memory references are attached for this turn.",
             }
-        except Exception as exc:
+        except (RuntimeError, ValueError, KeyError, OSError) as exc:
             return {
                 "status": "error",
                 "evidence_refs": [],
@@ -282,7 +282,7 @@ class ColearnLightRAGTool(Tool, ContextAware):
                 "text": result.text,
                 **evidence,
             }
-        except Exception as exc:
+        except (RuntimeError, ValueError, KeyError, OSError, ConnectionError) as exc:
             return {
                 "status": "error",
                 "source_refs": 0,
@@ -292,6 +292,88 @@ class ColearnLightRAGTool(Tool, ContextAware):
                 "evidence_refs": [],
                 "evidence_map": {},
                 "message": f"LightRAG context unavailable: {exc}",
+            }
+
+
+@tool_parameters(
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "count": {"type": "integer", "description": "Number of results (max 5)", "default": 5},
+        },
+        "required": ["query"],
+    }
+)
+class ColearnWebSearchTool(Tool):
+    def __init__(self, *, request: LearningTurnRequest) -> None:
+        self._request_var: ContextVar[LearningTurnRequest] = ContextVar("colearn_websearch_request", default=request)
+
+    def bind_request(self, *, request: LearningTurnRequest) -> None:
+        self._request_var.set(request)
+
+    @property
+    def name(self) -> str:
+        return "web_search"
+
+    @property
+    def description(self) -> str:
+        return "Search the web for current information using Brave Search. Use when the user asks about recent events or when local knowledge is insufficient."
+
+    async def execute(self, **kwargs: Any) -> Any:
+        import os
+        import httpx
+
+        query = str(kwargs.get("query") or "").strip()
+        if not query:
+            return {"status": "error", "message": "Empty query", "results": []}
+
+        api_key = os.environ.get("BRAVE_API_KEY", "")
+        if not api_key:
+            from colearn.api.state import SettingsStateService
+            import colearn.api.dependencies as _deps
+            svc = getattr(_deps, "settings_service", None)
+            if isinstance(svc, SettingsStateService):
+                env_block = svc.web_search_env()
+                api_key = str(env_block.get("BRAVE_API_KEY") or "")
+
+        if not api_key:
+            return {
+                "status": "unavailable",
+                "message": "Brave Search API key not configured. Answer using general knowledge.",
+                "results": [],
+            }
+
+        count = min(int(kwargs.get("count") or 5), 5)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    params={"q": query, "count": count},
+                    headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+                )
+                if resp.status_code != 200:
+                    return {
+                        "status": "error",
+                        "message": f"Brave API returned {resp.status_code}",
+                        "results": [],
+                    }
+                data = resp.json()
+                web_results = data.get("web", {}).get("results", [])
+                results = [
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "description": r.get("description", ""),
+                    }
+                    for r in web_results[:count]
+                ]
+                return {"status": "success", "query": query, "results": results}
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            return {
+                "status": "error",
+                "message": f"Web search failed: {exc}",
+                "results": [],
             }
 
 
@@ -330,7 +412,7 @@ def register_colearn_tools(
     enabled = set(normalize_enabled_tools(request.enabled_tools or DEFAULT_ENABLED_TOOLS))
     if not enabled:
         return
-    if not {"memory", "lightrag"} & enabled:
+    if not {"memory", "lightrag", "web_search"} & enabled:
         return
 
     registry = _resolve_tool_registry(bot=bot, request=request)
@@ -377,6 +459,16 @@ def register_colearn_tools(
     elif registry.has("lightrag"):
         registry.unregister("lightrag")
 
+    if "web_search" in enabled:
+        existing_ws = _registry_get(registry, "web_search")
+        if existing_ws is None:
+            registry.register(ColearnWebSearchTool(request=request))
+        elif not isinstance(existing_ws, ColearnWebSearchTool):
+            registry.unregister("web_search")
+            registry.register(ColearnWebSearchTool(request=request))
+    elif registry.has("web_search"):
+        registry.unregister("web_search")
+
 
 def bind_colearn_tools(
     *,
@@ -389,7 +481,7 @@ def bind_colearn_tools(
     enabled = set(normalize_enabled_tools(request.enabled_tools or DEFAULT_ENABLED_TOOLS))
     if not enabled:
         return
-    if not {"memory", "lightrag"} & enabled:
+    if not {"memory", "lightrag", "web_search"} & enabled:
         return
 
     registry = _resolve_tool_registry(bot=bot, request=request)
@@ -410,3 +502,8 @@ def bind_colearn_tools(
                 workspace=workspace,
                 retrieval_service=retrieval_service,
             )
+
+    if "web_search" in enabled:
+        ws_tool = _registry_get(registry, "web_search")
+        if isinstance(ws_tool, ColearnWebSearchTool):
+            ws_tool.bind_request(request=request)

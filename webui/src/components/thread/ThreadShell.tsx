@@ -5,6 +5,8 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
+import { ModeIndicator, LightRAGHealthBanner } from "@/components/thread/ModeIndicator";
+import { IntakeQuestionnaireCard } from "@/components/thread/IntakeQuestionnaireCard";
 import { useNanobotStream, type SendImage } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { fetchLearningSupport, setSessionMode as persistSessionMode } from "@/lib/api";
@@ -171,6 +173,9 @@ export function ThreadShell({
   const [sessionMode, setSessionMode] = useState<"chat" | "learning">("chat");
   const [learningSupport, setLearningSupport] = useState<LearningSupportPayload | null>(null);
   const [learningPromptVisible, setLearningPromptVisible] = useState(false);
+  const [showIntakeCard, setShowIntakeCard] = useState(false);
+  const intakeFlowActiveRef = useRef(false);
+  const [planConfirmVisible, setPlanConfirmVisible] = useState(false);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
@@ -193,10 +198,15 @@ export function ThreadShell({
     try {
       const support = await fetchLearningSupport(token, chatId);
       setLearningSupport(support);
+      // Show plan confirm card when plan first appears with multiple nodes
+      const planNodes = support?.learning_plan?.plan_nodes;
+      if (planNodes && planNodes.length > 1 && !planConfirmVisible) {
+        setPlanConfirmVisible(true);
+      }
     } catch {
       setLearningSupport(null);
     }
-  }, [chatId, token]);
+  }, [chatId, token, planConfirmVisible]);
 
   const handleTurnEnd = useCallback(() => {
     onTurnEnd?.();
@@ -220,8 +230,14 @@ export function ThreadShell({
   }, [chatId, historyKey]);
 
   useEffect(() => {
-    setSessionMode(session?.mode === "learning" ? "learning" : "chat");
+    const mode = session?.mode === "learning" ? "learning" : "chat";
+    setSessionMode(mode);
     setLearningPromptVisible(false);
+    // Don't reset intake card if we're in the middle of intake flow
+    if (!intakeFlowActiveRef.current) {
+      setShowIntakeCard(false);
+    }
+    intakeFlowActiveRef.current = false;
   }, [session?.chatId, session?.mode]);
 
   useEffect(() => {
@@ -238,8 +254,9 @@ export function ThreadShell({
     [goalState, learningIntent],
   );
   const goalHeaderLabel = useMemo(() => toLearningGoalLabel(composerGoalState), [composerGoalState]);
-  const showHeroComposer = messages.length === 0 && !loading;
+  const showHeroComposer = messages.length === 0 && !loading && !showIntakeCard;
   const compactBlankState = theme === "dark" && !session && !loading;
+  const hideEmptyState = showIntakeCard;
   const emptyPenguinSrc = sessionMode === "learning"
     ? "/brand/colearn_penguin_study_transparent.png"
     : "/brand/colearn_penguin_question_transparent.png";
@@ -340,7 +357,13 @@ export function ThreadShell({
     (mode: "chat" | "learning") => {
       setSessionMode(mode);
       setLearningPromptVisible(false);
-      if (mode === "chat") setLearningSupport(null);
+      if (mode === "learning" && messages.length === 0) {
+        setShowIntakeCard(true);
+      }
+      if (mode === "chat") {
+        setLearningSupport(null);
+        setShowIntakeCard(false);
+      }
       if (!chatId) return;
       void persistSessionMode(token, chatId, mode)
         .then(() => {
@@ -350,7 +373,7 @@ export function ThreadShell({
           setSessionMode((current) => current);
         });
     },
-    [chatId, refreshLearningSupport, token],
+    [chatId, messages.length, refreshLearningSupport, token],
   );
 
   const handleSessionModeRequest = useCallback(
@@ -364,9 +387,27 @@ export function ThreadShell({
     [handleSessionModeChange, sessionMode],
   );
 
+  const pendingLearningMessageRef = useRef<string | null>(null);
+
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendImage[]) => {
       if (booting) return;
+      if (looksLikeLearningPrompt(content)) {
+        // Save the message, create session first, then show intake card
+        pendingLearningMessageRef.current = content;
+        intakeFlowActiveRef.current = true;
+        setBooting(true);
+        const newId = await onCreateChat?.();
+        if (newId) {
+          setSessionMode("learning");
+          setShowIntakeCard(true);
+          setBooting(false);
+        } else {
+          intakeFlowActiveRef.current = false;
+          setBooting(false);
+        }
+        return;
+      }
       setBooting(true);
       pendingFirstRef.current = { content, images };
       const newId = await onCreateChat?.();
@@ -390,6 +431,48 @@ export function ThreadShell({
     [send, sessionMode],
   );
 
+  const handleIntakeComplete = useCallback(
+    (answers: Record<string, string>) => {
+      setShowIntakeCard(false);
+      const formatted = [
+        `背景：${answers.background || "未填写"}`,
+        `目标：${answers.goal || "未填写"}`,
+        `学习方式：${answers.style || "未填写"}`,
+      ].join("\n");
+      const originalMessage = pendingLearningMessageRef.current || "开始学习";
+      pendingLearningMessageRef.current = null;
+      const message = `${originalMessage}\n\n我的学习画像：\n${formatted}`;
+      setBooting(true);
+      pendingFirstRef.current = { content: message };
+      void onCreateChat?.().then((newId) => {
+        if (!newId) {
+          pendingFirstRef.current = null;
+          setBooting(false);
+        }
+      });
+    },
+    [onCreateChat],
+  );
+
+  const handlePlanConfirm = useCallback(
+    (nodes: Array<{ id?: string; label?: string; status?: string; summary?: string }>) => {
+      setPlanConfirmVisible(false);
+      const planText = nodes.map((n, i) => `${i + 1}. ${n.label}`).join("\n");
+      send(`确认学习计划：\n${planText}\n\n请按照这个计划开始教学。`, undefined, sendOptionsForMode("learning"));
+    },
+    [send],
+  );
+
+  const handlePlanDismiss = useCallback(() => {
+    setPlanConfirmVisible(false);
+  }, []);
+
+  const intakeOverlay = showIntakeCard ? (
+    <IntakeQuestionnaireCard
+      onComplete={handleIntakeComplete}
+    />
+  ) : null;
+
   const composer = (
     <>
       {streamError ? (
@@ -398,7 +481,7 @@ export function ThreadShell({
       {session ? (
         <ThreadComposer
           onSend={handleThreadSend}
-          disabled={!chatId}
+          disabled={!chatId || showIntakeCard}
           isStreaming={isStreaming}
           placeholder={showHeroComposer ? HERO_PLACEHOLDERS : t("thread.composer.placeholderThread")}
           modelLabel={toModelBadgeLabel(modelName)}
@@ -412,6 +495,7 @@ export function ThreadShell({
           learningPromptVisible={learningPromptVisible && sessionMode === "chat"}
           onLearningPromptAccept={() => handleSessionModeChange("learning")}
           onLearningPromptDismiss={() => setLearningPromptVisible(false)}
+          intakeOverlay={intakeOverlay}
         />
       ) : (
         <ThreadComposer
@@ -440,7 +524,7 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <h1 className="flex items-center justify-center gap-2 text-balance text-[30px] font-normal leading-tight tracking-[0.04em] text-foreground sm:text-[36px]">
+      <h1 className="flex items-center justify-center gap-2 text-balance text-4xl font-normal leading-tight tracking-[0.04em] text-foreground sm:text-4xl">
         <img
           src={emptyPenguinSrc}
           alt=""
@@ -457,7 +541,14 @@ export function ThreadShell({
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <ThreadHeader
         title={title}
-        subtitle={goalHeaderLabel}
+        subtitle={showIntakeCard ? null : goalHeaderLabel}
+        titleActions={session ? (
+          <ModeIndicator
+            mode={sessionMode}
+            learningPhase={learningSupport?.learning_phase}
+            onToggleMode={() => handleSessionModeChange(sessionMode === "learning" ? "chat" : "learning")}
+          />
+        ) : undefined}
         onToggleSidebar={onToggleSidebar}
         theme={theme}
         onToggleTheme={onToggleTheme}
@@ -465,15 +556,23 @@ export function ThreadShell({
         minimal={!session && !loading}
         titleStyle={session ? "chat" : "page"}
       />
+      {session && sessionMode === "learning" && (
+        <div className="px-4 pb-1">
+          <LightRAGHealthBanner />
+        </div>
+      )}
       <ThreadViewport
         messages={displayMessages}
         isStreaming={isStreaming}
-        emptyState={emptyState}
+        emptyState={hideEmptyState ? null : emptyState}
         composer={composer}
         scrollToBottomSignal={scrollToBottomSignal}
         conversationKey={historyKey}
         learningSupport={learningSupport}
         learningFocusLabel={learningIntent}
+        planConfirmVisible={planConfirmVisible}
+        onPlanConfirm={handlePlanConfirm}
+        onPlanDismiss={handlePlanDismiss}
       />
     </section>
   );

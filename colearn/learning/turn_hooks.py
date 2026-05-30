@@ -12,6 +12,7 @@ from colearn.learning.board_hooks import (
     extract_board_facts,
     resolve_model_preset,
 )
+from colearn.learning.constants import LearningPhase, TurnMode
 from colearn.learning.state import ReplyContract, TurnPolicy
 
 
@@ -95,6 +96,64 @@ def policy(
     retrieval_context: dict[str, Any] | None = None,
     **_: Any,
 ) -> TurnPolicy:
+    learning_phase = getattr(board, "learning_phase", LearningPhase.READY)
+
+    if learning_phase == LearningPhase.INTAKE:
+        return TurnPolicy(
+            turn_mode=TurnMode.LEARN,
+            model_preset=None,
+            main_goal="Collect user profile through guided intake conversation.",
+            restrictions=["do_not_teach_content", "ask_one_question_at_a_time"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="Continue intake: ask the next profile question.",
+            metadata={"learning_phase": "intake"},
+        )
+
+    if learning_phase == LearningPhase.REFLECT:
+        return TurnPolicy(
+            turn_mode=TurnMode.LEARN,
+            model_preset=None,
+            main_goal="Generate session summary and schedule next recall.",
+            restrictions=["do_not_introduce_new_topic"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="",
+            metadata={"learning_phase": "reflect"},
+        )
+
+    if learning_phase == LearningPhase.RECALL:
+        return TurnPolicy(
+            turn_mode=TurnMode.CHECK,
+            model_preset=None,
+            main_goal="Run quick recall questions on previously weak concepts.",
+            restrictions=["limit_to_3_questions", "do_not_introduce_new_topic"],
+            allowed_tools=["memory", "lightrag"] if memory_enabled else ["lightrag"],
+            enabled_tools=["memory", "lightrag"] if memory_enabled else ["lightrag"],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="Review weak concepts from last session.",
+            metadata={"learning_phase": "recall"},
+        )
+
+    if learning_phase == LearningPhase.DIAGNOSE:
+        return TurnPolicy(
+            turn_mode=TurnMode.CHECK,
+            model_preset=None,
+            main_goal="Assess baseline mastery with 2-3 diagnostic questions.",
+            restrictions=["do_not_teach_yet", "ask_progressively_harder"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="Continue diagnostic assessment.",
+            metadata={"learning_phase": "diagnose"},
+        )
+
     turn_mode = determine_turn_mode(board, user_message)
     restrictions: list[str] = []
 
@@ -128,6 +187,7 @@ def policy(
             "blocker_count": len(board.gaps_and_blockers.critical_blockers),
             "lightrag_enabled": "lightrag" in allowed_tools,
             "web_search_enabled": "web_search" in allowed_tools,
+            "learning_phase": str(learning_phase),
         },
     )
 

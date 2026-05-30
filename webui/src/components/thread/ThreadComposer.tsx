@@ -11,6 +11,7 @@ import {
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   Activity,
+  ArrowRight,
   ArrowUp,
   BookOpen,
   Bot,
@@ -85,6 +86,8 @@ interface ThreadComposerProps {
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
+  /** Overlay rendered inside the composer container (e.g. intake questionnaire). */
+  intakeOverlay?: React.ReactNode;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -108,27 +111,23 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 64;
 const HERO_TOPIC_SUGGESTIONS = [
   {
-    title: "\u4eba\u5de5\u667a\u80fd",
-    subtitle: "\u4ece\u57fa\u7840\u6982\u5ff5\u5f00\u59cb\uff0c\u5feb\u901f\u5efa\u7acb\u6574\u4f53\u8ba4\u77e5",
-    prompt: "\u4ec0\u4e48\u662f\u4eba\u5de5\u667a\u80fd\uff1f",
+    label: "AI \u5230\u5e95\u662f\u4ec0\u4e48\uff1f",
+    prompt: "\u7528\u6700\u7b80\u5355\u7684\u8bdd\u8bb2\u8bb2\uff0cAI \u5230\u5e95\u662f\u4ec0\u4e48\uff1f",
     icon: BrainCircuit,
   },
   {
-    title: "\u5927\u8bed\u8a00\u6a21\u578b",
-    subtitle: "\u7406\u89e3\u6a21\u578b\u5982\u4f55\u8bfb\u61c2\u3001\u9884\u6d4b\u548c\u751f\u6210\u5185\u5bb9",
-    prompt: "\u5927\u8bed\u8a00\u6a21\u578b\u662f\u600e\u4e48\u5de5\u4f5c\u7684\uff1f",
+    label: "\u5927\u8bed\u8a00\u6a21\u578b\u600e\u4e48\u4f1a\u8bf4\u8bdd\uff1f",
+    prompt: "\u5927\u8bed\u8a00\u6a21\u578b\u662f\u600e\u4e48\u5b66\u4f1a\u8bf4\u8bdd\u7684\uff1f",
     icon: Workflow,
   },
   {
-    title: "RAG \u4e0e\u77e5\u8bc6\u5e93",
-    subtitle: "\u770b\u6e05\u68c0\u7d22\u3001\u77e5\u8bc6\u5e93\u548c\u56de\u7b54\u6548\u679c\u4e4b\u95f4\u7684\u5173\u7cfb",
-    prompt: "RAG \u548c\u77e5\u8bc6\u5e93\u6709\u4ec0\u4e48\u5173\u7cfb\uff1f",
+    label: "RAG \u600e\u4e48\u5e2e\u6211\u67e5\u8d44\u6599\uff1f",
+    prompt: "RAG \u662f\u600e\u4e48\u5e2e AI \u67e5\u6211\u7684\u8d44\u6599\u7684\uff1f",
     icon: Database,
   },
   {
-    title: "AI Agent \u4efb\u52a1\u6267\u884c",
-    subtitle: "\u4e86\u89e3\u4efb\u52a1\u62c6\u89e3\u3001\u5de5\u5177\u8c03\u7528\u548c\u6267\u884c\u95ed\u73af",
-    prompt: "AI Agent \u600e\u4e48\u6267\u884c\u4efb\u52a1\uff1f",
+    label: "AI Agent \u600e\u4e48\u81ea\u5df1\u5e72\u6d3b\uff1f",
+    prompt: "AI Agent \u662f\u600e\u4e48\u81ea\u5df1\u5b8c\u6210\u4efb\u52a1\u7684\uff1f",
     icon: Bot,
   },
 ] as const;
@@ -311,51 +310,6 @@ function RunElapsedStrip({
 
   return (
     <div ref={stripWrapperRef} className="relative z-30">
-      {goalPanelOpen && canExpandGoal && markdownBody ? (
-        <div
-          ref={panelRef}
-          id="nanobot-goal-panel-root"
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="nanobot-goal-panel-title"
-          tabIndex={-1}
-          className={cn(
-            "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
-            "rounded-2xl border border-black/[0.08] bg-card shadow-[0_12px_40px_rgba(15,23,42,0.14)]",
-            "backdrop-blur-sm dark:border-white/[0.1] dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]",
-          )}
-          style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
-        >
-          <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
-            <h2
-              id="nanobot-goal-panel-title"
-              className="min-w-0 truncate text-sm font-semibold tracking-tight text-foreground"
-            >
-              {t("thread.composer.goalStateSheetTitle")}
-            </h2>
-            <button
-              type="button"
-              className={cn(
-                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              )}
-              aria-label={t("thread.composer.goalStateCloseAria")}
-              onClick={() => setGoalPanelOpen(false)}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          <div
-            id="nanobot-goal-panel-scroll"
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
-          >
-            <MarkdownText className="max-w-none text-sm leading-relaxed text-foreground/90">
-              {markdownBody}
-            </MarkdownText>
-          </div>
-        </div>
-      ) : null}
       <div
         className="flex min-h-[36px] items-center gap-2 px-3 py-2"
         role="status"
@@ -389,7 +343,6 @@ function RunElapsedStrip({
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             aria-expanded={goalPanelOpen}
-            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
             aria-label={t("thread.composer.goalStateExpandAria")}
             title={t("thread.composer.goalStateExpandAria")}
             onClick={() => setGoalPanelOpen((o) => !o)}
@@ -402,6 +355,18 @@ function RunElapsedStrip({
           </button>
         ) : null}
       </div>
+      {goalPanelOpen && canExpandGoal && markdownBody ? (
+        <div
+          ref={panelRef}
+          id="nanobot-goal-panel-root"
+          className="border-t border-border/40 px-3 pb-3 pt-2"
+          style={{ maxHeight: `${Math.round(panelMaxPx)}px`, overflowY: "auto" }}
+        >
+          <MarkdownText className="max-w-none text-sm leading-relaxed text-foreground/90">
+            {markdownBody}
+          </MarkdownText>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -471,6 +436,7 @@ export function ThreadComposer({
   onStop,
   runStartedAt = null,
   goalState,
+  intakeOverlay,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -893,13 +859,14 @@ export function ThreadComposer({
             && "goal-shell-glow ring-1 ring-[#013FF8]/35 motion-reduce:ring-[#013FF8]/25 dark:ring-[#013FF8]/45",
         )}
       >
-        {learningPromptVisible ? (
+        {intakeOverlay || null}
+        {!intakeOverlay && learningPromptVisible ? (
           <LearningPromptStrip
             onAccept={onLearningPromptAccept}
             onDismiss={onLearningPromptDismiss}
           />
         ) : null}
-        {images.length > 0 ? (
+        {!intakeOverlay && images.length > 0 ? (
           <div
             className="flex flex-wrap gap-2 px-3 pt-3"
             aria-label={t("thread.composer.attachImage")}
@@ -927,7 +894,7 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        {runStartedAt != null || goalState?.active ? (
+        {!intakeOverlay && (runStartedAt != null || goalState?.active) ? (
           <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         ) : null}
         <textarea
@@ -947,11 +914,12 @@ export function ThreadComposer({
           className={cn(
             "w-full resize-none bg-transparent",
             isHero
-              ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
+              ? "min-h-[78px] px-5 pb-2 pt-5 text-sm leading-6"
               : "min-h-[50px] px-4 pb-1.5 pt-3 text-sm leading-5",
             "placeholder:text-muted-foreground/70",
             "focus:outline-none focus-visible:outline-none",
             "disabled:cursor-not-allowed",
+            intakeOverlay && "hidden",
           )}
         />
         {inlineError ? (
@@ -969,6 +937,7 @@ export function ThreadComposer({
           className={cn(
             "flex items-center justify-between gap-2",
             isHero ? "px-4 pb-4" : "px-3 pb-2",
+            intakeOverlay && "hidden",
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
@@ -1113,36 +1082,39 @@ export function ThreadComposer({
         </div>
       </div>
       {isHero ? (
-        <div className="mt-3 grid w-full max-w-[48rem] grid-cols-4 gap-3">
-          {HERO_TOPIC_SUGGESTIONS.map((topic) => {
+        <div className="mt-4 w-full max-w-[36rem] overflow-hidden rounded-2xl">
+          {HERO_TOPIC_SUGGESTIONS.map((topic, index) => {
             const Icon = topic.icon;
             return (
               <button
-                key={topic.title}
+                key={topic.label}
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   insertHeroTopic(topic.prompt);
                 }}
                 className={cn(
-                  "flex w-full min-w-0 flex-col gap-3 rounded-[18px] border border-black/[0.08] bg-card p-3 text-left",
-                  "transition-all",
-                  "hover:-translate-y-0.5 hover:border-black/[0.16] hover:shadow-[0_10px_24px_rgba(15,23,42,0.05)]",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "dark:border-white/[0.1] dark:hover:border-white/[0.18] dark:hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]",
+                  "group flex w-full items-center gap-3 px-3 py-3 text-left",
+                  "transition-colors hover:bg-accent/40",
+                  "focus-visible:outline-none focus-visible:bg-accent/40",
+                  index > 0 && "border-t border-border/40",
                 )}
               >
-                <div className="flex h-9 w-9 items-center justify-center bg-white text-black dark:bg-white dark:text-black">
-                  <Icon className="h-4.5 w-4.5" aria-hidden />
-                </div>
-                <span className="min-w-0">
-                  <span className="block text-[13px] font-bold leading-5 text-foreground">
-                    {topic.title}
-                  </span>
-                  <span className="mt-1 block text-[12px] leading-4 text-muted-foreground">
-                    {topic.subtitle}
-                  </span>
+                <Icon
+                  className="h-[18px] w-[18px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground/80 transition-colors group-hover:text-foreground">
+                  {topic.label}
                 </span>
+                <ArrowRight
+                  className={cn(
+                    "h-[18px] w-[18px] shrink-0 text-muted-foreground",
+                    "translate-x-1 opacity-0 transition-all",
+                    "group-hover:translate-x-0 group-hover:opacity-100",
+                  )}
+                  aria-hidden
+                />
               </button>
             );
           })}

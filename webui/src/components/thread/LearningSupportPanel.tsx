@@ -1,12 +1,18 @@
 import { AlertTriangle, Link2, Search, Target } from "lucide-react";
 
 import { EmptyHint, InfoCard } from "@/components/panels/knowledge/KnowledgePanelPrimitives";
+import { MasteryProgress } from "@/components/thread/MasteryProgress";
+import { PlanConfirmCard } from "@/components/thread/PlanConfirmCard";
+import { SessionSummaryCard } from "@/components/thread/SessionSummaryCard";
 import type { LearningSupportItem, LearningSupportPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface LearningSupportPanelProps {
   support: LearningSupportPayload | null;
   focusLabel?: string | null;
+  onPlanConfirm?: (nodes: Array<{ id?: string; label?: string; status?: string; summary?: string }>) => void;
+  onPlanDismiss?: () => void;
+  planConfirmVisible?: boolean;
 }
 
 function itemSource(item: LearningSupportItem): string {
@@ -73,7 +79,7 @@ function compactText(value: string, max = 44): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-export function LearningSupportPanel({ support, focusLabel }: LearningSupportPanelProps) {
+export function LearningSupportPanel({ support, focusLabel, onPlanConfirm, onPlanDismiss, planConfirmVisible }: LearningSupportPanelProps) {
   const items = support?.prompt_support_bundle?.length
     ? support.prompt_support_bundle
     : support?.retrieval_hits ?? [];
@@ -88,14 +94,39 @@ export function LearningSupportPanel({ support, focusLabel }: LearningSupportPan
   const goal = focusLabel?.trim() || (isStaleProfileGoal(rawGoal) ? "" : rawGoal);
   const currentProgress = board?.current_progress?.trim() || currentNode?.label?.trim();
   const completedCount = board?.completed_nodes?.length ?? 0;
+  const totalNodes = plan?.plan_nodes?.length ?? 0;
   const pendingChecks = plan?.pending_checks?.length ?? 0;
   const blockerCount = (board?.blockers?.length ?? 0) + (board?.objections?.length ?? 0);
   const hasBoardSummary = Boolean(goal || currentProgress || completedCount || pendingChecks || blockerCount);
+  const masteryLevel = support?.mastery_level;
+  const sessionSummary = support?.session_summary;
 
-  if (visibleItems.length === 0 && misses.length === 0 && !nextHint && !hasBoardSummary) return null;
+  if (visibleItems.length === 0 && misses.length === 0 && !nextHint && !hasBoardSummary && !sessionSummary && !planConfirmVisible) return null;
 
   return (
     <aside aria-label="本轮参考依据" className="mb-3 min-w-0 max-w-full space-y-3 overflow-hidden px-3 py-2.5 text-sm text-muted-foreground">
+      {planConfirmVisible && plan?.plan_nodes && plan.plan_nodes.length > 1 && onPlanConfirm && onPlanDismiss ? (
+        <PlanConfirmCard
+          goal={goal}
+          nodes={plan.plan_nodes}
+          onConfirm={onPlanConfirm}
+          onDismiss={onPlanDismiss}
+        />
+      ) : null}
+
+      {sessionSummary && (sessionSummary.topics_covered?.length || sessionSummary.concepts_mastered?.length) ? (
+        <SessionSummaryCard summary={sessionSummary} />
+      ) : null}
+
+      {masteryLevel != null && masteryLevel > 0 ? (
+        <MasteryProgress
+          level={masteryLevel}
+          completedNodes={completedCount}
+          totalNodes={totalNodes}
+          className="px-1"
+        />
+      ) : null}
+
       <InfoCard
         title="本轮依据"
         actions={

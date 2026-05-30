@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time as _time
 from dataclasses import replace
 from typing import Any
 
 from colearn.knowledge import KnowledgeWorkspaceService
+from colearn.learning.constants import LearningPhase
 from colearn.learning.state_hooks import build_learning_board, build_state_snapshot
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
@@ -30,6 +32,52 @@ LEARNING_INTENT_KEYWORDS = (
     "study",
     "lesson",
 )
+
+SESSION_END_KEYWORDS = (
+    "结束",
+    "今天就到这",
+    "到此为止",
+    "下次再学",
+    "done",
+    "stop",
+    "that's all",
+    "end session",
+    "bye",
+    "再见",
+)
+
+
+def _normalize_session_mode(value: str | None) -> str:
+    return "learning" if str(value or "").strip().lower() == "learning" else "chat"
+
+
+def _looks_like_learning_intent(message: str) -> bool:
+    lowered = str(message or "").strip().lower()
+    return bool(lowered) and any(keyword in lowered for keyword in LEARNING_INTENT_KEYWORDS)
+
+
+def _looks_like_session_end(message: str) -> bool:
+    lowered = str(message or "").strip().lower()
+    return bool(lowered) and any(keyword in lowered for keyword in SESSION_END_KEYWORDS)
+
+
+def _has_profile(session: LearningSession) -> bool:
+    return bool(session.profile)
+
+
+def _recall_is_due(session: LearningSession) -> bool:
+    recall = session.next_recall
+    if not recall:
+        return False
+    next_at = recall.get("next_recall_at", "")
+    if not next_at:
+        return False
+    from datetime import datetime, timezone
+    try:
+        due = datetime.fromisoformat(next_at)
+        return datetime.now(timezone.utc) >= due
+    except (ValueError, TypeError):
+        return False
 
 
 def _normalize_session_mode(value: str | None) -> str:
@@ -116,6 +164,12 @@ class PreflightStage:
             session_mode = "learning"
         session.mode = session_mode
         project.mode = session_mode
+        learning_phase = self._resolve_learning_phase(
+            session=session,
+            session_mode=session_mode,
+            user_message=user_message,
+        )
+        session.learning_phase = learning_phase
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         source_profile = await self.source_preflight.run_async(
             project_id=project.project_id,
@@ -126,6 +180,7 @@ class PreflightStage:
             session=session,
             latest_review=project.latest_review,
         )
+        board = replace(board, learning_phase=LearningPhase(learning_phase))
         snapshot = build_state_snapshot(
             project=project,
             session=session,
@@ -142,6 +197,23 @@ class PreflightStage:
             "snapshot": snapshot,
             "session_mode": session_mode,
         }
+
+    def _resolve_learning_phase(
+        self,
+        *,
+        session: LearningSession,
+        session_mode: str,
+        user_message: str,
+    ) -> str:
+        if session_mode != "learning":
+            return LearningPhase.READY
+        if not _has_profile(session) and len(session.messages) == 0:
+            return LearningPhase.INTAKE
+        if _recall_is_due(session) and len(session.messages) == 0:
+            return LearningPhase.RECALL
+        if _looks_like_session_end(user_message):
+            return LearningPhase.REFLECT
+        return session.learning_phase or LearningPhase.READY
 
     def _sync_project_retrieval_profile(
         self,

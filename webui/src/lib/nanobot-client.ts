@@ -102,6 +102,7 @@ export interface NanobotClientLike {
     media?: OutboundMedia[],
     options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void;
+  cancelTurn(chatId: string, turnId?: string): void;
 }
 
 export interface NanobotClientOptions {
@@ -326,6 +327,14 @@ export class NanobotClient implements NanobotClientLike {
       webui: true,
     };
     this.queueSend(frame);
+  }
+
+  cancelTurn(chatId: string, turnId?: string): void {
+    this.queueSend({
+      type: "cancel_turn",
+      chat_id: chatId,
+      turn_id: turnId || chatId,
+    } as unknown as Outbound);
   }
 
   // -- internals ---------------------------------------------------------
@@ -583,6 +592,8 @@ export class OfflineNanobotClient implements NanobotClientLike {
     _media?: OutboundMedia[],
     _options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void {}
+
+  cancelTurn(_chatId: string, _turnId?: string): void {}
 
   private setStatus(status: ConnectionStatus): void {
     if (this.status_ === status) return;

@@ -266,7 +266,7 @@ export function SettingsView({
           </button>
 
           <div className="mb-8">
-            <h1 className="text-[32px] font-bold leading-tight tracking-[-0.03em] text-black dark:text-white sm:text-[40px]">
+            <h1 className="text-4xl font-bold leading-tight tracking-[-0.03em] text-black dark:text-white sm:text-4xl">
               设置
             </h1>
           </div>
@@ -570,7 +570,7 @@ function ProviderConnectionsPanel({
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon provider={provider.name} />
-            <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
+            <span className="block truncate text-sm font-semibold leading-5 text-foreground">
               {provider.label}
             </span>
           </span>

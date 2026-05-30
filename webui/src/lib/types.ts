@@ -111,6 +111,10 @@ export interface LearningSupportItem {
 export interface LearningSupportPayload {
   retrieval_active?: boolean;
   turn_mode?: string;
+  learning_phase?: string;
+  session_mode?: "chat" | "learning";
+  mastery_level?: number;
+  learning_duration_minutes?: number;
   learning_plan?: {
     goal?: string;
     current_node_id?: string;
@@ -130,6 +134,17 @@ export interface LearningSupportPayload {
     objections?: string[];
     evidence_refs?: string[];
     continuation?: string;
+  };
+  session_summary?: {
+    topics_covered?: string[];
+    concepts_mastered?: string[];
+    concepts_blocked?: string[];
+    duration_minutes?: number;
+    next_focus?: string;
+  };
+  next_recall?: {
+    next_recall_at?: string;
+    recall_items?: Array<{ concept: string; priority: string }>;
   };
   prompt_support_bundle: LearningSupportItem[];
   retrieval_hits: LearningSupportItem[];

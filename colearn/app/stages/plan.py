@@ -6,6 +6,7 @@ from dataclasses import asdict, replace
 import re
 from typing import Any
 
+from colearn.learning.constants import LearningPhase, NodeStatus
 from colearn.learning.state import (
     LearningBoard,
     LearningPlan,
@@ -28,7 +29,15 @@ _REPLAN_MARKERS = (
 
 
 class PlanStage:
-    """Generate a small, stable plan only when the board needs one."""
+    """Generate a small, stable plan only when the board needs one.
+
+    When a retrieval service is available, queries LightRAG for course
+    structure to produce a more intelligent plan. Falls back to the
+    4-step template when retrieval is unavailable.
+    """
+
+    def __init__(self, *, retrieval_service: Any = None) -> None:
+        self._retrieval_service = retrieval_service
 
     def run(self, ctx: TurnContext) -> TurnContext:
         if ctx.session_mode != "learning" or ctx.board is None or ctx.project is None:
@@ -38,7 +47,7 @@ class PlanStage:
             ctx.plan_stage = {"status": "skipped", "reason": "plan_exists"}
             return ctx
 
-        plan = self._build_plan(ctx)
+        plan = self._build_intelligent_plan(ctx) or self._build_plan(ctx)
         first_node = plan.plan_nodes[0] if plan.plan_nodes else LearningPlanNode()
         learning_board = LearningBoard(
             current_progress=first_node.label,
@@ -52,13 +61,21 @@ class PlanStage:
             ],
             continuation=f"Continue with {first_node.label}" if first_node.label else ctx.board.continuation.next_prompt_hint,
         )
+        mastery = ctx.board.student_snapshot.mastery_level
+        nodes_to_skip = self._skip_mastered_nodes(plan.plan_nodes, mastery)
+        active_node = first_node
+        for node in plan.plan_nodes:
+            if node.id not in nodes_to_skip:
+                active_node = node
+                break
         ctx.board = replace(
             ctx.board,
             current_turn_mode="LEARN",
+            learning_phase=LearningPhase.READY,
             current_progress=ProgressFacts(
-                active_node_id=first_node.id,
-                active_node_label=first_node.label,
-                completed_node_ids=list(ctx.board.current_progress.completed_node_ids),
+                active_node_id=active_node.id,
+                active_node_label=active_node.label,
+                completed_node_ids=list(ctx.board.current_progress.completed_node_ids) + list(nodes_to_skip),
                 path_node_ids=[node.id for node in plan.plan_nodes if node.id],
             ),
             learning_plan=plan,
@@ -67,8 +84,8 @@ class PlanStage:
         if ctx.snapshot is not None:
             ctx.snapshot = replace(
                 ctx.snapshot,
-                active_node_id=first_node.id,
-                active_node_label=first_node.label,
+                active_node_id=active_node.id,
+                active_node_label=active_node.label,
             )
         ctx.project.goal = plan.goal
         ctx.plan_patch = asdict(plan)
@@ -76,6 +93,7 @@ class PlanStage:
             "status": "planned",
             "reason": "missing_or_replan_requested",
             "node_count": len(plan.plan_nodes),
+            "skipped_nodes": len(nodes_to_skip),
         }
         return ctx
 
@@ -92,6 +110,70 @@ class PlanStage:
             return True
         return not str(plan.current_node_id or "").strip()
 
+    def _build_intelligent_plan(self, ctx: TurnContext) -> LearningPlan | None:
+        """Try to build a plan using LightRAG course structure."""
+        if self._retrieval_service is None:
+            return None
+        client = getattr(self._retrieval_service, "_lightrag_client", None) or getattr(
+            self._retrieval_service, "lightrag_client", None
+        )
+        if client is None or not getattr(client, "enabled", False):
+            return None
+        goal = self._goal_text(ctx)
+        try:
+            result = client.retrieve_project_context(
+                project_id=ctx.project.project_id if ctx.project else "",
+                query=f"course structure outline for: {goal}",
+                mode="hybrid",
+                top_k=8,
+            )
+            if not result or getattr(result, "retrieval_status", "") != "success":
+                return None
+            chunks = getattr(result, "chunks", []) or []
+            if not chunks:
+                return None
+            return self._plan_from_chunks(goal, chunks, ctx)
+        except (RuntimeError, ValueError, OSError, ConnectionError, AttributeError):
+            return None
+
+    def _plan_from_chunks(self, goal: str, chunks: list, ctx: TurnContext) -> LearningPlan | None:
+        """Extract plan nodes from retrieval chunks."""
+        base_id = self._slug(goal) or str(ctx.project.project_id or "learning")
+        nodes: list[LearningPlanNode] = []
+        seen_labels: set[str] = set()
+        for i, chunk in enumerate(chunks[:8]):
+            label = ""
+            if isinstance(chunk, dict):
+                label = str(chunk.get("title") or chunk.get("label") or chunk.get("content", "")[:60]).strip()
+            elif hasattr(chunk, "title"):
+                label = str(getattr(chunk, "title", "") or "").strip()
+            if not label or label in seen_labels:
+                continue
+            seen_labels.add(label)
+            nodes.append(LearningPlanNode(
+                id=f"{base_id}-{len(nodes) + 1}",
+                label=f"{goal}: {label}" if len(label) < 40 else label,
+                status=NodeStatus.CURRENT if len(nodes) == 0 else NodeStatus.PENDING,
+                depth=len(nodes),
+                summary=label,
+            ))
+        if len(nodes) < 2:
+            return None
+        return LearningPlan(
+            goal=goal,
+            plan_nodes=nodes,
+            current_node_id=nodes[0].id,
+            review_queue=[nodes[1].id] if len(nodes) > 1 else [],
+            pending_checks=[nodes[-1].id],
+        )
+
+    def _skip_mastered_nodes(self, nodes: list[LearningPlanNode], mastery: float) -> set[str]:
+        """Skip early nodes if mastery is high enough."""
+        if mastery < 0.5 or len(nodes) <= 2:
+            return set()
+        skip_count = min(len(nodes) - 2, int(mastery * len(nodes) * 0.3))
+        return {nodes[i].id for i in range(skip_count)}
+
     def _build_plan(self, ctx: TurnContext) -> LearningPlan:
         goal = self._goal_text(ctx)
         base_id = self._slug(goal) or str(ctx.project.project_id or "learning")
@@ -105,7 +187,7 @@ class PlanStage:
             LearningPlanNode(
                 id=f"{base_id}-{idx + 1}",
                 label=label,
-                status="current" if idx == 0 else ("check" if idx == 3 else "pending"),
+                status=NodeStatus.CURRENT if idx == 0 else (NodeStatus.PENDING),
                 depth=idx,
                 summary=label,
             )
@@ -130,11 +212,12 @@ class PlanStage:
                     break
             if message:
                 return message[:120]
-        project_goal = str(getattr(ctx.project, "goal", "") or "").strip()
+        project = ctx.project
+        project_goal = str((project.goal if project else "") or "").strip()
         if project_goal:
             return project_goal[:120]
-        project_title = str(getattr(ctx.project, "title", "") or "").strip()
-        project_id = str(getattr(ctx.project, "project_id", "") or "").strip()
+        project_title = str((project.title if project else "") or "").strip()
+        project_id = str((project.project_id if project else "") or "").strip()
         if project_title and project_title not in {project_id, "default-project", "CoLearn"}:
             return project_title[:120]
         for prefix in ("i want to learn", "learn", "study"):

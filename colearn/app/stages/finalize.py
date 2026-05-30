@@ -167,6 +167,17 @@ class FinalizeStage:
             request=request,
             result=result,
         )
+        runtime_v2 = dict(payload.get("runtime_v2") or {})
+        board_after = getattr(result, "board_after", None)
+        if board_after is not None:
+            runtime_v2["learning_phase"] = str(getattr(board_after, "learning_phase", "ready"))
+            snapshot = getattr(board_after, "student_snapshot", None)
+            if snapshot is not None:
+                runtime_v2["mastery_level"] = float(getattr(snapshot, "mastery_level", 0.0))
+        metadata = dict(getattr(request, "metadata", {}) or {})
+        if metadata.get("learning_phase"):
+            runtime_v2.setdefault("learning_phase", metadata["learning_phase"])
+        payload["runtime_v2"] = runtime_v2
         last_turn_result = {
             "final_text": result.final_text,
             "warnings": warnings,

@@ -25,6 +25,9 @@ interface ThreadViewportProps {
   conversationKey?: string | null;
   learningSupport?: LearningSupportPayload | null;
   learningFocusLabel?: string | null;
+  onPlanConfirm?: (nodes: Array<{ id?: string; label?: string; status?: string; summary?: string }>) => void;
+  onPlanDismiss?: () => void;
+  planConfirmVisible?: boolean;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -41,6 +44,9 @@ export function ThreadViewport({
   conversationKey = null,
   learningSupport = null,
   learningFocusLabel = null,
+  onPlanConfirm,
+  onPlanDismiss,
+  planConfirmVisible = false,
 }: ThreadViewportProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -254,12 +260,21 @@ export function ThreadViewport({
                 </div>
               </div>
             </div>
-          ) : (
+          ) : emptyState ? (
             <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[72rem] flex-col px-4">
               <div className="flex w-full flex-1 items-start justify-center pt-[20vh]">
                 <div className="flex w-full max-w-[48rem] flex-col gap-6">
                   {emptyState}
                   <div className="w-full">{composer}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
+              <div className="flex-1" />
+              <div className="sticky bottom-0 z-10 mt-auto bg-background">
+                <div className="px-4 pb-3">
+                  {composer}
                 </div>
               </div>
             </div>
@@ -314,7 +329,13 @@ export function ThreadViewport({
             style={{ width: learningPanelWidth }}
           >
             <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3">
-              <LearningSupportPanel support={learningSupport} focusLabel={learningFocusLabel} />
+              <LearningSupportPanel
+                support={learningSupport}
+                focusLabel={learningFocusLabel}
+                onPlanConfirm={onPlanConfirm}
+                onPlanDismiss={onPlanDismiss}
+                planConfirmVisible={planConfirmVisible}
+              />
             </div>
           </aside>
         </>

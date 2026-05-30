@@ -404,9 +404,15 @@ export async function fetchLearningSupport(
   );
   if (!retrievalActive && !hasLearningState) return null;
   if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0 && !hasLearningState) return null;
+  const sessionData = session as Record<string, unknown>;
   return {
     retrieval_active: retrievalActive,
     turn_mode: typeof runtime.turn_mode === "string" ? runtime.turn_mode : undefined,
+    learning_phase: typeof runtime.learning_phase === "string" ? runtime.learning_phase : undefined,
+    session_mode: (sessionData.mode === "learning" || sessionData.mode === "chat") ? sessionData.mode : undefined,
+    mastery_level: typeof runtime.mastery_level === "number" ? runtime.mastery_level : undefined,
+    session_summary: runtime.session_summary as LearningSupportPayload["session_summary"] | undefined,
+    next_recall: runtime.next_recall as LearningSupportPayload["next_recall"] | undefined,
     learning_plan: learningPlan,
     learning_board: learningBoard,
     prompt_support_bundle: promptSupport,
