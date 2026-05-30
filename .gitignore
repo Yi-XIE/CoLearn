@@ -66,3 +66,15 @@ Thumbs.db
 # Editor/application backup files
 *.bkp
 .$*
+
+# Claude Code
+.claude/
+
+# Vite cache
+.vite/
+
+# Progress notes
+PROGRESS.md
+
+# Temp files
+tmp*.json
