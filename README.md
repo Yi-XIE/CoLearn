@@ -9,6 +9,7 @@ This repository contains the standalone CoLearn plugin runtime and the NanoBot h
 - Blackboard and session state integration
 - Wiki-backed learning flow
 - Slash command and UI extension contracts
+- NanoBot reference snapshot under `third_party/nanobot-0.2.1/`
 
 ## Naming
 
@@ -22,3 +23,9 @@ This repository contains the standalone CoLearn plugin runtime and the NanoBot h
 
 This repository is being extracted from the main CoLearn product line so the plugin can evolve as an independent deliverable while still targeting NanoBot as the first and only host.
 
+## Third-party Reference
+
+`third_party/nanobot-0.2.1/` is a checked-in host reference snapshot for interface lookup and integration validation.
+
+- Treat it as read-only reference code.
+- Keep CoLearn plugin implementation under `colearn/`.

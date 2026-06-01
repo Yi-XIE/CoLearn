@@ -16,7 +16,7 @@ build/
 # Runtime state
 .colearn/
 
-# Local reference copies / vendor drops
-nanobot-0.2.1/
+# Local vendor drops except the checked-in NanoBot reference snapshot
 third_party/
-
+!third_party/
+!third_party/nanobot-0.2.1/
