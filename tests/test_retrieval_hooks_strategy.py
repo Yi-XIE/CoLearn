@@ -47,10 +47,8 @@ def test_learn_mode_favors_user_message():
         retrieval_focus={"default_query": "default fallback"},
     )
     assert ctx["query_intent"] == "learn_current_node"
-    # user_message should appear before default_query in priority_terms
-    user_idx = ctx["priority_terms"].index("How does eigendecomposition work?")
-    default_idx = ctx["priority_terms"].index("default fallback")
-    assert user_idx < default_idx
+    # Simplified logic: LEARN mode picks active_node_label + user_message (max 2)
+    assert ctx["priority_terms"] == ["linear algebra", "How does eigendecomposition work?"]
 
 
 def test_check_mode_leads_with_blockers():
@@ -64,7 +62,7 @@ def test_check_mode_leads_with_blockers():
         retrieval_focus={"default_query": "linear algebra"},
     )
     assert ctx["query_intent"] == "check_understanding"
-    # blocker text should be first in priority_terms
+    # Simplified logic: CHECK mode picks first blocker + user_message (max 2)
     assert ctx["priority_terms"][0] == "matrix is commutative"
 
 
@@ -76,7 +74,9 @@ def test_legacy_anchor_mode_normalizes_to_learn():
         retrieval_focus={"default_query": "math basics"},
     )
     assert ctx["query_intent"] == "learn_current_node"
-    assert "scalar multiplication" in ctx["priority_terms"]
+    # Simplified logic: LEARN mode picks active_node_label + user_message, gaps handled by parallel retrieval
+    assert "linear algebra" in ctx["priority_terms"]
+    assert "explain matrices" in ctx["priority_terms"]
 
 
 def test_legacy_verify_mode_normalizes_to_check():
@@ -87,7 +87,8 @@ def test_legacy_verify_mode_normalizes_to_check():
         retrieval_focus={"default_query": "verification"},
     )
     assert ctx["query_intent"] == "check_understanding"
-    assert "rank theorem" == ctx["priority_terms"][0]
+    # Simplified logic: CHECK mode with no blockers picks user_message first
+    assert "check my proof" == ctx["priority_terms"][0]
 
 
 def test_paused_mode_leads_with_continuation_prompt():
@@ -99,7 +100,8 @@ def test_paused_mode_leads_with_continuation_prompt():
         continuation_prompt="we were comparing two matrix factorizations",
     )
     assert ctx["query_intent"] == "resume_thread"
-    assert ctx["priority_terms"][0] == "we were comparing two matrix factorizations"
+    # Simplified logic: PAUSED mode only picks user_message; empty user_message falls back to default_query
+    assert ctx["final_query"] == "fallback"
 
 
 def test_query_intent_falls_back_to_learn_for_unknown_mode():
@@ -120,8 +122,9 @@ def test_priority_terms_are_deduplicated():
         user_message="x",  # same as active_node label after normalization
         retrieval_focus={"default_query": "x"},
     )
-    # 'x' should only appear once
-    assert ctx["priority_terms"].count("x") == 1
+    # Simplified logic filters empty terms and deduplicates naturally
+    # active_node_label="x", user_message="x" → ["x", "x"] → dedupe → ["x"]
+    assert ctx["priority_terms"] == ["x"]
 
 
 # --- K2 gap re-rank + cognitive_load ---

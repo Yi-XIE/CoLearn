@@ -1,4 +1,5 @@
-import { AlertTriangle, Link2, Search, Target } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Link2, Search, Target, XCircle } from "lucide-react";
+import { useState } from "react";
 
 import { EmptyHint, InfoCard } from "@/components/panels/knowledge/KnowledgePanelPrimitives";
 import { MasteryProgress } from "@/components/thread/MasteryProgress";
@@ -13,6 +14,8 @@ interface LearningSupportPanelProps {
   onPlanConfirm?: (nodes: Array<{ id?: string; label?: string; status?: string; summary?: string }>) => void;
   onPlanDismiss?: () => void;
   planConfirmVisible?: boolean;
+  sessionId?: string | null;
+  onBoardCorrectionApplied?: () => void;
 }
 
 function itemSource(item: LearningSupportItem): string {
@@ -79,7 +82,55 @@ function compactText(value: string, max = 44): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-export function LearningSupportPanel({ support, focusLabel, onPlanConfirm, onPlanDismiss, planConfirmVisible }: LearningSupportPanelProps) {
+/**
+ * Single source of truth for whether the learning support panel has anything to
+ * render. Used both by the panel itself (to short-circuit to null) and by the
+ * viewport mount gate, so the two never drift apart. Non-retrieval signals
+ * (session summary, mastery, board/plan summary, plan confirm) count too — these
+ * cards must show in memory-only phases (INTAKE/REFLECT) where retrieval is empty.
+ */
+export function hasRenderableSupport(
+  support: LearningSupportPayload | null,
+  planConfirmVisible = false,
+): boolean {
+  if (!support) return Boolean(planConfirmVisible);
+  const items = support.prompt_support_bundle?.length
+    ? support.prompt_support_bundle
+    : support.retrieval_hits ?? [];
+  const visibleItems = items.slice(0, 4);
+  const misses = support.retrieval_misses ?? [];
+  const nextHint = nextRetrievalHint(support);
+  const plan = support.learning_plan;
+  const board = support.learning_board;
+  const rawGoal = plan?.goal?.trim() ?? "";
+  const goal = isStaleProfileGoal(rawGoal) ? "" : rawGoal;
+  const currentNode = plan?.plan_nodes?.find((node) => node.id === plan.current_node_id);
+  const currentProgress = board?.current_progress?.trim() || currentNode?.label?.trim();
+  const completedCount = board?.completed_nodes?.length ?? 0;
+  const pendingChecks = plan?.pending_checks?.length ?? 0;
+  const blockerCount = (board?.blockers?.length ?? 0) + (board?.objections?.length ?? 0);
+  const hasBoardSummary = Boolean(goal || currentProgress || completedCount || pendingChecks || blockerCount);
+  const sessionSummary = support.session_summary;
+  const hasSessionSummary = Boolean(
+    sessionSummary
+      && (sessionSummary.topics_covered?.length || sessionSummary.concepts_mastered?.length),
+  );
+  const masteryLevel = support.mastery_level;
+  const hasMastery = masteryLevel != null && masteryLevel > 0;
+  return (
+    visibleItems.length > 0
+    || misses.length > 0
+    || Boolean(nextHint)
+    || hasBoardSummary
+    || hasSessionSummary
+    || hasMastery
+    || Boolean(planConfirmVisible)
+  );
+}
+
+export function LearningSupportPanel({ support, focusLabel, onPlanConfirm, onPlanDismiss, planConfirmVisible, sessionId, onBoardCorrectionApplied }: LearningSupportPanelProps) {
+  const [correctionLoading, setCorrectionLoading] = useState<string | null>(null);
+
   const items = support?.prompt_support_bundle?.length
     ? support.prompt_support_bundle
     : support?.retrieval_hits ?? [];
@@ -101,7 +152,44 @@ export function LearningSupportPanel({ support, focusLabel, onPlanConfirm, onPla
   const masteryLevel = support?.mastery_level;
   const sessionSummary = support?.session_summary;
 
-  if (visibleItems.length === 0 && misses.length === 0 && !nextHint && !hasBoardSummary && !sessionSummary && !planConfirmVisible) return null;
+  const handleCorrection = async (eventType: "NODE_COMPLETED" | "BLOCKER_FOUND") => {
+    if (!sessionId || correctionLoading) return;
+
+    const confirmMessage = eventType === "NODE_COMPLETED"
+      ? "确认标记为已完成？这将影响后续学习路径。"
+      : "确认标记为阻塞？系统会重点讲解这部分。";
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setCorrectionLoading(eventType);
+
+    try {
+      const response = await fetch(`/api/v1/sessions/${sessionId}/board_corrections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_type: eventType,
+          node_id: currentNode?.id || null,
+          reason: eventType === "BLOCKER_FOUND" ? "用户标记：还没理解这个概念" : "用户标记已掌握",
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+        throw new Error(error.detail || "Failed to apply correction");
+      }
+
+      // Trigger refresh
+      onBoardCorrectionApplied?.();
+    } catch (error) {
+      console.error("Board correction failed:", error);
+      alert(`纠错失败: ${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setCorrectionLoading(null);
+    }
+  };
+
+  if (!hasRenderableSupport(support, planConfirmVisible)) return null;
 
   return (
     <aside aria-label="本轮参考依据" className="mb-3 min-w-0 max-w-full space-y-3 overflow-hidden px-3 py-2.5 text-sm text-muted-foreground">
@@ -165,6 +253,38 @@ export function LearningSupportPanel({ support, focusLabel, onPlanConfirm, onPla
                     {countLabel("阻塞", blockerCount)}
                   </span>
                 </div>
+                {currentProgress && sessionId ? (
+                  <div className="mt-3 flex gap-2 border-t border-border/40 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => handleCorrection("BLOCKER_FOUND")}
+                      disabled={correctionLoading !== null}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                        "border border-border/60 bg-background/50 text-muted-foreground",
+                        "hover:border-orange-500/60 hover:bg-orange-500/10 hover:text-orange-600",
+                        "disabled:opacity-50 disabled:cursor-not-allowed",
+                      )}
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      {correctionLoading === "BLOCKER_FOUND" ? "处理中..." : "还没懂"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCorrection("NODE_COMPLETED")}
+                      disabled={correctionLoading !== null}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                        "border border-border/60 bg-background/50 text-muted-foreground",
+                        "hover:border-green-500/60 hover:bg-green-500/10 hover:text-green-600",
+                        "disabled:opacity-50 disabled:cursor-not-allowed",
+                      )}
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {correctionLoading === "NODE_COMPLETED" ? "处理中..." : "已经懂了"}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

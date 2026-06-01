@@ -49,6 +49,7 @@ class RetrievalService:
         session: LearningSession,
         query: str,
         libraries: list[SourceLibrary] | None = None,
+        top_k: int | None = None,
     ) -> RetrievalBundle:
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         return self.build_bundle_for_source_refs(
@@ -56,6 +57,7 @@ class RetrievalService:
             query=query,
             source_refs=source_refs,
             libraries=libraries,
+            top_k=top_k,
         )
 
     def build_bundle_for_source_refs(
@@ -65,6 +67,7 @@ class RetrievalService:
         query: str,
         source_refs: list[str],
         libraries: list[SourceLibrary] | None = None,
+        top_k: int | None = None,
     ) -> RetrievalBundle:
         return asyncio.run(
             self.async_build_bundle_for_source_refs(
@@ -72,6 +75,7 @@ class RetrievalService:
                 query=query,
                 source_refs=source_refs,
                 libraries=libraries,
+                top_k=top_k,
             )
         )
 
@@ -82,6 +86,7 @@ class RetrievalService:
         query: str,
         source_refs: list[str],
         libraries: list[SourceLibrary] | None = None,
+        top_k: int | None = None,
     ) -> RetrievalBundle:
         if not source_refs:
             return empty_retrieval_bundle(
@@ -101,7 +106,7 @@ class RetrievalService:
             project_id=project_id,
             query=query,
             source_refs=normalized_refs,
-            top_k=Defaults.RETRIEVAL_TOP_K,
+            top_k=top_k if top_k is not None else Defaults.RETRIEVAL_TOP_K,
         )
         bundle = self._bundle_from_lightrag_result(
             lightrag_result=lightrag_result,

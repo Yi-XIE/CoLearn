@@ -186,6 +186,7 @@
     },
     "empty": {
       "greeting": "What can I do for you?",
+      "subtitle": "Tell me where you'd like to start.",
       "quickActions": {
         "plan": {
           "title": "Create a project plan",
@@ -401,6 +402,7 @@
       "phase": {
         "intake": "Onboarding",
         "diagnose": "Diagnosing",
+        "ready": "Learning",
         "reflect": "Wrapping up",
         "recall": "Reviewing"
       }

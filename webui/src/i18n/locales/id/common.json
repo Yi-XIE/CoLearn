@@ -155,6 +155,7 @@
     "empty": {
       "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru.",
       "greeting": "Apa yang bisa saya bantu?",
+      "subtitle": "Beri tahu saya dari mana Anda ingin memulai.",
       "quickActions": {
         "plan": {
           "title": "Buat rencana proyek",

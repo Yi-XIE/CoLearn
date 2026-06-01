@@ -186,6 +186,7 @@
     },
     "empty": {
       "greeting": "今天想学什么？",
+      "subtitle": "随便聊聊，我帮你理清思路",
       "quickActions": {
         "plan": {
           "title": "创建项目计划",
@@ -401,6 +402,7 @@
       "phase": {
         "intake": "引导中",
         "diagnose": "诊断中",
+        "ready": "学习中",
         "reflect": "总结中",
         "recall": "复习中"
       }

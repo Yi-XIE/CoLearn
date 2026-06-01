@@ -27,6 +27,9 @@ MODE_SUPPORT_PRIORITIES: dict[str, list[str]] = {
 # Per-mode query-build strategy: which signals to favor when composing the
 # LightRAG query, and what intent label to attach so downstream re-rankers
 # know what kind of evidence the turn is asking for.
+# `intent` drives the query context label; `favor` is retained for reference
+# (the simplified build_retrieval_query_context now uses mode-specific term
+# selection rather than the favor-ordered signal pool).
 MODE_QUERY_STRATEGY: dict[str, dict[str, Any]] = {
     "LEARN": {
         "favor": ["user_message", "active_node_label", "default_query"],
@@ -93,7 +96,12 @@ def build_retrieval_query_context(
     retrieval_focus: dict[str, Any],
     continuation_prompt: str = "",
 ) -> dict[str, Any]:
-    """Build a query context whose final_query reflects the turn_mode's intent."""
+    """Build a query context whose final_query reflects the turn_mode's intent.
+
+    Simplified query construction: pick the most relevant 1-2 terms per turn_mode
+    rather than concatenating all available signals. Parallel retrieval covers
+    blockers/gaps separately, so the main query can stay focused.
+    """
     blockers = [
         {"id": blocker.id, "desc": blocker.desc, "type": blocker.type}
         for blocker in list(board.gaps_and_blockers.critical_blockers or [])
@@ -114,17 +122,32 @@ def build_retrieval_query_context(
         "continuation_prompt": str(continuation_prompt or board.continuation.next_prompt_hint or "").strip(),
     }
 
-    favored = strategy["favor"]
-    rest = [key for key in signal_pool.keys() if key not in favored]
-    ordered_keys = [*favored, *rest]
+    # Simplified query construction: mode-specific selection, max 2 terms
+    if turn_mode == "LEARN":
+        # LEARN: focus on current node + user's question
+        priority_terms = [
+            signal_pool.get("active_node_label", ""),
+            signal_pool.get("user_message", ""),
+        ]
+    elif turn_mode == "CHECK":
+        # CHECK: focus on first blocker or user's question
+        first_blocker = blockers[0]["desc"] if blockers else ""
+        priority_terms = [
+            first_blocker or signal_pool.get("user_message", ""),
+            signal_pool.get("user_message", "") if first_blocker else "",
+        ]
+    else:  # PAUSED
+        # PAUSED: only user's question
+        priority_terms = [signal_pool.get("user_message", "")]
 
-    priority_terms: list[str] = []
-    for key in ordered_keys:
-        value = signal_pool.get(key, "")
-        if value and value not in priority_terms:
-            priority_terms.append(value)
+    # Filter empty terms, deduplicate, limit to 2
+    deduped_terms: list[str] = []
+    for term in priority_terms:
+        if term and term not in deduped_terms:
+            deduped_terms.append(term)
+    priority_terms = deduped_terms[:2]
+    final_query = " | ".join(priority_terms) if priority_terms else signal_pool.get("default_query", "")
 
-    final_query = " | ".join(priority_terms)
     return {
         "turn_mode": turn_mode,
         "query_intent": strategy["intent"],

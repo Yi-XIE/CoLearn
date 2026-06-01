@@ -469,6 +469,26 @@ def register_colearn_tools(
     elif registry.has("web_search"):
         registry.unregister("web_search")
 
+    # Register learning_events tool for structured signal extraction
+    if "learning_events" in enabled:
+        from colearn.runtime_v2.learning_event_tool import (
+            LEARNING_EVENT_TOOL_SCHEMA,
+            emit_learning_events,
+        )
+
+        existing_le = _registry_get(registry, "emit_learning_events")
+        if existing_le is None:
+            registry.register(
+                Tool(
+                    name="emit_learning_events",
+                    description="Report learning state changes (student understood/blocked/completed a concept)",
+                    input_schema=LEARNING_EVENT_TOOL_SCHEMA,
+                    fn=emit_learning_events,
+                )
+            )
+    elif registry.has("emit_learning_events"):
+        registry.unregister("emit_learning_events")
+
 
 def bind_colearn_tools(
     *,

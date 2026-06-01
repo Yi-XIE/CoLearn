@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from colearn.api.dependencies import orchestrator, project_service, session_store
 from colearn.api.schemas import SessionCreatePayload, SessionUpdatePayload
 from colearn.api.session_api import serialize_session_detail, serialize_session_summary, touch_session
+from colearn.learning.constants import LearningEventType
 from colearn.learning.events import MemoryEventKind
+from colearn.learning.state import BoardFacts, LearningEvent
 
 router = APIRouter()
 
@@ -154,3 +158,120 @@ def session_board_history(session_id: str) -> dict[str, Any]:
         if e.kind in (MemoryEventKind.BOARD_SNAPSHOT_DERIVED, MemoryEventKind.BOARD_SNAPSHOT_FAILED, MemoryEventKind.BOARD_PATCH_APPLIED)
     ]
     return {"session_id": session_id, "history": history}
+
+
+class BoardCorrectionPayload(BaseModel):
+    event_type: str  # "NODE_COMPLETED" or "BLOCKER_FOUND"
+    node_id: str | None = None
+    reason: str = ""
+
+
+@router.post("/api/v1/sessions/{session_id}/board_corrections")
+def apply_board_correction(
+    session_id: str,
+    payload: BoardCorrectionPayload,
+) -> dict[str, Any]:
+    """Apply user correction to board state (e.g., 'I still don't understand this')."""
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Construct LearningEvent with user_correction source
+    event_payload: dict[str, Any] = {
+        "source": "user_correction",
+        "reason": payload.reason,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    if payload.event_type == "NODE_COMPLETED":
+        event_payload["node_id"] = payload.node_id or session.board_facts.get("current_progress", {}).get("active_node_id", "")
+        event_payload["node_label"] = session.board_facts.get("current_progress", {}).get("active_node_label", "")
+    elif payload.event_type == "BLOCKER_FOUND":
+        event_payload["id"] = f"user_blk_{int(datetime.utcnow().timestamp())}"
+        event_payload["type"] = "USER_REPORTED"
+        event_payload["desc"] = payload.reason or "用户标记：还没理解这个概念"
+        event_payload["node_id"] = payload.node_id or session.board_facts.get("current_progress", {}).get("active_node_id", "")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported event_type: {payload.event_type}")
+
+    event = LearningEvent(
+        type=LearningEventType(payload.event_type),
+        payload=event_payload,
+    )
+
+    # Write audit log
+    orchestrator.memory_store.append_event(
+        session_id=session_id,
+        kind=MemoryEventKind.USER_CORRECTION_APPLIED,
+        payload={"event": {"type": event.type, "payload": event.payload}},
+    )
+
+    # Apply event to board
+    from colearn.learning.board_hooks import apply_events
+    board_facts = BoardFacts(**session.board_facts) if session.board_facts else BoardFacts(session_id=session_id)
+    updated_board = apply_events(board_facts, [event])
+
+    # Save updated board
+    session.board_facts = {
+        "project_id": updated_board.project_id,
+        "session_id": updated_board.session_id,
+        "current_turn_mode": updated_board.current_turn_mode,
+        "learning_phase": updated_board.learning_phase,
+        "board_version": updated_board.board_version,
+        "updated_at": updated_board.updated_at,
+        "current_progress": {
+            "active_node_id": updated_board.current_progress.active_node_id,
+            "active_node_label": updated_board.current_progress.active_node_label,
+            "completed_node_ids": list(updated_board.current_progress.completed_node_ids),
+            "path_node_ids": list(updated_board.current_progress.path_node_ids),
+        },
+        "student_snapshot": {
+            "mastery_level": updated_board.student_snapshot.mastery_level,
+            "cognitive_load": updated_board.student_snapshot.cognitive_load,
+            "last_intent": updated_board.student_snapshot.last_intent,
+        },
+        "gaps_and_blockers": {
+            "critical_blockers": [
+                {"id": b.id, "type": b.type, "desc": b.desc}
+                for b in updated_board.gaps_and_blockers.critical_blockers
+            ],
+            "unverified_gaps": list(updated_board.gaps_and_blockers.unverified_gaps),
+        },
+        "continuation": {
+            "next_prompt_hint": updated_board.continuation.next_prompt_hint,
+            "last_completed_turn_id": updated_board.continuation.last_completed_turn_id,
+        },
+        "evidence_refs": list(updated_board.evidence_refs),
+        "learning_plan": {
+            "goal": updated_board.learning_plan.goal,
+            "plan_nodes": [
+                {
+                    "id": n.id,
+                    "label": n.label,
+                    "status": n.status,
+                    "depth": n.depth,
+                    "summary": n.summary,
+                }
+                for n in updated_board.learning_plan.plan_nodes
+            ],
+            "current_node_id": updated_board.learning_plan.current_node_id,
+            "review_queue": list(updated_board.learning_plan.review_queue),
+            "pending_checks": list(updated_board.learning_plan.pending_checks),
+        },
+        "learning_board": {
+            "current_progress": updated_board.learning_board.current_progress,
+            "completed_nodes": list(updated_board.learning_board.completed_nodes),
+            "blockers": list(updated_board.learning_board.blockers),
+            "objections": list(updated_board.learning_board.objections),
+            "evidence_refs": list(updated_board.learning_board.evidence_refs),
+            "continuation": updated_board.learning_board.continuation,
+        },
+        "check_mode_turns": updated_board.check_mode_turns,
+    }
+    touch_session(session)
+    session_store.save_session(session)
+
+    # Broadcast session update to trigger frontend refresh
+    # (WS broadcast would go here if ws_handler is accessible)
+
+    return {"board_version": updated_board.board_version, "status": "applied"}

@@ -70,6 +70,7 @@ class FinalizeStage:
             request=request,
             retrieval_focus=retrieval_context["retrieval_focus"],
             retrieval_evidence_map=retrieval_evidence_map,
+            retrieval_bundle=retrieval_context.get("retrieval_bundle"),
         )
         return retrieval_hits, retrieval_misses, retrieval_evidence_map
 
@@ -79,11 +80,18 @@ class FinalizeStage:
         request,
         retrieval_focus: dict[str, Any],
         retrieval_evidence_map: dict[str, list[dict[str, Any]]],
+        retrieval_bundle: Any = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
         evidence_map = {key: list(value or []) for key, value in retrieval_evidence_map.items()}
         hits: list[dict[str, Any]] = []
         misses: list[dict[str, Any]] = []
-        retrieval_active = "lightrag" in {str(item).strip().lower() for item in list(request.enabled_tools or [])}
+        # A miss is only meaningful when prefetch actually ran this turn. Prefetch
+        # is the sole retrieval path now (nanobot's per-turn lightrag tool is
+        # disabled in favor of RetrievalStage), so derive "active" from the bundle
+        # status rather than the request's enabled_tools. "skipped" means the turn
+        # mode gated prefetch off (e.g. PAUSED); anything else means we tried.
+        bundle_status = str(getattr(retrieval_bundle, "retrieval_status", "") or "").strip().lower()
+        retrieval_active = bool(bundle_status) and bundle_status != "skipped"
         board = request.board_facts
         active_node_id = str(board.current_progress.active_node_id or "").strip()
         blocker_ids = [

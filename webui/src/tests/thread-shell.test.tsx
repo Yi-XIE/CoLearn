@@ -400,6 +400,47 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("shows the learning phase label in the header for a learning session", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/v1/sessions/chat-a")) {
+          return httpJson({
+            session: {
+              session_id: "chat-a",
+              mode: "learning",
+              last_turn_result: {
+                runtime_v2: {
+                  learning_phase: "diagnose",
+                  turn_mode: "LEARN",
+                  learning_board: { current_progress: "Variables" },
+                },
+              },
+            },
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={{ ...session("chat-a"), mode: "learning" }}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText(/· Diagnosing/)).toBeInTheDocument());
+  });
+
   it("clears the old thread when the active session is removed", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");

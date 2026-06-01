@@ -158,6 +158,13 @@ class RetrievalStage:
                 warning="retrieval prefetch skipped for current turn mode",
             )
 
+        # Dynamically adjust top_k based on cognitive_load:
+        # HIGH → 3 (slightly more than effective_max=2 for ranking headroom)
+        # NORMAL → 5 (current default)
+        # LOW → 8 (increased coverage for deeper exploration)
+        cognitive_load = str(getattr(getattr(board, "student_snapshot", None), "cognitive_load", "") or "").upper()
+        effective_top_k = {"HIGH": 3, "NORMAL": 5, "LOW": 8}.get(cognitive_load, 5)
+
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         async_method = getattr(self.retrieval_service, "async_build_bundle_for_source_refs", None)
         try:
@@ -167,6 +174,7 @@ class RetrievalStage:
                     query=query,
                     source_refs=source_refs,
                     libraries=None,
+                    top_k=effective_top_k,
                 )
             if hasattr(self.retrieval_service, "build_bundle_for_source_refs"):
                 return await asyncio.to_thread(
@@ -175,6 +183,7 @@ class RetrievalStage:
                     query=query,
                     source_refs=source_refs,
                     libraries=None,
+                    top_k=effective_top_k,
                 )
             return await asyncio.to_thread(
                 self.retrieval_service.build_bundle,
@@ -182,6 +191,7 @@ class RetrievalStage:
                 session=session,
                 query=query,
                 libraries=None,
+                top_k=effective_top_k,
             )
         except (TimeoutError, OSError, RuntimeError) as exc:
             return empty_retrieval_bundle(
@@ -200,7 +210,7 @@ class RetrievalStage:
         turn_mode: str,
         board=None,
     ) -> dict[str, Any]:
-        queries = self._parallel_support_queries(retrieval_query_context)
+        queries = self._parallel_support_queries(retrieval_query_context, board=board)
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         if not self._should_prefetch_retrieval(turn_mode=turn_mode, board=board):
             return {"status": "skipped", "reason": f"turn_mode:{turn_mode.lower()}", "queries": queries, "results": []}
@@ -357,7 +367,17 @@ class RetrievalStage:
     ) -> dict[str, Any]:
         raise RuntimeError("RetrievalStage is async-only; use _build_parallel_support_dispatch")
 
-    def _parallel_support_queries(self, retrieval_query_context: dict[str, Any]) -> list[str]:
+    def _parallel_support_queries(self, retrieval_query_context: dict[str, Any], board=None) -> list[str]:
+        """Build parallel support queries for blockers and gaps.
+
+        Dynamically adjusts the max query count based on cognitive_load:
+        - HIGH: 1 query (only the most urgent blocker)
+        - NORMAL: 2 queries (current default, down from 3)
+        - LOW: 3 queries (full coverage)
+        """
+        cognitive_load = str(getattr(getattr(board, "student_snapshot", None), "cognitive_load", "") or "").upper()
+        max_queries = {"HIGH": 1, "NORMAL": 2, "LOW": 3}.get(cognitive_load, 2)
+
         candidates: list[str] = []
         final_query = str(retrieval_query_context.get("final_query") or "").strip()
         if final_query:
@@ -378,7 +398,7 @@ class RetrievalStage:
                 continue
             seen.add(key)
             deduped.append(query)
-            if len(deduped) >= 3:
+            if len(deduped) >= max_queries:
                 break
         return deduped
 

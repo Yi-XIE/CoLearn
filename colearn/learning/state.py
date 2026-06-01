@@ -144,6 +144,7 @@ class BoardFacts:
     evidence_refs: list[dict[str, Any]] = field(default_factory=list)
     learning_plan: LearningPlan = field(default_factory=LearningPlan)
     learning_board: LearningBoard = field(default_factory=LearningBoard)
+    check_mode_turns: int = 0  # Track consecutive turns in CHECK mode for fallback
 
     def __post_init__(self) -> None:
         if not self.learning_plan.current_node_id and self.current_progress.active_node_id:
