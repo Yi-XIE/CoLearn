@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "colearn"
+version = "0.1.0"
+description = "CoLearn plugin runtime for NanoBot"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Yi Xie" }
+]
+dependencies = []
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["colearn*"]
+
