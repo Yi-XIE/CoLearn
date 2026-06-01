@@ -27,6 +27,9 @@ MODE_SUPPORT_PRIORITIES: dict[str, list[str]] = {
 # Per-mode query-build strategy: which signals to favor when composing the
 # LightRAG query, and what intent label to attach so downstream re-rankers
 # know what kind of evidence the turn is asking for.
+# `intent` drives the query context label; `favor` is retained for reference
+# (the simplified build_retrieval_query_context now uses mode-specific term
+# selection rather than the favor-ordered signal pool).
 MODE_QUERY_STRATEGY: dict[str, dict[str, Any]] = {
     "LEARN": {
         "favor": ["user_message", "active_node_label", "default_query"],
@@ -137,8 +140,12 @@ def build_retrieval_query_context(
         # PAUSED: only user's question
         priority_terms = [signal_pool.get("user_message", "")]
 
-    # Filter empty terms, limit to 2
-    priority_terms = [term for term in priority_terms if term][:2]
+    # Filter empty terms, deduplicate, limit to 2
+    deduped_terms: list[str] = []
+    for term in priority_terms:
+        if term and term not in deduped_terms:
+            deduped_terms.append(term)
+    priority_terms = deduped_terms[:2]
     final_query = " | ".join(priority_terms) if priority_terms else signal_pool.get("default_query", "")
 
     return {

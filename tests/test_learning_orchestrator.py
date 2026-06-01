@@ -1164,8 +1164,8 @@ async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: P
 
     saved_session = session_store.get_session("sess-retrieval")
     assert saved_session is not None
-    assert "当前节点的核对、纠错和证据支持" in retrieval_service.last_bundle_query
-    assert "Verify node" in retrieval_service.last_bundle_query
+    # Simplified CHECK-mode query: first blocker + user_message (focused, max 2 terms)
+    assert "Need proof" in retrieval_service.last_bundle_query
     assert "Verify this step with evidence." in retrieval_service.last_bundle_query
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_reason"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["prefetched_references"]
