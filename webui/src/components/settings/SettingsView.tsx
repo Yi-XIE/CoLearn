@@ -259,14 +259,14 @@ export function SettingsView({
           <button
             type="button"
             onClick={onBackToChat}
-            className="mb-4 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+            className="mb-4 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
           >
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
             {t("settings.backToChat")}
           </button>
 
           <div className="mb-8">
-            <h1 className="text-[32px] font-bold leading-tight tracking-[-0.03em] text-black dark:text-white sm:text-[40px]">
+            <h1 className="text-4xl font-bold leading-tight tracking-[-0.03em] text-black dark:text-white sm:text-4xl">
               设置
             </h1>
           </div>
@@ -287,7 +287,7 @@ export function SettingsView({
           ) : settings ? (
             <div className="space-y-5">
               {error ? (
-                <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+                <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                   {error}
                 </div>
               ) : null}
@@ -317,7 +317,7 @@ export function SettingsView({
                       onChange={(event) =>
                         setForm((prev) => ({ ...prev, model: event.target.value }))
                       }
-                      className="h-8 w-[280px] rounded-full text-[13px]"
+                      className="h-8 w-[280px] rounded-full text-sm"
                     />
                   </SettingsRow>
                   {(dirty || saving || settings.requires_restart) ? (
@@ -360,7 +360,7 @@ export function SettingsView({
 
               <section className="space-y-3">
                 <SettingsSectionTitle>连接</SettingsSectionTitle>
-                <div className="px-1 text-[12px] leading-5 text-muted-foreground">
+                <div className="px-1 text-sm leading-5 text-muted-foreground">
                   当前只保留与本地学习工作流直接相关的模型连接。
                 </div>
                 <ProviderConnectionsPanel
@@ -408,7 +408,7 @@ export function SettingsView({
                     title={t("settings.rows.configPath")}
                     description={t("settings.help.configPath")}
                   >
-                    <code className="max-w-[320px] overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-muted px-3 py-1.5 text-[12px] text-muted-foreground">
+                    <code className="max-w-[320px] overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-muted px-3 py-1.5 text-sm text-muted-foreground">
                       {settings.runtime.config_path || t("settings.values.notAvailable")}
                     </code>
                   </SettingsRow>
@@ -448,7 +448,7 @@ export function SettingsView({
                         type="button"
                         variant="ghost"
                         onClick={onLogout}
-                        className="h-9 rounded-full px-3 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
+                        className="h-9 rounded-full px-3 text-sm font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
                       >
                         <LogOut className="mr-1.5 h-4 w-4" aria-hidden />
                         {t("app.account.logout")}
@@ -487,7 +487,7 @@ function ProviderPicker({
           variant="outline"
           disabled={disabled}
           className={cn(
-            "h-8 w-[210px] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "h-8 w-[210px] justify-between rounded-full border-input bg-background px-3 text-sm font-normal shadow-none",
             "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
           )}
@@ -507,7 +507,7 @@ function ProviderPicker({
               key={provider.name}
               onSelect={() => onChange(provider.name)}
               className={cn(
-                "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-3 py-2 text-[13px]",
+                "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-3 py-2 text-sm",
                 "focus:bg-muted focus:text-foreground",
                 selected && "bg-primary/10 text-primary focus:bg-primary/12 focus:text-primary",
               )}
@@ -570,13 +570,13 @@ function ProviderConnectionsPanel({
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon provider={provider.name} />
-            <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
+            <span className="block truncate text-sm font-semibold leading-5 text-foreground">
               {provider.label}
             </span>
           </span>
           <span
             className={cn(
-              "rounded-full px-2.5 py-1 text-[12px] font-medium",
+              "rounded-full px-2.5 py-1 text-sm font-medium",
               provider.configured
                 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                 : "bg-muted text-muted-foreground",
@@ -589,7 +589,7 @@ function ProviderConnectionsPanel({
         {expanded ? (
           <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
             <label className="block space-y-1.5">
-              <span className="text-[12px] font-medium text-muted-foreground">
+              <span className="text-sm font-medium text-muted-foreground">
                 {t("settings.byok.apiKey")}
               </span>
               <div className="relative">
@@ -606,7 +606,7 @@ function ProviderConnectionsPanel({
                           ? t("settings.byok.apiKeyConfiguredPlaceholder")
                           : t("settings.byok.apiKeyPlaceholder")
                       }
-                      className="h-9 rounded-full pr-11 text-[13px]"
+                      className="h-9 rounded-full pr-11 text-sm"
                     />
                     <Button
                       type="button"
@@ -625,7 +625,7 @@ function ProviderConnectionsPanel({
                   </>
                 ) : (
                   <>
-                    <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
+                    <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-sm text-muted-foreground">
                       {provider.api_key_hint ?? t("settings.byok.configuredKeyHint")}
                     </div>
                     <Button
@@ -644,7 +644,7 @@ function ProviderConnectionsPanel({
             </label>
 
             <label className="block space-y-1.5">
-              <span className="text-[12px] font-medium text-muted-foreground">
+              <span className="text-sm font-medium text-muted-foreground">
                 {t("settings.byok.apiBase")}
               </span>
               <Input
@@ -653,7 +653,7 @@ function ProviderConnectionsPanel({
                   onChangeProviderForm(provider.name, { apiBase: event.target.value })
                 }
                 placeholder={provider.default_api_base ?? t("settings.byok.apiBasePlaceholder")}
-                className="h-9 rounded-full text-[13px]"
+                className="h-9 rounded-full text-sm"
               />
             </label>
 
@@ -770,7 +770,7 @@ function WebSearchSettingsPanel({
           title={t("settings.byok.webSearch.credentials")}
           description={t("settings.byok.webSearch.noCredentialHelp")}
         >
-          <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-sm font-medium text-emerald-700 dark:text-emerald-300">
             {t("settings.byok.webSearch.noCredentialRequired")}
           </span>
         </SettingsRow>
@@ -793,7 +793,7 @@ function WebSearchSettingsPanel({
                       ? t("settings.byok.apiKeyConfiguredPlaceholder")
                       : t("settings.byok.apiKeyPlaceholder")
                   }
-                  className="h-9 rounded-full pr-11 text-[13px]"
+                  className="h-9 rounded-full pr-11 text-sm"
                 />
                 <Button
                   type="button"
@@ -814,7 +814,7 @@ function WebSearchSettingsPanel({
               </>
             ) : (
               <>
-                <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
+                <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-sm text-muted-foreground">
                   {settings.web_search.api_key_hint ?? t("settings.byok.configuredKeyHint")}
                 </div>
                 <Button
@@ -842,13 +842,13 @@ function WebSearchSettingsPanel({
             value={form.baseUrl ?? ""}
             onChange={(event) => onChangeBaseUrl(event.target.value)}
             placeholder={t("settings.byok.webSearch.baseUrlPlaceholder")}
-            className="h-9 w-[280px] rounded-full text-[13px]"
+            className="h-9 w-[280px] rounded-full text-sm"
           />
         </SettingsRow>
       ) : null}
 
       <div className="flex min-h-[58px] items-center justify-between gap-4 px-4 py-3 sm:px-5">
-        <div className="text-[13px] text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
           {missingCredential
             ? t("settings.byok.webSearch.missingCredential")
             : t("settings.byok.webSearch.saveHint")}
@@ -870,10 +870,10 @@ function WebSearchSettingsPanel({
 function ByokSectionHeader({ title, count }: { title: string; count: number }) {
   return (
     <div className="flex items-center justify-between px-1">
-      <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+      <h2 className="text-sm font-semibold tracking-[-0.01em] text-foreground/85">
         {title}
       </h2>
-      <span className="rounded-full bg-muted px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground">
+      <span className="rounded-full bg-muted px-2 py-0.5 text-sm font-medium text-muted-foreground">
         {count}
       </span>
     </div>
@@ -882,7 +882,7 @@ function ByokSectionHeader({ title, count }: { title: string; count: number }) {
 
 function ByokEmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-[18px] border border-dashed border-border/65 bg-card/45 px-4 py-5 text-[13px] text-muted-foreground">
+    <div className="rounded-[18px] border border-dashed border-border/65 bg-card/45 px-4 py-5 text-sm text-muted-foreground">
       {children}
     </div>
   );
@@ -907,7 +907,7 @@ function ProviderIcon({ provider }: { provider: string }) {
 
 function SettingsSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+    <h2 className="px-1 text-sm font-semibold tracking-[-0.01em] text-foreground/85">
       {children}
     </h2>
   );
@@ -935,7 +935,7 @@ function SettingsRow({
       <div className="min-w-0">
         <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
         {description ? (
-          <div className="mt-0.5 max-w-[28rem] text-[12px] leading-5 text-muted-foreground">
+          <div className="mt-0.5 max-w-[28rem] text-sm leading-5 text-muted-foreground">
             {description}
           </div>
         ) : null}
@@ -959,7 +959,7 @@ function SettingsFooter({
   const { t } = useTranslation();
   return (
     <div className="flex min-h-[58px] items-center justify-between gap-4 px-4 py-3 sm:px-5">
-      <div className="text-[13px] text-muted-foreground">
+      <div className="text-sm text-muted-foreground">
         {saved ? t("settings.status.savedRestart") : t("settings.status.unsaved")}
       </div>
       <Button

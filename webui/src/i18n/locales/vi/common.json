@@ -155,6 +155,7 @@
     "empty": {
       "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới.",
       "greeting": "Tôi có thể giúp gì cho bạn?",
+      "subtitle": "Hãy cho tôi biết bạn muốn bắt đầu từ đâu.",
       "quickActions": {
         "plan": {
           "title": "Tạo kế hoạch dự án",

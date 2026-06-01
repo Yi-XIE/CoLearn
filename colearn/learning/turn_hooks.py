@@ -12,35 +12,168 @@ from colearn.learning.board_hooks import (
     extract_board_facts,
     resolve_model_preset,
 )
+from colearn.learning.constants import LearningPhase, TurnMode
 from colearn.learning.state import ReplyContract, TurnPolicy
+
+
+# Kept for the future re-enable path of `_needs_lightrag` (see its docstring).
+# Currently unreferenced because nanobot's per-turn lightrag tool is disabled in
+# favor of RetrievalStage prefetch.
+LIGHTRAG_HINT_KEYWORDS: tuple[str, ...] = (
+    "来源",
+    "依据",
+    "证据",
+    "参考",
+    "资料",
+    "文献",
+    "出处",
+    "例子",
+    "反例",
+    "证明",
+    "why",
+    "source",
+    "sources",
+    "reference",
+    "references",
+    "evidence",
+    "example",
+    "examples",
+    "counterexample",
+    "proof",
+)
+
+WEB_SOURCE_KEYWORDS: tuple[str, ...] = (
+    "latest",
+    "current",
+    "today",
+    "news",
+    "web",
+    "internet",
+    "online",
+    "search",
+    "browse",
+    "external source",
+    "public source",
+    "最新",
+    "今天",
+    "新闻",
+    "网页",
+    "网上",
+    "互联网",
+    "搜索",
+    "公开资料",
+    "外部资料",
+)
+
+
+def _needs_lightrag(*, board, user_message: str, turn_mode: str) -> bool:
+    """Whether nanobot should get its own lightrag tool this turn.
+
+    Disabled by default: RetrievalStage already prefetches the main query plus
+    parallel blocker/gap queries before the turn runs, and injects the results
+    into the prompt support bundle. Letting nanobot re-run lightrag mid-turn
+    duplicated that work (same query → cache hit at best, wasted tool-call +
+    round-trip at worst). Keep the signature and call sites intact so this can
+    be re-enabled per policy if prefetch ever proves insufficient.
+    """
+    _ = (board, user_message, turn_mode)
+    return False
+
+
+def _needs_web_tools(*, user_message: str, retrieval_context: dict[str, Any] | None = None) -> bool:
+    lowered = str(user_message or "").strip().lower()
+    if lowered and any(keyword in lowered for keyword in WEB_SOURCE_KEYWORDS):
+        return True
+    fallback = dict((retrieval_context or {}).get("external_web_fallback") or {})
+    return bool(fallback.get("recommended"))
 
 
 def policy(
     *,
     board,
     user_message: str,
+    memory_enabled: bool = True,
+    retrieval_context: dict[str, Any] | None = None,
     **_: Any,
 ) -> TurnPolicy:
+    learning_phase = getattr(board, "learning_phase", LearningPhase.READY)
+
+    if learning_phase == LearningPhase.INTAKE:
+        return TurnPolicy(
+            turn_mode=TurnMode.LEARN,
+            model_preset=None,
+            main_goal="Collect user profile through guided intake conversation.",
+            restrictions=["do_not_teach_content", "ask_one_question_at_a_time"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="Continue intake: ask the next profile question.",
+            metadata={"learning_phase": "intake"},
+        )
+
+    if learning_phase == LearningPhase.REFLECT:
+        return TurnPolicy(
+            turn_mode=TurnMode.LEARN,
+            model_preset=None,
+            main_goal="Generate session summary and schedule next recall.",
+            restrictions=["do_not_introduce_new_topic"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="",
+            metadata={"learning_phase": "reflect"},
+        )
+
+    if learning_phase == LearningPhase.RECALL:
+        return TurnPolicy(
+            turn_mode=TurnMode.CHECK,
+            model_preset=None,
+            main_goal="Run quick recall questions on previously weak concepts.",
+            restrictions=["limit_to_3_questions", "do_not_introduce_new_topic"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="Review weak concepts from last session.",
+            metadata={"learning_phase": "recall"},
+        )
+
+    if learning_phase == LearningPhase.DIAGNOSE:
+        return TurnPolicy(
+            turn_mode=TurnMode.CHECK,
+            model_preset=None,
+            main_goal="Assess baseline mastery with 2-3 diagnostic questions.",
+            restrictions=["do_not_teach_yet", "ask_progressively_harder"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
+            reply_contract=ReplyContract(),
+            warnings=[],
+            continuation_prompt="Continue diagnostic assessment.",
+            metadata={"learning_phase": "diagnose"},
+        )
+
     turn_mode = determine_turn_mode(board, user_message)
     restrictions: list[str] = []
 
-    if turn_mode == "ANCHOR":
-        restrictions.append("must_clarify_anchor_first")
-    elif turn_mode == "CORRECTION":
+    if turn_mode == "CHECK":
         restrictions.extend(["do_not_introduce_new_topic", "do_not_give_direct_answer"])
-    elif turn_mode == "VERIFY":
-        restrictions.append("do_not_give_direct_answer")
 
-    allowed_tools: list[str] = ["memory"]
-    if turn_mode == "EXPLORE":
+    allowed_tools: list[str] = ["memory"] if memory_enabled else []
+    # Always enable learning_events tool for structured signal extraction
+    allowed_tools.append("learning_events")
+    if _needs_lightrag(board=board, user_message=user_message, turn_mode=turn_mode):
         allowed_tools.append("lightrag")
+    if _needs_web_tools(user_message=user_message, retrieval_context=retrieval_context):
+        allowed_tools.extend(["web_search", "web_fetch"])
 
     return TurnPolicy(
         turn_mode=turn_mode,
         model_preset=resolve_model_preset(turn_mode),
         main_goal=(
-            "Complete the learning anchor first."
-            if turn_mode == "ANCHOR"
+            "Check and strengthen the current learning node."
+            if turn_mode == "CHECK"
             else "Advance the current learning turn with grounded explanations."
         ),
         restrictions=restrictions,
@@ -48,14 +181,15 @@ def policy(
         enabled_tools=list(allowed_tools),
         reply_contract=ReplyContract(),
         warnings=(
-            ["Project anchor is incomplete."]
-            if turn_mode == "ANCHOR"
-            else [blocker.desc for blocker in board.gaps_and_blockers.critical_blockers]
+            [blocker.desc for blocker in board.gaps_and_blockers.critical_blockers]
         ),
         continuation_prompt=board.continuation.next_prompt_hint,
         metadata={
             "board_version": board.board_version,
             "blocker_count": len(board.gaps_and_blockers.critical_blockers),
+            "lightrag_enabled": "lightrag" in allowed_tools,
+            "web_search_enabled": "web_search" in allowed_tools,
+            "learning_phase": str(learning_phase),
         },
     )
 
@@ -75,7 +209,7 @@ def before_turn(
             request,
             metadata={
                 **request.metadata,
-                "turn_mode_before": getattr(request, "turn_mode", "EXPLORE"),
+                "turn_mode_before": getattr(request, "turn_mode", "LEARN"),
                 "board_version_before": int(getattr(board, "board_version", 1) or 1),
                 "active_node_id_before": str(getattr(progress, "active_node_id", "") or ""),
                 "active_node_label_before": str(getattr(progress, "active_node_label", "") or ""),
@@ -106,7 +240,7 @@ def after_turn_payload(
             project=project,
             session_id=getattr(session, "session_id", ""),
             board_version=int(getattr(session, "board_version", 1) or 1),
-            turn_mode=getattr(session, "turn_mode", "EXPLORE"),
+            turn_mode=getattr(session, "turn_mode", "LEARN"),
         )
     updated_board, events = after_turn(
         board=board,
@@ -122,7 +256,7 @@ def after_turn_payload(
     continuation_prompt = updated_board.continuation.next_prompt_hint or str(
         getattr(request, "continuation_prompt", "")
     )
-    turn_mode_before = str(getattr(request, "turn_mode", "EXPLORE"))
+    turn_mode_before = str(getattr(request, "turn_mode", "LEARN"))
     base_board_version = int(getattr(board, "board_version", 1) or 1)
     resolved_board_version = int(updated_board.board_version or 1)
     event_types = [event.type for event in events]
@@ -148,7 +282,11 @@ def after_turn_payload(
             "student_snapshot": asdict(updated_board.student_snapshot),
             "gaps_and_blockers": asdict(updated_board.gaps_and_blockers),
             "evidence_refs": list(updated_board.evidence_refs),
+            "learning_plan": asdict(updated_board.learning_plan),
+            "learning_board": asdict(updated_board.learning_board),
         },
+        "plan_patch": asdict(updated_board.learning_plan),
+        "learning_board": asdict(updated_board.learning_board),
         "continuation_retrieval_hint": {
             "active_node_id": updated_board.current_progress.active_node_id,
             "evidence_refs": list(updated_board.evidence_refs or []),

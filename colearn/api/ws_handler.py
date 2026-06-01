@@ -21,6 +21,7 @@ from colearn.api.ws import (
     message_event,
     normalize_attachments,
     normalize_turn_frame,
+    mode_from_frame,
     project_id_from_frame,
     project_title_from_frame,
     ready_event,
@@ -36,16 +37,6 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-_agent_loop = None
-_session_manager = None
-
-
-def set_agent_loop(loop, session_manager=None):
-    """Called at startup to inject the initialized AgentLoop (model_name display only)."""
-    global _agent_loop, _session_manager
-    _agent_loop = loop
-    _session_manager = session_manager
-
 
 def _current_model_name() -> str:
     catalog = _deps.settings_service.catalog()
@@ -59,7 +50,7 @@ def _current_model_name() -> str:
             if active_model_id and str(model.get("id") or "") != active_model_id:
                 continue
             return str(model.get("model") or model.get("name") or "")
-    return getattr(_agent_loop, "model", "") or ""
+    return getattr(getattr(_deps, "agent_loop", None), "model", "") or ""
 
 
 @router.get("/webui/bootstrap")
@@ -115,6 +106,7 @@ async def _handle_start_turn(
         language=str(frame.get("language") or "zh"),
         attachments=normalize_attachments(frame),
         requested_skills=skills_from_frame(frame),
+        requested_mode=mode_from_frame(frame),
     )
 
 
@@ -136,6 +128,9 @@ async def _handle_cancel_turn(
     executor = getattr(orchestrator, "executor", None)
     if executor is not None and hasattr(executor, "cancel_session"):
         executor.cancel_session(turn.session_id)
+    complete_goal = getattr(executor, "complete_sustained_goal", None)
+    if callable(complete_goal):
+        complete_goal(session_id=turn.session_id, recap="Learning turn cancelled.")
 
 
 async def _handle_subscribe_turn(
@@ -208,6 +203,10 @@ async def _dispatch_frame(
         return
 
     if msg_type in {"message", "start_turn"}:
+        content = str(frame.get("content") or "").strip()
+        if content == "/stop":
+            await _handle_cancel_turn(frame=frame, send_event=send_event)
+            return
         normalized = normalize_turn_frame(frame)
         await _handle_start_turn(connection_id=connection_id, frame=normalized, send_event=send_event)
         return
@@ -236,7 +235,7 @@ async def _serve_ws(websocket: WebSocket) -> None:
             await websocket.send_json(event)
         except WebSocketDisconnect:
             pass
-        except Exception as exc:
+        except (RuntimeError, ConnectionError) as exc:
             logger.warning("ws send_event failed: %s", exc)
 
     try:
@@ -253,7 +252,7 @@ async def _serve_ws(websocket: WebSocket) -> None:
             )
     except WebSocketDisconnect:
         pass
-    except Exception as exc:
+    except (json.JSONDecodeError, RuntimeError, ConnectionError) as exc:
         logger.warning("ws error: %s", exc)
     finally:
         unsubscribe_connection(connection_id)

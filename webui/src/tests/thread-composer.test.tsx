@@ -99,9 +99,26 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("min-h-[50px]");
     expect(input.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.className).toContain("rounded-[22px]");
-    expect(input.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
+    expect(input.parentElement?.className).toContain("shadow-[0_3px_12px_rgba(15,23,42,0.05)]");
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
-    expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
+    expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-[#8C8D8F]");
+  });
+
+  it("uses CoLearn blue for the active learning mode affordance", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        sessionMode="learning"
+      />,
+    );
+
+    const input = screen.getByPlaceholderText("Type your message...");
+    expect(input.parentElement?.className).toContain("goal-shell-glow");
+    expect(input.parentElement?.className).toContain("ring-[#013FF8]/35");
+    expect(screen.getByRole("button", { name: "Toggle learning mode" }).className).toContain(
+      "text-[#013FF8]",
+    );
   });
 
   it("shows turn run timer when runStartedAt is set", () => {

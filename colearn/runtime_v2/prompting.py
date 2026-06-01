@@ -96,6 +96,11 @@ def _board_runtime_lines(request: LearningTurnRequest) -> list[str]:
     if retrieval_reason:
         lines.append(f"Retrieval reason: {retrieval_reason}")
 
+    external_web_fallback = dict(retrieval_metadata.get("external_web_fallback") or {})
+    if external_web_fallback.get("recommended"):
+        reason = str(external_web_fallback.get("reason") or "external_web_fallback").strip()
+        lines.append(f"External web fallback: {reason}")
+
     support_bundle = list(
         retrieval_metadata.get("prompt_support_bundle")
         or request.metadata.get("prompt_support_bundle")
@@ -165,6 +170,21 @@ def build_turn_prompt(request: LearningTurnRequest) -> str:
             hint = f"{hint}; warnings={'; '.join(str(item) for item in warnings[:3])}"
         lines.append(hint)
     lines.extend(_board_runtime_lines(request))
+
+    # Learning signal reporting guidance (only if learning_events tool is enabled)
+    enabled_tools = set(request.enabled_tools or [])
+    if "learning_events" in enabled_tools:
+        lines.append(
+            "## 学习信号上报\n\n"
+            "当观察到以下情况时，调用 emit_learning_events 工具：\n"
+            "- 学生理解了某个概念 → NODE_COMPLETED(node_id, node_label)\n"
+            "- 学生开始学习新节点 → NODE_STARTED(node_id, node_label)\n"
+            "- 学生遇到阻塞 → BLOCKER_FOUND(id, type, desc)\n"
+            "- 阻塞已解决 → BLOCKER_RESOLVED(id, desc)\n"
+            "- 附加了证据材料 → EVIDENCE_ATTACHED(source_ref, tool_name, chunk_id)\n\n"
+            "仅在状态确实变化时上报，不要重复上报同一事件。"
+        )
+
     restrictions = list(request.metadata.get("policy_restrictions") or [])
     if not restrictions and policy is not None:
         restrictions = list(getattr(policy, "restrictions", []) or [])

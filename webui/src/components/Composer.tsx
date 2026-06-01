@@ -101,7 +101,7 @@ export function Composer({
           )}
         />
         <div className="flex items-center justify-between gap-2 px-3 pb-2">
-          <span className="hidden select-none text-[11px] text-muted-foreground/70 sm:inline">
+          <span className="hidden select-none text-sm text-muted-foreground/70 sm:inline">
             Enter to send · Shift+Enter for newline
           </span>
           <span className="sm:hidden" aria-hidden />

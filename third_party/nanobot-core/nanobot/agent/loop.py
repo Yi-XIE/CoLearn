@@ -436,11 +436,12 @@ class AgentLoop:
             bus=self.bus,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
+            sessions=self.sessions,
             provider_snapshot_loader=self._provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
         )
-        loader = ToolLoader(allowed_modules={"filesystem", "message"})
+        loader = ToolLoader(allowed_modules={"filesystem", "long_task", "message"})
         registered = loader.load(ctx, self.tools)
 
         # MyTool needs runtime state reference — manual registration
@@ -592,6 +593,7 @@ class AgentLoop:
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
             session_summary=pending_summary,
+            session_metadata=session.metadata,
         )
 
     async def _dispatch_command_inline(
@@ -1075,6 +1077,7 @@ class AgentLoop:
             current_role=current_role,
             sender_id=msg.sender_id,
             session_summary=pending,
+            session_metadata=session.metadata,
         )
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,

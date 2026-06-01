@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from colearn.learning.response_contract import LearningTurnResult
@@ -43,7 +44,9 @@ def normalize_learning_turn_result(
     retrieval_hits = list(retrieval_metadata.get("hits") or [])
     retrieval_misses = list(retrieval_metadata.get("misses") or [])
     retrieval_evidence_map = dict(retrieval_metadata.get("evidence_map") or {})
+    retrieval_active = "lightrag" in {str(item).strip().lower() for item in list(request.enabled_tools or [])}
     runtime_retrieval = {
+        "retrieval_active": retrieval_active,
         "prefetched_references": list(retrieval_metadata.get("prefetched_references") or []),
         "prompt_support_bundle": list(retrieval_metadata.get("prompt_support_bundle") or []),
         "retrieval_focus": retrieval_focus,
@@ -52,6 +55,7 @@ def normalize_learning_turn_result(
         "retrieval_hits": retrieval_hits,
         "retrieval_misses": retrieval_misses,
         "retrieval_evidence_map": retrieval_evidence_map,
+        "external_web_fallback": dict(retrieval_metadata.get("external_web_fallback") or {}),
         "knowledge_support_summary": {
             "active_node_id": result_board.current_progress.active_node_id,
             "critical_blockers": [blocker.id for blocker in result_board.gaps_and_blockers.critical_blockers],
@@ -73,6 +77,13 @@ def normalize_learning_turn_result(
     runtime_v2["board_summary"] = board_summary
     runtime_v2["turn_envelope"] = turn_envelope
     runtime_v2["retrieval"] = runtime_retrieval
+    runtime_v2["learning_plan"] = asdict(result_board.learning_plan)
+    runtime_v2["learning_board"] = asdict(result_board.learning_board)
+    runtime_v2["goal_state"] = {
+        "active": request.turn_mode != "PAUSED",
+        "objective": request.project_title or result_board.learning_plan.goal,
+        "ui_summary": result_board.learning_board.current_progress or board_summary["active_node_label"],
+    }
     payload["runtime_v2"] = runtime_v2
     review_to_persist = dict(payload.get("review_to_persist") or {})
     board_patch = dict(payload.get("board_patch") or {})

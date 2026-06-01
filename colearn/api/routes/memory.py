@@ -7,7 +7,13 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from colearn.api.dependencies import memory_doc_service, project_service, session_store, orchestrator
+from colearn.api.dependencies import (
+    memory_doc_service,
+    orchestrator,
+    project_service,
+    session_store,
+    settings_service,
+)
 from colearn.api.schemas import MemoryFilePayload, MemoryRefreshPayload, MemoryUpdatePayload
 
 router = APIRouter()
@@ -120,11 +126,12 @@ def update_memory(payload: MemoryUpdatePayload) -> dict[str, Any]:
 @router.post("/api/v1/memory/refresh")
 def refresh_memory(payload: MemoryRefreshPayload | None = None) -> dict[str, Any]:
     _ = payload
+    if not settings_service.memory_settings()["enabled"]:
+        return {**get_memory(), "changed": False}
     latest_review = ""
     if session_store.list_sessions():
         latest_session = session_store.list_sessions()[-1]
         latest_review = str((latest_session.pending_review or {}).get("summary") or "")
-    changed = False
     changed = memory_doc_service.refresh_summary(latest_review)
     return {**get_memory(), "changed": changed}
 

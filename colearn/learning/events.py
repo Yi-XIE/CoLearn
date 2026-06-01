@@ -17,6 +17,11 @@ class MemoryEventKind:
     CONTINUATION_UPDATED = "continuation_updated"
     UNDERSTOOD_CONCEPT = "understood_concept"
     STILL_BLOCKED = "still_blocked"
+    SESSION_REFLECTED = "session_reflected"
+    RECALL_SCHEDULED = "recall_scheduled"
+    RECALL_COMPLETED = "recall_completed"
+    INTAKE_COMPLETED = "intake_completed"
+    DIAGNOSE_COMPLETED = "diagnose_completed"
 
 
 class BoardSnapshotDerivedPayload(TypedDict):

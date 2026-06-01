@@ -1,4 +1,4 @@
-"""WritebackStage — persists turn results, runs board/dream consolidation."""
+"""WritebackStage - persists turn results, runs board/dream consolidation."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from colearn.logging_config import get_logger
+from colearn.api.state import MemoryDocStateService, SettingsStateService
 from colearn.memory.store import EventMemoryStore, MemoryEvent
 from colearn.projects.models import LearningProject
 from colearn.projects.service import LearningProjectService
+from colearn.sessions.titles import derive_session_title
 from colearn.runtime_v2.executor import NanobotTurnExecutor
 from colearn.sessions.store import LearningSession, SessionStore
 
@@ -41,6 +43,8 @@ class WritebackStage:
         project_service: LearningProjectService,
         session_store: SessionStore,
         memory_store: EventMemoryStore,
+        settings_service: SettingsStateService,
+        memory_doc_service: MemoryDocStateService,
         executor: NanobotTurnExecutor,
         background_finalizer: Any,
         build_last_turn_result: Callable[..., dict[str, Any]],
@@ -49,12 +53,14 @@ class WritebackStage:
         self.project_service = project_service
         self.session_store = session_store
         self.memory_store = memory_store
+        self.settings_service = settings_service
+        self.memory_doc_service = memory_doc_service
         self.executor = executor
         self.background_finalizer = background_finalizer
         # Borrowed from FinalizeStage so we don't cross-import it.
         self._build_last_turn_result = build_last_turn_result
         # Back-ref to the orchestrator; lets us read mutable tunables
-        # (autocompact thresholds, board_deriver, …) at call time so tests can
+        # (autocompact thresholds, board_deriver, etc.) at call time so tests can
         # tweak them after construction.
         self._owner = owner
 
@@ -106,7 +112,7 @@ class WritebackStage:
         """Persist turn output with board-version conflict protection.
 
         Rejects writes whose ``board_before.board_version`` is older than the
-        current session board — protects concurrent turns / background
+        current session board - protects concurrent turns / background
         finalizers from clobbering newer state. The dropped result still emits
         a warning in ``warnings``.
         """
@@ -117,6 +123,8 @@ class WritebackStage:
         session_conflict = current_session_version > base_version and current_session is not session
         if session_conflict and current_session is not None:
             session = current_session
+        request_mode = str(getattr(request, "metadata", {}).get("session_mode") or getattr(session, "mode", "chat") or "chat")
+        session.mode = request_mode
         session.turn_mode = result.turn_mode_after
         warnings = list(result.warnings)
         if session_conflict:
@@ -141,11 +149,14 @@ class WritebackStage:
                 {"role": "assistant", "content": result.final_text},
             ]
         )
+        if not session.title_is_custom and not str(session.title or "").strip():
+            session.title = derive_session_title(request.user_message)
         current_project = self.project_service.get_project(project.project_id)
         if current_project is not None:
             project = current_project
         current_project_version = int(getattr(project, "board_version", 1) or 1)
         project.turn_mode = result.turn_mode_after
+        project.mode = request_mode
         if not session_conflict:
             project.board_version = max(current_project_version, int(result.board_after.board_version or 1))
         session.last_turn_result = self._build_last_turn_result(
@@ -159,29 +170,32 @@ class WritebackStage:
         project.current_main_goal = (
             request.turn_policy.main_goal if request.turn_policy else project.current_main_goal
         )
-        for item in result.memory_events:
-            self.memory_store.append(
-                MemoryEvent(
-                    event_id=str(uuid4()),
-                    kind=str(item.get("kind") or "event"),
-                    payload=dict(item.get("payload") or {}),
-                )
-            )
-        # P2: Persist learning_events (incl. signal_extractor output) to event store
-        for item in result.learning_events:
-            if hasattr(item, "event_id"):
-                self.memory_store.append(item)
-            elif isinstance(item, dict) and item.get("kind"):
+        memory_enabled = self.settings_service.memory_settings()["enabled"]
+        if memory_enabled:
+            for item in result.memory_events:
                 self.memory_store.append(
                     MemoryEvent(
-                        event_id=str(item.get("event_id") or uuid4()),
-                        kind=str(item["kind"]),
+                        event_id=str(uuid4()),
+                        kind=str(item.get("kind") or "event"),
                         payload=dict(item.get("payload") or {}),
                     )
                 )
+        # P2: Persist learning_events (incl. signal_extractor output) to event store
+        if memory_enabled:
+            for item in result.learning_events:
+                if hasattr(item, "event_id"):
+                    self.memory_store.append(item)
+                elif isinstance(item, dict) and item.get("kind"):
+                    self.memory_store.append(
+                        MemoryEvent(
+                            event_id=str(item.get("event_id") or uuid4()),
+                            kind=str(item["kind"]),
+                            payload=dict(item.get("payload") or {}),
+                        )
+                    )
         # P1: Record board_patch application as event for consolidation input
         board_patch = result.board_patch
-        if board_patch and not session_conflict:
+        if memory_enabled and board_patch and not session_conflict:
             self.memory_store.append(
                 MemoryEvent(
                     event_id=str(uuid4()),
@@ -196,8 +210,14 @@ class WritebackStage:
             )
         self._append_nanobot_history(project=project, session=session, result=result)
         self._maybe_compact_session(session)
-        self._maybe_consolidate_memory(project, session, result)
-        self._maybe_derive_board_snapshot(project=project, session=session, result=result)
+        if request_mode == "learning":
+            self._maybe_consolidate_memory(project, session, result)
+        self._sync_memory_documents(
+            session=session,
+            review_summary=str(getattr(result, "review_summary", "") or ""),
+        )
+        if request_mode == "learning":
+            self._maybe_derive_board_snapshot(project=project, session=session, result=result)
         if not session.source_refs and project.source_refs:
             session.source_refs = list(project.source_refs)
         self.session_store.save_session(session)
@@ -256,6 +276,7 @@ class WritebackStage:
         last_turn_result["warnings"] = warnings
         last_turn_result["product_compression"] = product_status
         session.last_turn_result = last_turn_result
+        self._sync_memory_documents(session=session, review_summary=review_summary)
         self._save_background_session_update(session)
         if status != "failed":
             self._save_background_project_update(project, session_id=session.session_id)
@@ -292,6 +313,8 @@ class WritebackStage:
     def _schedule_auxiliary_writeback(self, ctx: TurnContext) -> None:
         # Auxiliary post-turn enrichment must never become part of the main turn
         # completion contract. It always runs after core session/project writeback.
+        if str(getattr(ctx.session, "mode", "") or "chat") != "learning":
+            return
         self.background_finalizer.schedule(
             project=ctx.project,
             session=ctx.session,
@@ -326,6 +349,8 @@ class WritebackStage:
         session: LearningSession,
         result,
     ) -> None:
+        if not self.settings_service.memory_settings()["enabled"]:
+            return
         event_count = len(self.memory_store.list_events())
         if event_count == 0 or event_count % self.DREAM_CONSOLIDATION_EVENT_INTERVAL != 0:
             return
@@ -375,6 +400,38 @@ class WritebackStage:
                 )
             )
 
+    def _sync_memory_documents(self, *, session: LearningSession, review_summary: str = "") -> None:
+        if not self.settings_service.memory_settings()["enabled"]:
+            return
+        if not isinstance(self.memory_doc_service, MemoryDocStateService):
+            return
+        clean_review = str(review_summary or (session.pending_review or {}).get("summary") or "").strip()
+        if clean_review:
+            self.memory_doc_service.refresh_summary(clean_review)
+        events = self.memory_store.list_events_for_session(session.session_id)
+        for event in reversed(events):
+            if str(getattr(event, "kind", "") or "") != MemoryEventKind.PROFILE_CONSOLIDATED:
+                continue
+            payload = dict(getattr(event, "payload", {}) or {})
+            excerpt = str(payload.get("memory_excerpt") or "").strip()
+            source_key = str(payload.get("dream_cursor") or payload.get("event_id") or event.event_id or "").strip()
+            if not excerpt or not source_key:
+                return
+            self.memory_doc_service.append_auto_entry(
+                "profile",
+                source_key=f"dream:{source_key}",
+                title="长期画像",
+                body=excerpt,
+            )
+            # Mark profile as collected to prevent INTAKE re-trigger on new sessions
+            if not session.profile:
+                session.profile = {
+                    "consolidated_at": payload.get("dream_cursor"),
+                    "source": "nanobot_dream",
+                    "excerpt": excerpt[:200],  # Store a short excerpt for reference
+                }
+            return
+
     def _maybe_derive_board_snapshot(
         self,
         *,
@@ -385,7 +442,7 @@ class WritebackStage:
         """Q3: Periodically re-derive BoardFacts from event stream via LLM.
 
         Runs synchronously after writeback. If ``board_deriver`` is None
-        (default), no-op — preserves backward compat. On success, overwrites
+        (default), no-op - preserves backward compat. On success, overwrites
         ``session.board_facts`` and emits ``board_snapshot_derived`` for audit.
         """
         if self.board_deriver is None:
@@ -491,4 +548,5 @@ class WritebackStage:
             )
         except Exception:
             append_session_warning(session, "nanobot_history_append_failed")
+
 

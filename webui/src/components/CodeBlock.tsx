@@ -79,7 +79,7 @@ export function CodeBlock({ language, code, className }: CodeBlockProps) {
     >
       <div
         className={cn(
-          "flex items-center justify-between px-4 py-1.5 text-xs font-medium",
+          "flex items-center justify-between px-4 py-1.5 text-sm font-medium",
           isDark
             ? "bg-zinc-800 text-zinc-300"
             : "bg-zinc-100 text-zinc-600",

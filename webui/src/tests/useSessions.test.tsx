@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSessionHistory, useSessions } from "@/hooks/useSessions";
+import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
 import { ClientProvider } from "@/providers/ClientProvider";
 
@@ -148,7 +148,7 @@ describe("useSessions", () => {
           chatId: "chat-new",
           createdAt: "2026-04-16T10:00:00Z",
           updatedAt: "2026-04-16T10:00:00Z",
-          title: "latest session",
+          title: "",
           preview: "first message",
         },
       ]);
@@ -180,7 +180,7 @@ describe("useSessions", () => {
       await result.current.refresh();
     });
 
-    await waitFor(() => expect(result.current.sessions[0]?.title).toBe("latest session"));
+    await waitFor(() => expect(result.current.sessions[0]?.preview).toBe("first message"));
   });
 
   it("keeps the newest persisted session at the top even if the backend returns insertion order", async () => {
@@ -214,6 +214,69 @@ describe("useSessions", () => {
       "chat-new",
       "chat-old",
     ]);
+  });
+
+  it("moves a resumed older session to the top when its updatedAt becomes newer", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([
+        {
+          key: "chat-old",
+          channel: "",
+          chatId: "chat-old",
+          createdAt: "2026-05-22T10:00:00.000Z",
+          updatedAt: "2026-05-22T10:01:00.000Z",
+          title: "",
+          preview: "older first message",
+        },
+        {
+          key: "chat-new",
+          channel: "",
+          chatId: "chat-new",
+          createdAt: "2026-05-22T10:20:00.000Z",
+          updatedAt: "2026-05-22T10:21:00.000Z",
+          title: "",
+          preview: "newer first message",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          key: "chat-old",
+          channel: "",
+          chatId: "chat-old",
+          createdAt: "2026-05-22T10:00:00.000Z",
+          updatedAt: "2026-05-24T09:30:00.000Z",
+          title: "",
+          preview: "older first message",
+        },
+        {
+          key: "chat-new",
+          channel: "",
+          chatId: "chat-new",
+          createdAt: "2026-05-22T10:20:00.000Z",
+          updatedAt: "2026-05-22T10:21:00.000Z",
+          title: "",
+          preview: "newer first message",
+        },
+      ]);
+
+    const client = fakeClient();
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.sessions.map((session) => session.key)).toEqual([
+      "chat-new",
+      "chat-old",
+    ]));
+
+    act(() => {
+      client.emitSessionUpdate("chat-old");
+    });
+
+    await waitFor(() => expect(result.current.sessions.map((session) => session.key)).toEqual([
+      "chat-old",
+      "chat-new",
+    ]));
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {
@@ -462,5 +525,34 @@ describe("useSessions", () => {
 
     expect(api.updateSessionTitle).toHaveBeenCalledWith("tok", "chat-a", "Custom name");
     expect(result.current.sessions[0]?.title).toBe("Custom name");
+  });
+
+  it("uses the first user message as the default title until the user renames the session", () => {
+    const autoTitle = sessionTitle({
+      key: "chat-a",
+      channel: "",
+      chatId: "chat-a",
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      title: "Generated title",
+      titleIsCustom: false,
+      preview: "This is the first user sentence that should become the default title",
+    });
+
+    expect(autoTitle.startsWith("This is the first user sentence")).toBe(true);
+    expect(autoTitle.endsWith("...")).toBe(true);
+
+    expect(
+      sessionTitle({
+        key: "chat-b",
+        channel: "",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Custom name",
+        titleIsCustom: true,
+        preview: "This preview should not override the custom title",
+      }),
+    ).toBe("Custom name");
   });
 });

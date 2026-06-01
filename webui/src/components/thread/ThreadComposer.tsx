@@ -11,12 +11,15 @@ import {
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   Activity,
+  ArrowRight,
   ArrowUp,
   BookOpen,
+  BrainCircuit,
   Check,
   ChevronDown,
   ChevronUp,
   CircleHelp,
+  Database,
   History,
   ImageIcon,
   Loader2,
@@ -27,6 +30,7 @@ import {
   SquarePen,
   Target,
   Undo2,
+  Workflow,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -71,11 +75,18 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   imageMode?: boolean;
   onImageModeChange?: (enabled: boolean) => void;
+  sessionMode?: "chat" | "learning";
+  onSessionModeChange?: (mode: "chat" | "learning") => void;
+  learningPromptVisible?: boolean;
+  onLearningPromptAccept?: () => void;
+  onLearningPromptDismiss?: () => void;
   onStop?: () => void;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
+  /** Overlay rendered inside the composer container (e.g. intake questionnaire). */
+  intakeOverlay?: React.ReactNode;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -97,6 +108,24 @@ const SLASH_PALETTE_GAP_PX = 8;
 const SLASH_PALETTE_MAX_HEIGHT_PX = 288;
 const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 64;
+const HERO_TOPIC_SUGGESTIONS = [
+  {
+    label: "\u6211\u4e00\u76f4\u542c\u4eba\u8bf4 AI\uff0c\u5b83\u5230\u5e95\u662f\u4e2a\u4ec0\u4e48\u4e1c\u897f\uff1f",
+    prompt: "\u7528\u6700\u7b80\u5355\u7684\u8bdd\u8bb2\u8bb2\uff0cAI \u5230\u5e95\u662f\u4ec0\u4e48\uff1f",
+    icon: BrainCircuit,
+  },
+  {
+    label: "ChatGPT \u4e3a\u4ec0\u4e48\u80fd\u542c\u61c2\u6211\u8bf4\u8bdd\uff0c\u80cc\u540e\u662f\u600e\u4e48\u56de\u4e8b\uff1f",
+    prompt: "\u5927\u8bed\u8a00\u6a21\u578b\u662f\u600e\u4e48\u5b66\u4f1a\u8bf4\u8bdd\u7684\uff1f",
+    icon: Workflow,
+  },
+  {
+    label: "\u6211\u6709\u4e00\u5806\u8d44\u6599\u60f3\u8ba9 AI \u5e2e\u6211\u67e5\uff0c\u8be5\u600e\u4e48\u5f04\uff1f",
+    prompt: "RAG \u662f\u600e\u4e48\u5e2e AI \u67e5\u6211\u7684\u8d44\u6599\u7684\uff1f",
+    icon: Database,
+  },
+] as const;
+
 
 type SlashPalettePlacement = "above" | "below";
 
@@ -275,53 +304,8 @@ function RunElapsedStrip({
 
   return (
     <div ref={stripWrapperRef} className="relative z-30">
-      {goalPanelOpen && canExpandGoal && markdownBody ? (
-        <div
-          ref={panelRef}
-          id="nanobot-goal-panel-root"
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="nanobot-goal-panel-title"
-          tabIndex={-1}
-          className={cn(
-            "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
-            "rounded-2xl border border-black/[0.08] bg-card shadow-[0_12px_40px_rgba(15,23,42,0.14)]",
-            "backdrop-blur-sm dark:border-white/[0.1] dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]",
-          )}
-          style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
-        >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
-            <h2
-              id="nanobot-goal-panel-title"
-              className="min-w-0 truncate text-[13px] font-semibold tracking-tight text-foreground"
-            >
-              {t("thread.composer.goalStateSheetTitle")}
-            </h2>
-            <button
-              type="button"
-              className={cn(
-                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              )}
-              aria-label={t("thread.composer.goalStateCloseAria")}
-              onClick={() => setGoalPanelOpen(false)}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          <div
-            id="nanobot-goal-panel-scroll"
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
-          >
-            <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
-              {markdownBody}
-            </MarkdownText>
-          </div>
-        </div>
-      ) : null}
       <div
-        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+        className="flex min-h-[36px] items-center gap-2 px-3 py-2"
         role="status"
         aria-label={ariaLabel}
       >
@@ -330,7 +314,7 @@ function RunElapsedStrip({
         ) : (
           <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
         )}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium text-foreground/75">
           {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
           {timerTitle && showGoal ? (
             <span className="shrink-0 text-muted-foreground/45" aria-hidden>
@@ -339,7 +323,7 @@ function RunElapsedStrip({
           ) : null}
           {showGoal ? (
             <span className="truncate">
-              {t("thread.composer.goalStateStrip", { label: stripLabel })}
+              {stripLabel}
             </span>
           ) : null}
         </span>
@@ -353,7 +337,6 @@ function RunElapsedStrip({
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             aria-expanded={goalPanelOpen}
-            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
             aria-label={t("thread.composer.goalStateExpandAria")}
             title={t("thread.composer.goalStateExpandAria")}
             onClick={() => setGoalPanelOpen((o) => !o)}
@@ -366,6 +349,67 @@ function RunElapsedStrip({
           </button>
         ) : null}
       </div>
+      {goalPanelOpen && canExpandGoal && markdownBody ? (
+        <div
+          ref={panelRef}
+          id="nanobot-goal-panel-root"
+          role="dialog"
+          aria-label={t("thread.composer.goalPanelLabel")}
+          className="border-t border-border/40 px-3 pb-3 pt-2"
+          style={{ maxHeight: `${Math.round(panelMaxPx)}px`, overflowY: "auto" }}
+        >
+          <MarkdownText className="max-w-none text-sm leading-relaxed text-foreground/90">
+            {markdownBody}
+          </MarkdownText>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LearningPromptStrip({
+  onAccept,
+  onDismiss,
+}: {
+  onAccept?: () => void;
+  onDismiss?: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      className="flex min-h-[42px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+      role="status"
+      aria-live="polite"
+    >
+      <Sparkles className="h-4 w-4 shrink-0 text-foreground/75" aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground/75">
+        {t("thread.learningPrompt.title")} CoLearn将和你一起学习
+      </span>
+      <button
+        type="button"
+        aria-label={t("thread.learningPrompt.dismiss")}
+        onClick={onDismiss}
+        className={cn(
+          "shrink-0 rounded-[10px] px-2.5 py-1.5 text-sm text-muted-foreground",
+          "transition-colors hover:bg-muted/65 hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        {t("thread.learningPrompt.dismiss")}
+      </button>
+      <button
+        type="button"
+        aria-label={t("thread.learningPrompt.accept")}
+        onClick={onAccept}
+        className={cn(
+          "shrink-0 rounded-[10px] bg-[#013FF8] px-3 py-1.5 text-sm font-medium text-white",
+          "transition-colors hover:bg-[#0137d8]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        {t("thread.learningPrompt.accept")}
+      </button>
     </div>
   );
 }
@@ -380,9 +424,15 @@ export function ThreadComposer({
   slashCommands = [],
   imageMode: controlledImageMode,
   onImageModeChange,
+  sessionMode = "chat",
+  onSessionModeChange,
+  learningPromptVisible = false,
+  onLearningPromptAccept,
+  onLearningPromptDismiss,
   onStop,
   runStartedAt = null,
   goalState,
+  intakeOverlay,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -400,6 +450,7 @@ export function ThreadComposer({
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
   const imageMode = controlledImageMode ?? uncontrolledImageMode;
+  const learningMode = sessionMode === "learning";
   const setImageMode = useCallback(
     (enabled: boolean) => {
       if (controlledImageMode === undefined) {
@@ -409,6 +460,10 @@ export function ThreadComposer({
     },
     [controlledImageMode, onImageModeChange],
   );
+  const toggleLearningMode = useCallback(() => {
+    onSessionModeChange?.(learningMode ? "chat" : "learning");
+    textareaRef.current?.focus();
+  }, [learningMode, onSessionModeChange]);
   const placeholderItems = Array.isArray(placeholder) ? placeholder.filter(Boolean) : [];
 
   useEffect(() => {
@@ -677,6 +732,16 @@ export function ThreadComposer({
     }
   }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
+  const insertHeroTopic = useCallback((topic: string) => {
+    setValue(topic);
+    setSlashMenuDismissed(false);
+    setInlineError(null);
+    requestAnimationFrame(() => {
+      resizeTextarea();
+      textareaRef.current?.focus();
+    });
+  }, [resizeTextarea]);
+
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlashMenu) {
       if (e.key === "ArrowDown") {
@@ -766,9 +831,9 @@ export function ThreadComposer({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
-    >
-      {showSlashMenu ? (
-        <SlashCommandPalette
+      >
+        {showSlashMenu ? (
+          <SlashCommandPalette
           commands={filteredSlashCommands}
           selectedIndex={selectedCommandIndex}
           layout={slashPaletteLayout}
@@ -781,16 +846,23 @@ export function ThreadComposer({
         className={cn(
           "relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-[28px] border border-black/[0.14] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.16] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
-            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.14] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.16] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
+            ? "max-w-[58rem] rounded-[28px] border border-black/[0.14] bg-card shadow-[0_4px_16px_rgba(15,23,42,0.06)] dark:border-white/[0.16] dark:shadow-[0_4px_16px_rgba(0,0,0,0.25)]"
+            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.14] bg-card shadow-[0_3px_12px_rgba(15,23,42,0.05)] dark:border-white/[0.16] dark:shadow-[0_3px_12px_rgba(0,0,0,0.2)]",
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
-          goalState?.active &&
-            "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
+          (learningMode || goalState?.active)
+            && "goal-shell-glow ring-1 ring-[#013FF8]/35 motion-reduce:ring-[#013FF8]/25 dark:ring-[#013FF8]/45",
         )}
       >
-        {images.length > 0 ? (
+        {intakeOverlay || null}
+        {!intakeOverlay && learningPromptVisible ? (
+          <LearningPromptStrip
+            onAccept={onLearningPromptAccept}
+            onDismiss={onLearningPromptDismiss}
+          />
+        ) : null}
+        {!intakeOverlay && images.length > 0 ? (
           <div
             className="flex flex-wrap gap-2 px-3 pt-3"
             aria-label={t("thread.composer.attachImage")}
@@ -818,7 +890,7 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        {runStartedAt != null || goalState?.active ? (
+        {!intakeOverlay && (runStartedAt != null || goalState?.active) ? (
           <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         ) : null}
         <textarea
@@ -838,11 +910,12 @@ export function ThreadComposer({
           className={cn(
             "w-full resize-none bg-transparent",
             isHero
-              ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
-              : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
+              ? "min-h-[78px] px-5 pb-2 pt-5 text-sm leading-6"
+              : "min-h-[50px] px-4 pb-1.5 pt-3 text-sm leading-5",
             "placeholder:text-muted-foreground/70",
             "focus:outline-none focus-visible:outline-none",
             "disabled:cursor-not-allowed",
+            intakeOverlay && "hidden",
           )}
         />
         {inlineError ? (
@@ -850,7 +923,7 @@ export function ThreadComposer({
             role="alert"
             className={cn(
               "mx-3 mb-1 rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive",
+              "text-sm font-medium text-destructive",
             )}
           >
             {inlineError}
@@ -860,6 +933,7 @@ export function ThreadComposer({
           className={cn(
             "flex items-center justify-between gap-2",
             isHero ? "px-4 pb-4" : "px-3 pb-2",
+            intakeOverlay && "hidden",
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
@@ -880,14 +954,33 @@ export function ThreadComposer({
               onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "rounded-full text-muted-foreground hover:text-foreground",
-                isHero
-                  ? "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
-                  : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+                isHero ? "h-9 w-9 bg-card hover:bg-card" : "h-9 w-9 bg-card hover:bg-card",
               )}
             >
               <Plus className={cn(isHero ? "h-5 w-5" : "h-5 w-5")} />
             </Button>
             <div ref={aspectControlRef} className="relative flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={disabled}
+                aria-pressed={learningMode}
+                aria-label={t("thread.composer.learningMode.toggle")}
+                title={t("thread.composer.learningMode.toggle")}
+                onClick={toggleLearningMode}
+                className={cn(
+                  "rounded-full px-2.5 font-medium",
+                  "h-9 text-sm",
+                  learningMode
+                    ? "bg-[#013FF8]/10 text-[#013FF8] hover:bg-[#013FF8]/14 dark:bg-[#013FF8]/16 dark:text-[#7DA0FF] dark:hover:bg-[#013FF8]/22"
+                    : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                )}
+              >
+                <BookOpen className={cn("mr-1.5", isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
+                {learningMode
+                  ? t("thread.composer.learningMode.learning")
+                  : t("thread.composer.learningMode.chat")}
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
@@ -900,8 +993,8 @@ export function ThreadComposer({
                   textareaRef.current?.focus();
                 }}
                 className={cn(
-                  "rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
-                  isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  "rounded-full px-2.5 font-medium",
+                  "h-9 text-sm",
                   imageMode
                     ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
                     : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
@@ -920,8 +1013,8 @@ export function ThreadComposer({
                   aria-label={t("thread.composer.imageMode.aspectAria")}
                   onClick={() => setAspectMenuOpen((open) => !open)}
                   className={cn(
-                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
-                    isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                    "rounded-full bg-card px-2.5 font-medium text-foreground/80 hover:bg-card",
+                    "h-9 text-sm",
                   )}
                 >
                   <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
@@ -948,8 +1041,8 @@ export function ThreadComposer({
                 className={cn(
                   "inline-flex min-w-0 font-medium text-foreground/72",
                   isHero
-                    ? "max-w-[13rem] text-[12px]"
-                    : "max-w-[12rem] text-[12px]",
+                    ? "max-w-[13rem] text-sm"
+                    : "max-w-[12rem] text-sm",
                 )}
               >
                 <span className="truncate">{modelLabel}</span>
@@ -957,32 +1050,72 @@ export function ThreadComposer({
             ) : null}
             <Button
               type={showStopButton ? "button" : "submit"}
+              variant="ghost"
               size="icon"
               disabled={showStopButton ? disabled : !canSend}
               aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
               onClick={showStopButton ? onStop : undefined}
               className={cn(
-                "rounded-full transition-transform",
+                "rounded-full transition-transform disabled:opacity-100",
                 showStopButton
-                  ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
-                  : isHero
-                    ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
-                    : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
-                isHero ? "" : "h-9 w-9",
+                  ? "bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
+                  : canSend
+                    ? "!bg-[#1A1C1F] text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:!bg-[#1A1C1F]/90 disabled:!bg-[#1A1C1F]/35 disabled:text-background/80"
+                    : "!bg-[#8C8D8F] text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:!bg-[#8C8D8F]/90 disabled:!bg-[#8C8D8F]/35 disabled:text-background/80",
+                isHero ? "" : "h-8 w-8",
                 (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
               )}
             >
               {showStopButton ? (
                 <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3 w-3")} />
               ) : isStreaming ? (
-                <Loader2 className={cn(isHero ? "h-4.5 w-4.5" : "h-4.5 w-4.5", "animate-spin")} />
+                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
               ) : (
-                <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4.5 w-4.5")} />
+                <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
               )}
             </Button>
           </div>
         </div>
       </div>
+      {isHero ? (
+        <div className="mt-4 w-full max-w-[58rem] overflow-hidden rounded-2xl">
+          {HERO_TOPIC_SUGGESTIONS.map((topic, index) => {
+            const Icon = topic.icon;
+            return (
+              <button
+                key={topic.label}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertHeroTopic(topic.prompt);
+                }}
+                className={cn(
+                  "group flex w-full items-center gap-3 px-3 py-3 text-left",
+                  "transition-colors hover:bg-accent/40",
+                  "focus-visible:outline-none focus-visible:bg-accent/40",
+                  index > 0 && "border-t border-border/40",
+                )}
+              >
+                <Icon
+                  className="h-[18px] w-[18px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground/80 transition-colors group-hover:text-foreground">
+                  {topic.label}
+                </span>
+                <ArrowRight
+                  className={cn(
+                    "h-[18px] w-[18px] shrink-0 text-muted-foreground",
+                    "translate-x-1 opacity-0 transition-all",
+                    "group-hover:translate-x-0 group-hover:opacity-100",
+                  )}
+                  aria-hidden
+                />
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -1015,7 +1148,7 @@ function ImageAspectMenu({
         isHero ? "top-full mt-2" : "bottom-full mb-2",
         "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_16px_45px_rgba(15,23,42,0.16)]",
         "dark:border-white/10 dark:shadow-[0_18px_45px_rgba(0,0,0,0.42)]",
-        isHero ? "text-[12px]" : "text-[11.5px]",
+        "text-sm",
       )}
     >
       <div className="px-2 pb-1 pt-1 font-medium text-muted-foreground/70">
@@ -1075,7 +1208,7 @@ function SlashCommandPalette({
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >
-      <div className="px-2 pb-1 pt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground/70">
+      <div className="px-2 pb-1 pt-1 text-sm font-medium tracking-[0.08em] text-muted-foreground/70">
         {t("thread.composer.slash.label")}
       </div>
       <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
@@ -1119,19 +1252,19 @@ function SlashCommandPalette({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="font-mono text-[13px] font-semibold text-foreground">
+                  <span className="font-mono text-sm font-semibold text-foreground">
                     {command.command}
                   </span>
                   {command.argHint ? (
-                    <span className="font-mono text-[12px] text-muted-foreground">
+                    <span className="font-mono text-sm text-muted-foreground">
                       {command.argHint}
                     </span>
                   ) : null}
-                  <span className="truncate text-[13px] font-medium">
+                  <span className="truncate text-sm font-medium">
                     {title}
                   </span>
                 </span>
-                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                <span className="mt-0.5 block truncate text-sm text-muted-foreground">
                   {description}
                 </span>
               </span>
@@ -1139,7 +1272,7 @@ function SlashCommandPalette({
           );
         })}
       </div>
-      <div className="flex items-center gap-2 px-2 pt-1.5 text-[10.5px] text-muted-foreground/70">
+      <div className="flex items-center gap-2 px-2 pt-1.5 text-sm text-muted-foreground/70">
         <span>{t("thread.composer.slash.navigateHint")}</span>
         <span>{t("thread.composer.slash.selectHint")}</span>
         <span>{t("thread.composer.slash.closeHint")}</span>
@@ -1211,7 +1344,7 @@ function AttachmentChip({
           </div>
         ) : null}
       </div>
-      <div className="flex min-w-0 flex-col text-[11.5px] leading-4">
+      <div className="flex min-w-0 flex-col text-sm leading-4">
         <span className="truncate max-w-[14rem] font-medium" title={image.file.name}>
           {image.file.name}
         </span>

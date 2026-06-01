@@ -39,7 +39,7 @@ export function ConnectionBadge() {
   return (
     <span
       className={cn(
-        "inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors",
+        "inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium transition-colors",
         meta.color,
       )}
       aria-live="polite"

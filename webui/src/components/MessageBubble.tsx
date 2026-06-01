@@ -86,7 +86,7 @@ export function MessageBubble({
           <p
             className={cn(
               "ml-auto w-fit rounded-[18px] bg-secondary/70 px-4 py-2",
-              "text-left text-[16px]/[1.75] whitespace-pre-wrap break-words",
+              "text-left text-sm/[1.75] whitespace-pre-wrap break-words",
             )}
           >
             {message.content}
@@ -112,7 +112,7 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const showAssistantFooterRow = showCopyButton || showLatencyFooter;
   return (
-    <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
+    <div className={cn("w-full text-sm", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
         <ReasoningBubble text={reasoning} streaming={reasoningStreaming} hasBodyBelow={!empty} />
       ) : null}
@@ -145,7 +145,7 @@ export function MessageBubble({
               ) : null}
               {showLatencyFooter ? (
                 <span
-                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                  className="text-sm leading-none text-muted-foreground/70 tabular-nums"
                   title={t("message.turnLatencyTitle")}
                 >
                   {formatTurnLatency(latencyMs)}
@@ -204,7 +204,7 @@ function MediaCell({ media }: { media: UIMediaAttachment }) {
           aria-label={media.name ? `${t("message.videoAttachment", { defaultValue: "Video attachment" })}: ${media.name}` : t("message.videoAttachment", { defaultValue: "Video attachment" })}
         />
         {media.name ? (
-          <figcaption className="truncate px-3 py-1.5 text-[11.5px] text-muted-foreground">
+          <figcaption className="truncate px-3 py-1.5 text-sm text-muted-foreground">
             {media.name}
           </figcaption>
         ) : null}
@@ -232,7 +232,7 @@ function MediaCell({ media }: { media: UIMediaAttachment }) {
         download={media.name ?? label}
         title={media.name ?? undefined}
         aria-label={label}
-        className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground hover:underline"
+        className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-sm text-muted-foreground hover:underline"
       >
         {inner}
       </a>
@@ -241,7 +241,7 @@ function MediaCell({ media }: { media: UIMediaAttachment }) {
 
   return (
     <div
-      className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+      className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
       title={media.name ?? undefined}
       aria-label={label}
     >
@@ -377,7 +377,7 @@ function UserImageCell({
   return (
     <div className={tileClasses} title={image.name ?? undefined}>
       <div
-        className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-[11px] text-muted-foreground"
+        className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-sm text-muted-foreground"
         aria-label={placeholderLabel}
       >
         <ImageIcon className="h-4 w-4 flex-none" aria-hidden />
@@ -489,7 +489,7 @@ export function ReasoningBubble({
         onClick={onToggle}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
-          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
+          "text-sm text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={open}
         aria-live={streaming ? "polite" : undefined}
@@ -520,11 +520,11 @@ export function ReasoningBubble({
         >
           <MarkdownText
             className={cn(
-              "text-[12.5px] italic text-muted-foreground/88",
+              "text-sm italic text-muted-foreground/88",
               "prose-p:my-1.5 prose-li:my-0.5",
               "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
               "prose-headings:text-muted-foreground/92 prose-strong:text-muted-foreground",
-              "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
+              "prose-h1:text-[15px] prose-h2:text-sm prose-h3:text-sm prose-h4:text-sm",
               "prose-a:text-muted-foreground/95 prose-a:underline hover:prose-a:opacity-90",
               "prose-code:text-[0.92em]",
             )}
@@ -559,7 +559,7 @@ export function TraceGroup({ message, animClass }: TraceGroupProps) {
         onClick={() => setOpen((v) => !v)}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
-          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
+          "text-sm text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={open}
       >
@@ -587,7 +587,7 @@ export function TraceGroup({ message, animClass }: TraceGroupProps) {
           {lines.map((line, i) => (
             <li
               key={i}
-              className="whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-muted-foreground/90"
+              className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-muted-foreground/90"
             >
               {line}
             </li>

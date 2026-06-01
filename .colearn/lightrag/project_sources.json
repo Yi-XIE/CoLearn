@@ -1,0 +1,26 @@
+{
+  "default-project": {
+    "project_id": "default-project",
+    "indexed_paths": [],
+    "source_count": 0,
+    "source_refs": []
+  },
+  "proj-tools-2": {
+    "project_id": "proj-tools-2",
+    "indexed_paths": [],
+    "source_count": 1,
+    "source_refs": [
+      {
+        "source_ref": "note-1",
+        "chunk_id": "c-1",
+        "support_type": "definition"
+      }
+    ]
+  },
+  "proj-count": {
+    "project_id": "proj-count",
+    "indexed_paths": [],
+    "source_count": 0,
+    "source_refs": []
+  }
+}

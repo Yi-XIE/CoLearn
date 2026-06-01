@@ -27,7 +27,10 @@ def test_turn_timeout_raises_when_bot_hangs():
             return SimpleNamespace(content="never", messages=[], tools_used=[])
 
     executor = NanobotTurnExecutor(_bot=HangingBot())
-    request = _make_request(metadata={"turn_timeout_seconds": 0.1, "_runtime_warnings": []})
+    request = _make_request(
+        enabled_tools=["__none__"],
+        metadata={"turn_timeout_seconds": 0.1, "_runtime_warnings": []},
+    )
 
     async def run():
         return await executor._run_turn_async(request=request)
@@ -44,7 +47,10 @@ def test_turn_completes_within_timeout():
             return SimpleNamespace(content="done", messages=[], tools_used=[])
 
     executor = NanobotTurnExecutor(_bot=FastBot())
-    request = _make_request(metadata={"turn_timeout_seconds": 5.0, "_runtime_warnings": []})
+    request = _make_request(
+        enabled_tools=["__none__"],
+        metadata={"turn_timeout_seconds": 5.0, "_runtime_warnings": []},
+    )
 
     async def run():
         return await executor._run_turn_async(request=request)
@@ -62,7 +68,7 @@ def test_no_timeout_means_no_wait_for():
             return SimpleNamespace(content="ok", messages=[], tools_used=[])
 
     executor = NanobotTurnExecutor(_bot=FastBot())
-    request = _make_request()
+    request = _make_request(enabled_tools=["__none__"])
 
     async def run():
         return await executor._run_turn_async(request=request)
@@ -79,7 +85,10 @@ def test_zero_or_negative_timeout_disables_check():
             return SimpleNamespace(content="ok", messages=[], tools_used=[])
 
     executor = NanobotTurnExecutor(_bot=FastBot())
-    request = _make_request(metadata={"turn_timeout_seconds": 0, "_runtime_warnings": []})
+    request = _make_request(
+        enabled_tools=["__none__"],
+        metadata={"turn_timeout_seconds": 0, "_runtime_warnings": []},
+    )
 
     async def run():
         return await executor._run_turn_async(request=request)

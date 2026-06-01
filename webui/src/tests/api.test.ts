@@ -3,14 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteSession,
   fetchLearningSupport,
+  fetchKnowledgeFilePreview,
+  fetchSettings,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
+  updateMemorySettings,
   updateSessionTitle,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
 } from "@/lib/api";
+import { deriveTitle } from "@/lib/format";
 
 describe("webui API helpers", () => {
   beforeEach(() => {
@@ -40,6 +44,22 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/v1/sessions/chat-1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("keeps knowledge preview path separators while encoding each segment", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ name: "note.md", path: "folder/note one.md", kind: "markdown", content: "# Note" }),
+    } as Response);
+
+    await fetchKnowledgeFilePreview("tok", "kb alpha", "folder/note one.md");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/knowledge/kb%20alpha/files/folder/note%20one.md/preview",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -87,12 +107,23 @@ describe("webui API helpers", () => {
         session: {
           last_turn_result: {
             runtime_v2: {
-              retrieval: {
-                prompt_support_bundle: [
-                  {
-                    source_ref: "note.md",
-                    chunk_id: "c1",
-                    support_type: "definition",
+              turn_mode: "CHECK",
+              learning_plan: {
+                goal: "Core mechanics",
+                current_node_id: "node-1",
+                plan_nodes: [{ id: "node-1", label: "Forces" }],
+              },
+              learning_board: {
+                current_progress: "Forces",
+                completed_nodes: ["node-0"],
+              },
+                retrieval: {
+                  retrieval_active: true,
+                  prompt_support_bundle: [
+                    {
+                      source_ref: "note.md",
+                      chunk_id: "c1",
+                      support_type: "definition",
                     summary: "Core idea",
                   },
                 ],
@@ -114,6 +145,46 @@ describe("webui API helpers", () => {
       }),
     );
     expect(support?.prompt_support_bundle[0]?.summary).toBe("Core idea");
+    expect(support?.turn_mode).toBe("CHECK");
+    expect(support?.learning_plan?.goal).toBe("Core mechanics");
+    expect(support?.learning_board?.current_progress).toBe("Forces");
+  });
+
+  it("returns learning support when only plan and board state are present", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        session: {
+          last_turn_result: {
+            runtime_v2: {
+              turn_mode: "LEARN",
+              learning_plan: {
+                goal: "Energy conservation",
+                current_node_id: "node-work",
+                plan_nodes: [{ id: "node-work", label: "Work and energy" }],
+              },
+              learning_board: {
+                current_progress: "Work and energy",
+                completed_nodes: [],
+              },
+              retrieval: {
+                retrieval_active: false,
+                prompt_support_bundle: [],
+                retrieval_hits: [],
+                retrieval_misses: [],
+              },
+            },
+          },
+        },
+      }),
+    } as Response);
+
+    const support = await fetchLearningSupport("tok", "session-board-only");
+
+    expect(support?.retrieval_active).toBe(false);
+    expect(support?.turn_mode).toBe("LEARN");
+    expect(support?.learning_plan?.goal).toBe("Energy conservation");
+    expect(support?.prompt_support_bundle).toEqual([]);
   });
 
   it("returns null when retrieval metadata only exists in deprecated top-level fields", async () => {
@@ -188,6 +259,7 @@ describe("webui API helpers", () => {
             },
           },
           providers: { search: [] },
+          memory: { enabled: true },
           runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
@@ -277,6 +349,7 @@ describe("webui API helpers", () => {
             },
           },
           providers: { search: [] },
+          memory: { enabled: true },
           runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
@@ -343,6 +416,7 @@ describe("webui API helpers", () => {
           providers: {
             search: [{ value: "searxng", label: "SearXNG", credential: "base_url" }],
           },
+          memory: { enabled: false },
           runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
         }),
       } as Response);
@@ -365,7 +439,57 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("maps generated session titles from the sessions list", async () => {
+  it("normalizes memory settings from the settings payload", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        catalog: { services: {} },
+        providers: { search: [] },
+        memory: { enabled: false },
+        runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
+      }),
+    } as Response);
+
+    await expect(fetchSettings("tok")).resolves.toMatchObject({
+      memory: { enabled: false },
+    });
+  });
+
+  it("updates memory settings through the dedicated endpoint", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ memory: { enabled: false } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          catalog: { services: {} },
+          providers: { search: [] },
+          memory: { enabled: false },
+          runtime: { config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json" },
+        }),
+      } as Response);
+
+    await expect(updateMemorySettings("tok", { enabled: false })).resolves.toMatchObject({
+      memory: { enabled: false },
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/settings/memory",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({ enabled: false }),
+      }),
+    );
+  });
+
+  it("preserves only custom titles from the sessions list", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -374,7 +498,9 @@ describe("webui API helpers", () => {
             session_id: "websocket:chat-1",
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
-            title: "Generated title",
+            title: "",
+            title_is_custom: false,
+            last_message: "First user sentence",
           },
         ],
       }),
@@ -385,8 +511,9 @@ describe("webui API helpers", () => {
         key: "websocket:chat-1",
         channel: "websocket",
         chatId: "chat-1",
-        title: "Generated title",
-        preview: "",
+        title: "",
+        titleIsCustom: false,
+        preview: "First user sentence",
       },
     ]);
   });
@@ -413,6 +540,17 @@ describe("webui API helpers", () => {
         updatedAt: "2026-05-22T12:39:28.000Z",
       }),
     ]);
+  });
+
+  it("truncates long default chat titles to a single compact line", () => {
+    const title = deriveTitle(
+      "This is a very long first user sentence that should become the default title and be truncated neatly for the sidebar",
+      "New chat",
+    );
+
+    expect(title).toHaveLength(60);
+    expect(title.startsWith("This is a very long first user sentence")).toBe(true);
+    expect(title.endsWith("...")).toBe(true);
   });
 
   it("keeps slash commands empty when the backend does not expose them", async () => {

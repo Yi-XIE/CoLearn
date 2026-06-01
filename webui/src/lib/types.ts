@@ -89,7 +89,9 @@ export interface ChatSummary {
   createdAt: string | null;
   updatedAt: string | null;
   title?: string;
+  titleIsCustom?: boolean;
   preview: string;
+  mode?: "chat" | "learning";
 }
 
 export interface LearningSupportItem {
@@ -107,6 +109,43 @@ export interface LearningSupportItem {
 }
 
 export interface LearningSupportPayload {
+  retrieval_active?: boolean;
+  turn_mode?: string;
+  learning_phase?: string;
+  session_mode?: "chat" | "learning";
+  mastery_level?: number;
+  learning_duration_minutes?: number;
+  learning_plan?: {
+    goal?: string;
+    current_node_id?: string;
+    plan_nodes?: Array<{
+      id?: string;
+      label?: string;
+      status?: string;
+      summary?: string;
+    }>;
+    review_queue?: string[];
+    pending_checks?: string[];
+  };
+  learning_board?: {
+    current_progress?: string;
+    completed_nodes?: string[];
+    blockers?: string[];
+    objections?: string[];
+    evidence_refs?: string[];
+    continuation?: string;
+  };
+  session_summary?: {
+    topics_covered?: string[];
+    concepts_mastered?: string[];
+    concepts_blocked?: string[];
+    duration_minutes?: number;
+    next_focus?: string;
+  };
+  next_recall?: {
+    next_recall_at?: string;
+    recall_items?: Array<{ concept: string; priority: string }>;
+  };
   prompt_support_bundle: LearningSupportItem[];
   retrieval_hits: LearningSupportItem[];
   retrieval_misses: Array<Record<string, unknown>>;
@@ -147,6 +186,9 @@ export interface SettingsPayload {
       credential: "none" | "api_key" | "base_url";
     }>;
   };
+  memory: {
+    enabled: boolean;
+  };
   runtime: {
     config_path: string;
   };
@@ -167,9 +209,17 @@ export interface ProviderSettingsUpdate {
 export interface KnowledgeFileSummary {
   name: string;
   path: string;
+  source_path?: string;
   size: number;
   modified: number;
   mime_type?: string | null;
+}
+
+export interface KnowledgeFilePreview {
+  name: string;
+  path: string;
+  kind: "markdown" | "text" | "unsupported";
+  content: string;
 }
 
 export interface KnowledgeBaseSummary {
@@ -220,6 +270,9 @@ export interface KnowledgeGraphEdge {
 export interface KnowledgeGraphPayload {
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
+  visualization_url?: string | null;
+  provider?: string | null;
+  sync_status?: string | null;
 }
 
 export interface MemorySummaryItem {
@@ -258,6 +311,11 @@ export interface SkillSummary {
   name: string;
   description: string;
   tags: string[];
+  always?: boolean;
+}
+
+export interface SkillDetail extends SkillSummary {
+  content: string;
 }
 
 export interface WebSearchSettingsUpdate {
@@ -369,6 +427,8 @@ export interface OutboundImageGeneration {
   aspect_ratio?: string | null;
 }
 
+export type SessionMode = "chat" | "learning";
+
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
@@ -386,6 +446,7 @@ export type Outbound =
       content: string;
       media?: OutboundMedia[];
       image_generation?: OutboundImageGeneration;
+      mode?: SessionMode;
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

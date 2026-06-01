@@ -2,7 +2,7 @@
   "agents": {
     "defaults": {
       "workspace": "./.colearn/nanobot-workspace",
-      "provider": "openai",
+      "provider": "deepseek",
       "model": "deepseek-v4-flash",
       "fallbackModels": [],
       "maxToolIterations": 80,
@@ -32,7 +32,7 @@
       "streaming": true,
       "websocketRequiresToken": true,
       "tokenIssuePath": "/auth/token",
-      "tokenIssueSecret": "${COLEARN_NANOBOT_TOKEN_ISSUE_SECRET}"
+      "tokenIssueSecret": ""
     }
   },
   "gateway": {
@@ -57,9 +57,9 @@
     "mcpServers": {}
   },
   "providers": {
-    "openai": {
-      "apiKey": "${OPENAI_API_KEY}",
-      "apiBase": "${OPENAI_API_BASE}"
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "apiBase": "https://api.deepseek.com"
     }
   }
 }

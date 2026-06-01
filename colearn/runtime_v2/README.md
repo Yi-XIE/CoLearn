@@ -24,7 +24,8 @@
 - Result bridge is complete.
 - Learning closure is complete.
 - LearningState writeback is complete.
-- `memory` and `LightRAG` are enabled by default.
+- `memory` is enabled by default.
+- `LightRAG` is enabled on demand for retrieval-heavy turns.
 - WebUI now uses the `runtime_v2 + slim config` mainline.
 
 ## Entry Points

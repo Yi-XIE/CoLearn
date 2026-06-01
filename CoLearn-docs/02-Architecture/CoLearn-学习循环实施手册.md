@@ -2,214 +2,99 @@
 
 ## 文档目的
 
-这份手册面向工程实现，记录当前学习循环已经落地的形态、回归方式，以及仍保留的实现边界。
-
-它不是目标蓝图，而是当前代码的施工说明。
+这份手册面向工程实现，记录当前学习循环已经落地的形态、回归方式，以及仍保留的实现边界。它是当前代码的施工说明，不是目标蓝图。
 
 ## 当前最小闭环
 
-当前后端已经具备以下学习循环闭环能力：
+当前后端具备以下学习循环能力：
 
-- FastAPI HTTP 接口可创建项目、会话、知识库资源
-- `/api/v1/ws` 可发起实时学习回合
-- `LearningOrchestrator` 可组装单轮学习请求
-- `BoardFacts -> TurnPolicy -> LearningEvent` 三层状态链已接入
-- `NanobotTurnExecutor` 作为当前执行器
-- `memory` 和 `lightrag` 以工具方式接入
+- FastAPI HTTP 接口创建项目、会话、知识库资源
+- `/api/v1/ws` 发起实时学习回合
+- `LearningOrchestrator` 组装单轮学习请求
+- 双模式（Chat / Learning）+ 五段 `LearningPhase`（INTAKE/DIAGNOSE/READY/REFLECT/RECALL）+ 三态 `TurnMode`（LEARN/CHECK/PAUSED）
+- `BoardFacts -> TurnPolicy -> LearningEvent` 三层状态链
+- `NanobotTurnExecutor` 作为执行器，挂 nanobot 原生 `AgentHook` 真流式
+- `memory` / `lightrag` / `web_search` 以工具方式按需接入
 - runtime compression 与 product compression 都已接上
-- session / project / memory 均可落到 JSON state store
+- session / project / memory 落到 JSON state store
 
-## 当前单轮流程
+## 主链阶段（stages）
+
+主链已从单个 orchestrator 方法拆成 `colearn/app/stages/*` 的阶段类，`LearningOrchestrator._run_turn_pipeline()` 的执行顺序：
+
+1. `PreflightStage` — 解析/创建 session 与 project，判定 session mode 与 learning phase，跑 source readiness，构建初始 Board / Snapshot
+2. `PlanStage` — 仅在需要时生成/重排 `LearningPlan`（首次进入、换题、计划缺失），并按 mastery 跳过已掌握节点
+3. 长期目标同步 — learning 模式调用 `executor.sync_sustained_goal()`（nanobot 原生 goal）；chat 模式则收口已有 goal
+4. `RetrievalStage` — learning 模式按需取证（LightRAG + 轻量并行检索）；chat 模式直接 skip
+5. `sync_project_retrieval_profile` — 把 source readiness + prefetch 状态写回 `project.retrieval_profile`
+6. `ExecuteStage` — 组 prompt、设 model preset、挂工具、跑 executor，拿到 `LearningTurnResult`
+7. `FinalizeStage` — 组装 `last_turn_result` 等产物
+8. 长期目标收尾 — 计划全部完成或回到 `PAUSED` 时自动 `complete_goal`
+9. `WritebackStage` — 统一写回 session / project / memory，调度后台 product compression、dream consolidation、board derivation
+
+## 单轮流程
 
 ### 1. 请求进入
 
-WebSocket `start_turn` 或 `message` 进入 `/api/v1/ws` 后，API 层会：
-
-- 准备 session
-- 标记 `status=running`
-- 写入 `active_turn_id` 和 `active_turns`
-- 先发 `session` 与 `stage_start` 事件
+WebSocket `start_turn` / `message` 进入 `/api/v1/ws`（`colearn/api/ws_handler.py`，内部委托 `colearn/api/ws/*`）后，会准备 session、标记 `status=running`、写入 `active_turn_id`，并先发 `session` 与 `stage_start` 事件。
 
 ### 2. orchestrator 组装
 
-`LearningOrchestrator.run_turn()` 当前执行顺序：
-
-1. 获取或创建 session / project
-2. 计算 source readiness
-3. 构建 Learning Board
-4. 生成 Turn Policy 和 Snapshot
-5. 构建 `LearningTurnRequest`
-6. 执行 runtime compression
-7. 调用 executor
-8. 生成 `after_turn_payload`
-9. 统一写回 session / project / memory
-10. 安排后台 product compression
+按上面的 stages 顺序执行。Chat Mode 走轻链路：不跑 PlanStage 学习逻辑、不取证、不调度学习型后台后处理。
 
 ### 3. executor 执行
 
-`NanobotTurnExecutor` 当前行为：
+`NanobotTurnExecutor`：
 
-- 根据 request 组 prompt
+- 用 nanobot `ContextBuilder.build_system_prompt()` 生成基础 system prompt，再叠加 CoLearn 学习上下文（`runtime_v2/prompting.py`）
 - 从 `metadata["source_profile"]` 注入 source readiness 提示
-- 按 `enabled_tools` 挂载 `memory` / `lightrag`
-- 运行 nanobot
+- 按 `enabled_tools` 挂载 `memory` / `lightrag` / `web_search`（`runtime_v2/tooling.py`）
+- 若 `request.model_preset` 存在，先 `set_model_preset` 再跑
+- 挂 `AgentHook` 把 runtime 的 delta / tool call / reasoning 实时写入 stream channel
 - 把返回值规范化成 `LearningTurnResult`
 
 ### 4. 结果写回
 
-主链写回当前会更新：
+主链写回会更新：`session.board_facts / board_version / messages / last_turn_result / continuation_prompt / status / learning_phase`，以及 `project.board_facts / board_version / retrieval_profile / current_main_goal`，并写 `EventMemoryStore`。
 
-- `session.board_facts`
-- `session.board_version`
-- `session.messages`
-- `session.last_turn_result`
-- `session.continuation_prompt`
-- `session.status`
-- `project.board_facts`
-- `project.board_version`
-- `project.retrieval_profile`
-- `project.current_main_goal`
-- `EventMemoryStore`
+### 5. 后台后处理
 
-### 5. 后台 review
+后台 product compression、dream consolidation、board derivation 结束后只补写 review / continuation / product compression 状态，不覆盖主链已写入的 messages / board / status。Chat Mode 不调度这些学习型后处理。
 
-后台 product compression 结束后，当前只补写：
+## 已落地的对齐项
 
-- `session.pending_review`
-- `session.continuation_prompt`
-- `session.last_turn_result.product_compression`
-- `project.latest_review`
-
-## 已完成的对齐项
-
-### 1. 状态持久化
-
-以下问题已经收口：
-
-- `LearningSession.created_at / updated_at` 已是正式字段
-- `touch_session()` 直接写 dataclass 字段
-- `SessionStore`、`LearningProjectService`、`EventMemoryStore` 已统一改用 `colearn.storage.records`
-
-### 2. JSON 写入保护
-
-`JsonStateStore` 当前已经具备：
-
-- 按路径共享锁
-- 原子替换写入
-
-这解决了多实例或后台结果写回时最明显的文件覆盖风险。
-
-### 3. 后台压缩竞态缓解
-
-后台线程不再直接重复整对象写 store。当前模式是：
-
-- 线程只负责计算 `ProductCompressionResult`
-- orchestrator 统一合并结果
-
-这样避免了后台线程把主链刚写入的 messages / board / status 整体冲掉。
-
-### 4. source readiness 真正进入请求
-
-当前 preflight 结果不只写到 `project.retrieval_profile`，还会进入：
-
-- `LearningTurnRequest.metadata["source_profile"]`
-- executor prompt 的 source readiness 提示
-
-这意味着 preflight 已经有下游消费者，不再是纯展示字段。
-
-### 5. LightRAG async 边界
-
-LightRAG 适配层已经改成显式 async / sync 双入口：
-
-- async 路径供事件循环内调用
-- sync 路径在已有事件循环中会明确拒绝
-
-旧的 `_run_async()` 线程绕行逻辑已经移除。
-
-### 6. API 状态拆分
-
-`settings_state`、`memory_docs`、`skills_state` 这类全局可变字典已经拆到 `colearn.api.state` 中的可重置 service。
-
-### 7. 本轮联调补齐
-
-为配合前端联调，当前后端已补齐：
-
-- auth 状态与登录注册
-- knowledge task stream / progress ws / file route
-- settings diagnostics events
-
-这使当前学习循环不再只停留在聊天主链，而是补到了知识库与 settings 配套入口。
+- 状态持久化：`created_at/updated_at` 为正式字段，`SessionStore`/`LearningProjectService`/`EventMemoryStore` 统一走 `colearn.storage.records`
+- JSON 写入保护：`JsonStateStore` 按路径共享锁 + 临时文件原子替换
+- 后台压缩竞态缓解：后台线程只产出 `ProductCompressionResult`，orchestrator 单一入口合并
+- source readiness 进入请求与 prompt
+- LightRAG async / sync 双入口，旧 `_run_async()` 绕行已移除
+- API 状态拆分到 `colearn.api.state` 的可重置 service
+- nanobot 原生能力接入：`AgentHook` 流式、`set_model_preset`、`ContextBuilder`、`AutoCompact`、`Dream`、`long_task / complete_goal / goal_state`
 
 ## 当前仍保留的实现边界
 
-### 1. API schema 只做到重点收口
+- API schema 只做到重点收口，并非全部 payload 强类型化
+- `board_version` 是 stale write 保护，不是严格 compare-and-swap
+- `BoardFacts` 运行时 dataclass、持久化 dict，类型边界未统一
+- `retrieval_bundle` 仍保留在 request contract
+- `parallel_support` 仍是轻量并行检索，未替换为 `SubagentManager`
+- `KnowledgeWorkspaceService` 仍是轻量服务，不是独立知识库主存储
 
-当前已经 schema 化的重点入口包括：
+## 回归方式
 
-- settings catalog / ui / test start
-- auth login / register
-- memory update / clear
-- session / project 主要写接口
-- WebSocket `start_turn`
-
-但“全部 payload 都已强类型化”还不成立。
-
-### 2. Board version
-
-当前 `board_version` 的能力是：
-
-- 防止明显 stale write 覆盖较新 Board
-- 发生冲突时跳过写入并记录 warning
-
-它还不是严格 compare-and-swap 或严格单步递增写入协议。
-
-### 3. BoardFacts 的双重表示
-
-当前 Board 在运行时是 dataclass，在 session / project JSON 中仍是 dict。
-
-这个边界是可用的，但还没有收紧成单一类型流。
-
-### 4. retrieval_bundle
-
-`LearningTurnRequest.retrieval_bundle` 仍保留在 request contract 中。
-
-当前主链仍以 tool-mode retrieval 为主，没有在回合开始前把真实检索文本写进去。
-
-### 5. KnowledgeWorkspaceService
-
-`KnowledgeWorkspaceService` 当前主要负责 source readiness 与轻量 source library 管理，仍是内存态服务，不是完整知识库主存储。
-
-## 当前回归方式
-
-后端继续使用下面这条命令作为主回归入口：
+后端主回归入口：
 
 ```bash
 python -m pytest tests
 ```
 
-前端与契约侧的当前回归入口包括：
+前端回归入口（`webui/`，Vitest）：
 
 ```bash
-cd web
-npm run test:node
+cd webui
+pnpm test
 ```
 
-## 本轮之后优先关注的事项
+## 维护建议
 
-如果继续推进后端收口，建议优先看这几项：
-
-1. 真实页面联调是否闭环
-2. WebSocket 消息分发层继续强类型化
-3. `memory refresh` 等剩余裸 payload 入口收口
-4. BoardFacts 持久化边界进一步统一
-5. `retrieval_bundle` 是否从 request contract 移出
-6. knowledge workspace 是否需要持久化
-
-## 使用建议
-
-维护学习循环时，建议遵守两个顺序：
-
-1. 先更新本目录协议与装配文档
-2. 再修改 orchestrator、executor、API 或状态层代码
-
-这样前后端和文档更容易保持同一个事实面。
+维护学习循环时遵守两个顺序：先更新本目录协议与装配文档，再修改 orchestrator / stages / executor / API / 状态层代码。这样前后端和文档更容易保持同一个事实面。

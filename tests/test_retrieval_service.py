@@ -210,9 +210,19 @@ def test_normalize_source_refs_resolves_existing_paths(tmp_path: Path):
     assert refs[1]["title"] == "missing.md"
 
 
-def test_require_lightrag_client_raises_when_unavailable():
+def test_require_lightrag_client_raises_when_unavailable(monkeypatch):
+    # _require_lightrag_client re-resolves a real client when none is set, so
+    # force resolution to fail to exercise the unavailable path hermetically
+    # (otherwise this passes/fails based on the host's LightRAG config).
+    from colearn.retrieval import service as service_module
+
+    def _unavailable(**_kwargs):
+        raise service_module.LightRAGConfigurationError("no client in test env")
+
+    monkeypatch.setattr(service_module, "get_lightrag_client", _unavailable)
+
     service = RetrievalService(lightrag_client=None)
     service._lightrag_client = None
     service._lightrag_error = None
-    with pytest.raises(RuntimeError, match="LightRAG client is unavailable"):
+    with pytest.raises(service_module.LightRAGConfigurationError, match="no client in test env"):
         service._require_lightrag_client()

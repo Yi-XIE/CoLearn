@@ -23,14 +23,15 @@ from colearn.storage.project_session_store import (
 state_store = JsonStateStore()
 project_service = build_stateful_project_service(state_store.root)
 session_store = build_stateful_session_store(state_store.root)
+settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
+memory_doc_service = MemoryDocStateService(JsonStateStore(state_store.root))
 orchestrator = LearningOrchestrator(
     project_service=project_service,
     session_store=session_store,
     memory_store=build_stateful_memory_store(state_store.root),
+    settings_service=settings_service,
+    memory_doc_service=memory_doc_service,
 )
-
-settings_service = SettingsStateService(JsonStateStore(state_store.root), colearn_env_file())
-memory_doc_service = MemoryDocStateService()
 knowledge_task_service = KnowledgeTaskService(state_root=state_store.root)
 
 WORKSPACE_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"

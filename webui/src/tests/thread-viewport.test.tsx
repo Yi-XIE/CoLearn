@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
@@ -160,5 +160,166 @@ describe("ThreadViewport", () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+
+  it("renders a draggable divider when learning support is present", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: true,
+          prompt_support_bundle: [
+            {
+              source_ref: "notes/force.md",
+              summary: "force summary",
+              target_label: "Newton",
+            },
+          ],
+          retrieval_hits: [],
+          retrieval_misses: [],
+          retrieval_evidence_map: {},
+          retrieval_query_context: {},
+          continuation_retrieval_hint: {},
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
+  });
+
+  it("updates preview panel width while dragging the divider", () => {
+    const { container } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: true,
+          prompt_support_bundle: [
+            {
+              source_ref: "notes/force.md",
+              summary: "force summary",
+              target_label: "Newton",
+            },
+          ],
+          retrieval_hits: [],
+          retrieval_misses: [],
+          retrieval_evidence_map: {},
+          retrieval_query_context: {},
+          continuation_retrieval_hint: {},
+        }}
+      />,
+    );
+
+    const viewport = container.firstElementChild as HTMLElement;
+    Object.defineProperty(viewport, "clientWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    viewport.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 1200,
+      bottom: 800,
+      width: 1200,
+      height: 800,
+      toJSON: () => ({}),
+    });
+
+    const divider = screen.getByRole("button", { name: "Resize preview panel" });
+    const aside = divider.nextElementSibling as HTMLElement;
+
+    act(() => {
+      fireEvent.pointerDown(divider, { clientX: 840 });
+    });
+
+    act(() => {
+      fireEvent.pointerMove(window, { clientX: 900 });
+      fireEvent.pointerUp(window, { clientX: 900 });
+    });
+
+    expect(aside.style.width).toBe("300px");
+  });
+
+  it("mounts the support panel for a session summary with no retrieval data", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+          session_summary: {
+            topics_covered: ["Newton's laws"],
+            concepts_mastered: ["inertia"],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
+  });
+
+  it("mounts the support panel for mastery progress with no retrieval data", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+          mastery_level: 0.4,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
+  });
+
+  it("does not mount the support panel for an empty chat payload", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Resize preview panel" })).not.toBeInTheDocument();
+  });
+
+  it("mounts the support panel when only a plan confirmation is pending", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        planConfirmVisible
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
   });
 });

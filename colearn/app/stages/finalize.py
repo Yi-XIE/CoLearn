@@ -43,8 +43,8 @@ class FinalizeStage:
         )
         ctx.result = normalize_learning_turn_result(
             request=request_with_metadata,
-            final_text=ctx.result.final_text,
-            learning_result=dict(ctx.result.raw_learning_result or {}),
+            final_text=ctx.final_text,
+            learning_result=dict(ctx.closure_payload or ctx.raw_learning_result or {}),
         )
         ctx.retrieval_hits = retrieval_hits
         ctx.retrieval_misses = retrieval_misses
@@ -70,6 +70,7 @@ class FinalizeStage:
             request=request,
             retrieval_focus=retrieval_context["retrieval_focus"],
             retrieval_evidence_map=retrieval_evidence_map,
+            retrieval_bundle=retrieval_context.get("retrieval_bundle"),
         )
         return retrieval_hits, retrieval_misses, retrieval_evidence_map
 
@@ -79,10 +80,18 @@ class FinalizeStage:
         request,
         retrieval_focus: dict[str, Any],
         retrieval_evidence_map: dict[str, list[dict[str, Any]]],
+        retrieval_bundle: Any = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
         evidence_map = {key: list(value or []) for key, value in retrieval_evidence_map.items()}
         hits: list[dict[str, Any]] = []
         misses: list[dict[str, Any]] = []
+        # A miss is only meaningful when prefetch actually ran this turn. Prefetch
+        # is the sole retrieval path now (nanobot's per-turn lightrag tool is
+        # disabled in favor of RetrievalStage), so derive "active" from the bundle
+        # status rather than the request's enabled_tools. "skipped" means the turn
+        # mode gated prefetch off (e.g. PAUSED); anything else means we tried.
+        bundle_status = str(getattr(retrieval_bundle, "retrieval_status", "") or "").strip().lower()
+        retrieval_active = bool(bundle_status) and bundle_status != "skipped"
         board = request.board_facts
         active_node_id = str(board.current_progress.active_node_id or "").strip()
         blocker_ids = [
@@ -102,7 +111,7 @@ class FinalizeStage:
                 for item in values:
                     if item not in hits:
                         hits.append(item)
-        if not hits:
+        if retrieval_active and not hits:
             misses.append(
                 {
                     "reason": "no_prefetched_references",
@@ -166,10 +175,22 @@ class FinalizeStage:
             request=request,
             result=result,
         )
+        runtime_v2 = dict(payload.get("runtime_v2") or {})
+        board_after = getattr(result, "board_after", None)
+        if board_after is not None:
+            runtime_v2["learning_phase"] = str(getattr(board_after, "learning_phase", "ready"))
+            snapshot = getattr(board_after, "student_snapshot", None)
+            if snapshot is not None:
+                runtime_v2["mastery_level"] = float(getattr(snapshot, "mastery_level", 0.0))
+        metadata = dict(getattr(request, "metadata", {}) or {})
+        if metadata.get("learning_phase"):
+            runtime_v2.setdefault("learning_phase", metadata["learning_phase"])
+        payload["runtime_v2"] = runtime_v2
         last_turn_result = {
             "final_text": result.final_text,
             "warnings": warnings,
             "board_patch": result.board_patch,
+            "session_mode": str(getattr(request, "metadata", {}).get("session_mode") or ""),
             **payload,
             "turn_mode_before": result.turn_mode_before,
             "turn_mode_after": result.turn_mode_after,

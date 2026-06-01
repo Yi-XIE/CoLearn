@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Menu, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -7,6 +8,7 @@ import { cn } from "@/lib/utils";
 interface ThreadHeaderProps {
   title: string;
   subtitle?: string | null;
+  titleActions?: ReactNode;
   onToggleSidebar: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -18,6 +20,7 @@ interface ThreadHeaderProps {
 export function ThreadHeader({
   title,
   subtitle = null,
+  titleActions,
   onToggleSidebar,
   theme,
   onToggleTheme,
@@ -77,14 +80,15 @@ export function ThreadHeader({
             className={cn(
               "max-w-[min(60vw,32rem)] truncate leading-tight",
               titleStyle === "page"
-                ? "text-[22px] font-bold text-black dark:text-white sm:text-[26px]"
-                : "text-[14px] font-medium text-foreground/78 sm:text-[15px]",
+                ? "text-2xl font-bold text-black dark:text-white sm:text-2xl"
+                : "text-[14px] font-medium text-foreground/78 sm:text-sm",
             )}
           >
             {title}
           </span>
+          {titleActions ? <div className="mt-4 flex items-center gap-3">{titleActions}</div> : null}
           {subtitle ? (
-            <span className="mt-1 max-w-[min(70vw,42rem)] truncate text-[12px] text-foreground/68">
+            <span className="mt-1 max-w-[min(70vw,42rem)] truncate text-sm text-foreground/68">
               {subtitle}
             </span>
           ) : null}

@@ -178,8 +178,15 @@
   },
   "thread": {
     "loadingConversation": "Loading conversation…",
+    "learningPrompt": {
+      "title": "Turn on Learning Mode?",
+      "body": "Use a structured plan for this conversation.",
+      "accept": "Turn on",
+      "dismiss": "Ignore"
+    },
     "empty": {
       "greeting": "What can I do for you?",
+      "subtitle": "Tell me where you'd like to start.",
       "quickActions": {
         "plan": {
           "title": "Create a project plan",
@@ -250,11 +257,17 @@
       "goalStateStrip": "Goal · {{label}}",
       "goalStateFallback": "Goal",
       "goalStateExpandAria": "Show full goal",
+      "goalPanelLabel": "Goal",
       "goalStateSheetTitle": "Goal",
       "goalStateCloseAria": "Close goal",
       "send": "Send message",
       "stop": "Stop response",
       "attachImage": "Attach image",
+      "learningMode": {
+        "toggle": "Toggle learning mode",
+        "chat": "Chat",
+        "learning": "Learning"
+      },
       "imageMode": {
         "label": "Image Generation",
         "toggle": "Toggle image generation mode",
@@ -376,10 +389,73 @@
   "common": {
     "dismiss": "Dismiss"
   },
+  "learning": {
+    "mastery": {
+      "label": "Mastery",
+      "nodes": "{{completed}}/{{total}} nodes"
+    },
+    "mode": {
+      "learning": "Learning",
+      "chat": "Chat",
+      "switchToChat": "Switch to chat mode",
+      "switchToLearning": "Switch to learning mode",
+      "phase": {
+        "intake": "Onboarding",
+        "diagnose": "Diagnosing",
+        "ready": "Learning",
+        "reflect": "Wrapping up",
+        "recall": "Reviewing"
+      }
+    },
+    "sessionSummary": {
+      "title": "Session summary",
+      "minutes": "{{count}} min",
+      "topicsCovered": "Covered",
+      "mastered": "Mastered",
+      "needsReview": "Needs review",
+      "nextFocus": "Next focus: {{focus}}"
+    },
+    "intake": {
+      "confirm": "OK",
+      "questions": {
+        "background": {
+          "question": "What's your current background?",
+          "options": [
+            "Have a programming base (Python/math, etc.)",
+            "Have a statistics/linear algebra base",
+            "Student / just starting out"
+          ],
+          "placeholder": "Other background..."
+        },
+        "goal": {
+          "question": "What's your learning goal?",
+          "options": [
+            "Understand the basics",
+            "Apply it in a real project",
+            "Prepare for work / a career switch"
+          ],
+          "placeholder": "Specific goal..."
+        },
+        "style": {
+          "question": "Which learning style do you prefer?",
+          "options": [
+            "Theory + mathematical derivation",
+            "Hands-on + project-driven",
+            "A mix of both"
+          ],
+          "placeholder": "Other preference..."
+        }
+      }
+    }
+  },
   "errors": {
     "messageTooBig": {
       "title": "Message too large",
       "body": "The server rejected your last message because it exceeded the size limit. Remove some images or try smaller files, then send again."
+    },
+    "boundary": {
+      "title": "Something went wrong.",
+      "retry": "Try again"
     }
   }
 }

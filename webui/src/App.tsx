@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DeleteConfirm } from "@/components/DeleteConfirm";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { MemoryPanel } from "@/components/panels/MemoryPanel";
 import { KnowledgeGardenPanel } from "@/components/panels/KnowledgeGardenPanel";
 import { SkillsPanel } from "@/components/panels/SkillsPanel";
@@ -9,7 +10,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { Sidebar } from "@/components/Sidebar";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { useSessions } from "@/hooks/useSessions";
+import { sessionTitle, useSessions } from "@/hooks/useSessions";
 import { useTheme } from "@/hooks/useTheme";
 import { deriveWsUrl, fetchBootstrap, loadSavedSecret, saveSecret } from "@/lib/bootstrap";
 import { deriveTitle } from "@/lib/format";
@@ -26,7 +27,7 @@ type BootState = {
 };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
-const SIDEBAR_WIDTH = 272;
+const SIDEBAR_WIDTH = 296;
 const BRAND_NAME = "CoLearn";
 
 type ShellView = "chat" | "knowledge" | "memory" | "skills" | "settings";
@@ -247,11 +248,13 @@ function Shell({
   }, [renameChat, t]);
 
   const headerTitle = activeSession
-    ? (activeSession.title?.trim()
-      || deriveTitle(
+    ? sessionTitle(
+        activeSession,
+        undefined,
+      ) || deriveTitle(
         activeSession.preview,
         t("chat.fallbackTitle", { id: activeSession.chatId.slice(0, 6) }),
-      ))
+      )
     : BRAND_NAME;
 
   useEffect(() => {
@@ -322,65 +325,67 @@ function Shell({
       </Sheet>
 
       <main className="relative flex h-full min-w-0 flex-1 flex-col">
-        {view === "chat" ? (
-          <div className="absolute inset-0 flex flex-col">
-            <ThreadShell
-              session={activeSession}
-              title={headerTitle}
+        <ErrorBoundary>
+          {view === "chat" ? (
+            <div className="absolute inset-0 flex flex-col">
+              <ThreadShell
+                session={activeSession}
+                title={headerTitle}
+                onToggleSidebar={toggleSidebar}
+                onNewChat={onNewChat}
+                onCreateChat={onCreateChat}
+                onTurnEnd={() => void refresh()}
+                theme={theme}
+                onToggleTheme={toggle}
+                hideSidebarToggleOnDesktop={desktopSidebarOpen}
+              />
+            </div>
+          ) : null}
+
+          {view === "knowledge" ? (
+            <KnowledgeGardenPanel
+              token={token}
               onToggleSidebar={toggleSidebar}
-              onNewChat={onNewChat}
-              onCreateChat={onCreateChat}
-              onTurnEnd={() => void refresh()}
               theme={theme}
               onToggleTheme={toggle}
               hideSidebarToggleOnDesktop={desktopSidebarOpen}
             />
-          </div>
-        ) : null}
+          ) : null}
 
-        {view === "knowledge" ? (
-          <KnowledgeGardenPanel
-            token={token}
-            onToggleSidebar={toggleSidebar}
-            theme={theme}
-            onToggleTheme={toggle}
-            hideSidebarToggleOnDesktop={desktopSidebarOpen}
-          />
-        ) : null}
-
-        {view === "memory" ? (
-          <MemoryPanel
-            token={token}
-            onToggleSidebar={toggleSidebar}
-            theme={theme}
-            onToggleTheme={toggle}
-            hideSidebarToggleOnDesktop={desktopSidebarOpen}
-          />
-        ) : null}
-
-        {view === "skills" ? (
-          <SkillsPanel
-            token={token}
-            onToggleSidebar={toggleSidebar}
-            theme={theme}
-            onToggleTheme={toggle}
-            hideSidebarToggleOnDesktop={desktopSidebarOpen}
-          />
-        ) : null}
-
-        {view === "settings" ? (
-          <div className="absolute inset-0 flex flex-col">
-            <SettingsView
+          {view === "memory" ? (
+            <MemoryPanel
+              token={token}
+              onToggleSidebar={toggleSidebar}
               theme={theme}
               onToggleTheme={toggle}
-              onBackToChat={onBackToChat}
-              onModelNameChange={onModelNameChange}
-              onLogout={onLogout}
-              onRestart={undefined}
-              isRestarting={false}
+              hideSidebarToggleOnDesktop={desktopSidebarOpen}
             />
-          </div>
-        ) : null}
+          ) : null}
+
+          {view === "skills" ? (
+            <SkillsPanel
+              token={token}
+              onToggleSidebar={toggleSidebar}
+              theme={theme}
+              onToggleTheme={toggle}
+              hideSidebarToggleOnDesktop={desktopSidebarOpen}
+            />
+          ) : null}
+
+          {view === "settings" ? (
+            <div className="absolute inset-0 flex flex-col">
+              <SettingsView
+                theme={theme}
+                onToggleTheme={toggle}
+                onBackToChat={onBackToChat}
+                onModelNameChange={onModelNameChange}
+                onLogout={onLogout}
+                onRestart={undefined}
+                isRestarting={false}
+              />
+            </div>
+          ) : null}
+        </ErrorBoundary>
       </main>
 
       <DeleteConfirm

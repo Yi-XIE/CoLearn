@@ -40,11 +40,7 @@ class RetrievalService:
         self._lightrag_client = lightrag_client
         self._lightrag_error: Exception | None = None
         self._cache = cache or RetrievalCache()
-        if self._lightrag_client is None:
-            try:
-                self._lightrag_client = get_lightrag_client(workspace=self._workspace)
-            except LightRAGConfigurationError as exc:
-                self._lightrag_error = exc
+        self._ensure_lightrag_client()
 
     def build_bundle(
         self,
@@ -53,6 +49,7 @@ class RetrievalService:
         session: LearningSession,
         query: str,
         libraries: list[SourceLibrary] | None = None,
+        top_k: int | None = None,
     ) -> RetrievalBundle:
         source_refs = list(session.source_refs or project.source_subset or project.source_refs)
         return self.build_bundle_for_source_refs(
@@ -60,6 +57,7 @@ class RetrievalService:
             query=query,
             source_refs=source_refs,
             libraries=libraries,
+            top_k=top_k,
         )
 
     def build_bundle_for_source_refs(
@@ -69,6 +67,7 @@ class RetrievalService:
         query: str,
         source_refs: list[str],
         libraries: list[SourceLibrary] | None = None,
+        top_k: int | None = None,
     ) -> RetrievalBundle:
         return asyncio.run(
             self.async_build_bundle_for_source_refs(
@@ -76,6 +75,7 @@ class RetrievalService:
                 query=query,
                 source_refs=source_refs,
                 libraries=libraries,
+                top_k=top_k,
             )
         )
 
@@ -86,6 +86,7 @@ class RetrievalService:
         query: str,
         source_refs: list[str],
         libraries: list[SourceLibrary] | None = None,
+        top_k: int | None = None,
     ) -> RetrievalBundle:
         if not source_refs:
             return empty_retrieval_bundle(
@@ -105,7 +106,7 @@ class RetrievalService:
             project_id=project_id,
             query=query,
             source_refs=normalized_refs,
-            top_k=Defaults.RETRIEVAL_TOP_K,
+            top_k=top_k if top_k is not None else Defaults.RETRIEVAL_TOP_K,
         )
         bundle = self._bundle_from_lightrag_result(
             lightrag_result=lightrag_result,
@@ -260,11 +261,21 @@ class RetrievalService:
         return await client.async_sync_project_sources(project_id, normalized_refs)
 
     def _require_lightrag_client(self) -> LightRAGClientProtocol:
+        self._ensure_lightrag_client()
         if self._lightrag_client is None and self._lightrag_error is not None:
             raise self._lightrag_error
         if self._lightrag_client is None:
             raise RuntimeError("LightRAG client is unavailable.")
         return self._lightrag_client
+
+    def _ensure_lightrag_client(self) -> None:
+        if self._lightrag_client is not None:
+            return
+        try:
+            self._lightrag_client = get_lightrag_client(workspace=self._workspace)
+            self._lightrag_error = None
+        except LightRAGConfigurationError as exc:
+            self._lightrag_error = exc
 
     def _normalize_source_refs(
         self,

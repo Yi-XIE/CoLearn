@@ -1,4 +1,4 @@
-"""Tests for ProductCompressionBridge and RuntimeCompressionBridge."""
+﻿"""Tests for ProductCompressionBridge and RuntimeCompressionBridge."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _make_board(**kwargs) -> BoardFacts:
 
 
 def _make_request(**kwargs) -> LearningTurnRequest:
-    defaults = {"session_id": "s1", "turn_id": "t1", "user_message": "hello", "turn_mode": "EXPLORE"}
+    defaults = {"session_id": "s1", "turn_id": "t1", "user_message": "hello", "turn_mode": "LEARN"}
     defaults.update(kwargs)
     return LearningTurnRequest(**defaults)
 

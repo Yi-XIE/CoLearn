@@ -19,32 +19,25 @@ SUPPORT_TYPES = {
 }
 
 MODE_SUPPORT_PRIORITIES: dict[str, list[str]] = {
-    "ANCHOR": ["definition", "prerequisite", "example", "reference", "extension"],
-    "CORRECTION": ["counterexample", "comparison", "definition", "reference", "example"],
-    "VERIFY": ["procedure", "reference", "definition", "example"],
-    "EXPLORE": ["example", "extension", "comparison", "definition", "reference"],
+    "LEARN": ["example", "definition", "extension", "comparison", "reference"],
+    "CHECK": ["procedure", "counterexample", "reference", "definition", "example"],
     "PAUSED": ["reference", "definition", "example"],
 }
 
 # Per-mode query-build strategy: which signals to favor when composing the
 # LightRAG query, and what intent label to attach so downstream re-rankers
 # know what kind of evidence the turn is asking for.
+# `intent` drives the query context label; `favor` is retained for reference
+# (the simplified build_retrieval_query_context now uses mode-specific term
+# selection rather than the favor-ordered signal pool).
 MODE_QUERY_STRATEGY: dict[str, dict[str, Any]] = {
-    "ANCHOR": {
-        "favor": ["unverified_gaps", "active_node_label", "default_query"],
-        "intent": "ground_prerequisites",
-    },
-    "CORRECTION": {
-        "favor": ["critical_blockers", "user_message", "active_node_label"],
-        "intent": "dispel_misconception",
-    },
-    "VERIFY": {
-        "favor": ["active_node_label", "user_message", "unverified_gaps"],
-        "intent": "validate_understanding",
-    },
-    "EXPLORE": {
+    "LEARN": {
         "favor": ["user_message", "active_node_label", "default_query"],
-        "intent": "expand_concept",
+        "intent": "learn_current_node",
+    },
+    "CHECK": {
+        "favor": ["critical_blockers", "unverified_gaps", "active_node_label", "user_message"],
+        "intent": "check_understanding",
     },
     "PAUSED": {
         "favor": ["continuation_prompt", "active_node_label"],
@@ -105,9 +98,9 @@ def build_retrieval_query_context(
 ) -> dict[str, Any]:
     """Build a query context whose final_query reflects the turn_mode's intent.
 
-    Each turn_mode favors different signals (see MODE_QUERY_STRATEGY): CORRECTION
-    leads with blockers, ANCHOR with gaps + active_node, etc. priority_terms is
-    the deduplicated list of weighted phrases used by downstream re-rankers.
+    Simplified query construction: pick the most relevant 1-2 terms per turn_mode
+    rather than concatenating all available signals. Parallel retrieval covers
+    blockers/gaps separately, so the main query can stay focused.
     """
     blockers = [
         {"id": blocker.id, "desc": blocker.desc, "type": blocker.type}
@@ -116,7 +109,7 @@ def build_retrieval_query_context(
     ]
     gaps = [str(item).strip() for item in board.gaps_and_blockers.unverified_gaps if str(item).strip()]
     turn_mode = normalize_turn_mode(board.current_turn_mode)
-    strategy = MODE_QUERY_STRATEGY.get(turn_mode, MODE_QUERY_STRATEGY["EXPLORE"])
+    strategy = MODE_QUERY_STRATEGY.get(turn_mode, MODE_QUERY_STRATEGY["LEARN"])
 
     signal_pool: dict[str, str] = {
         "default_query": str(retrieval_focus.get("default_query") or "").strip(),
@@ -129,17 +122,32 @@ def build_retrieval_query_context(
         "continuation_prompt": str(continuation_prompt or board.continuation.next_prompt_hint or "").strip(),
     }
 
-    favored = strategy["favor"]
-    rest = [key for key in signal_pool.keys() if key not in favored]
-    ordered_keys = [*favored, *rest]
+    # Simplified query construction: mode-specific selection, max 2 terms
+    if turn_mode == "LEARN":
+        # LEARN: focus on current node + user's question
+        priority_terms = [
+            signal_pool.get("active_node_label", ""),
+            signal_pool.get("user_message", ""),
+        ]
+    elif turn_mode == "CHECK":
+        # CHECK: focus on first blocker or user's question
+        first_blocker = blockers[0]["desc"] if blockers else ""
+        priority_terms = [
+            first_blocker or signal_pool.get("user_message", ""),
+            signal_pool.get("user_message", "") if first_blocker else "",
+        ]
+    else:  # PAUSED
+        # PAUSED: only user's question
+        priority_terms = [signal_pool.get("user_message", "")]
 
-    priority_terms: list[str] = []
-    for key in ordered_keys:
-        value = signal_pool.get(key, "")
-        if value and value not in priority_terms:
-            priority_terms.append(value)
+    # Filter empty terms, deduplicate, limit to 2
+    deduped_terms: list[str] = []
+    for term in priority_terms:
+        if term and term not in deduped_terms:
+            deduped_terms.append(term)
+    priority_terms = deduped_terms[:2]
+    final_query = " | ".join(priority_terms) if priority_terms else signal_pool.get("default_query", "")
 
-    final_query = " | ".join(priority_terms)
     return {
         "turn_mode": turn_mode,
         "query_intent": strategy["intent"],
@@ -182,13 +190,10 @@ def _support_target_for(
 
     blockers = list(board.gaps_and_blockers.critical_blockers or [])
     gaps = [str(item).strip() for item in board.gaps_and_blockers.unverified_gaps if str(item).strip()]
-    if (
-        turn_mode in {"CORRECTION", "VERIFY"}
-        or support_type in {"counterexample", "comparison"}
-    ) and blockers:
+    if (turn_mode == "CHECK" or support_type in {"counterexample", "comparison"}) and blockers:
         blocker = blockers[index % len(blockers)]
         return {"target_type": "blocker", "target_id": blocker.id, "target_label": blocker.desc}
-    if turn_mode == "VERIFY" and gaps:
+    if turn_mode == "CHECK" and gaps:
         gap_index = index % len(gaps)
         return {"target_type": "gap", "target_id": f"gap_{gap_index:03d}", "target_label": gaps[gap_index]}
     node_id = str(board.current_progress.active_node_id or board.project_id or "").strip()
@@ -200,7 +205,7 @@ def _support_target_for(
 
 
 def _support_priority_score(*, support_type: str, turn_mode: str, raw_score: Any) -> float:
-    priorities = MODE_SUPPORT_PRIORITIES.get(turn_mode, MODE_SUPPORT_PRIORITIES["EXPLORE"])
+    priorities = MODE_SUPPORT_PRIORITIES.get(turn_mode, MODE_SUPPORT_PRIORITIES["LEARN"])
     try:
         source_score = float(raw_score)
     except (TypeError, ValueError):
@@ -340,10 +345,8 @@ def build_retrieval_focus(
         "evidence_refs": evidence_refs,
     }
     focus["default_query"] = {
-        "ANCHOR": "\u57fa\u7840\u5b9a\u4e49\u3001\u524d\u7f6e\u77e5\u8bc6\u3001\u5173\u952e\u6982\u5ff5",
-        "CORRECTION": "\u53cd\u4f8b\u3001\u7ea0\u9519\u8bc1\u636e\u3001\u6982\u5ff5\u5bf9\u7167",
-        "VERIFY": "\u6b65\u9aa4\u6838\u9a8c\u3001\u6765\u6e90\u4f9d\u636e\u3001\u63a8\u7406\u94fe",
-        "EXPLORE": "\u5f53\u524d\u8282\u70b9\u6269\u5c55\u8d44\u6599\u3001\u76f8\u5173\u4f8b\u5b50\u3001\u5ef6\u4f38\u7406\u89e3",
+        "LEARN": "\u5f53\u524d\u8282\u70b9\u7684\u57fa\u7840\u8bb2\u89e3\u3001\u4f8b\u5b50\u548c\u80cc\u666f\u8d44\u6599",
+        "CHECK": "\u5f53\u524d\u8282\u70b9\u7684\u6838\u5bf9\u3001\u7ea0\u9519\u548c\u8bc1\u636e\u652f\u6301",
         "PAUSED": "\u5f53\u524d\u5b66\u4e60\u8282\u70b9\u80cc\u666f\u8d44\u6599",
     }.get(resolved_mode, "\u5f53\u524d\u5b66\u4e60\u8282\u70b9\u80cc\u666f\u8d44\u6599")
     if active_node_id:
@@ -409,12 +412,10 @@ def build_retrieval_reason(
     blockers = list(board.gaps_and_blockers.critical_blockers or [])
     if blockers:
         return f"{mode} turn needs evidence for {len(blockers)} critical blocker(s)."
-    if mode == "VERIFY":
-        return "VERIFY turn needs source-backed validation."
-    if mode == "CORRECTION":
-        return "CORRECTION turn needs counterexamples and correction evidence."
-    if mode == "ANCHOR":
-        return "ANCHOR turn needs base definitions and prerequisites."
+    if mode == "CHECK":
+        return "CHECK turn needs validation and correction evidence."
+    if mode == "LEARN":
+        return "LEARN turn needs current-node background support."
     if source_readiness and str(source_readiness.get("readiness") or "").lower() != "ready":
         return f"Source readiness is {source_readiness.get('readiness', 'unknown')}; prefetch to reduce turn risk."
     return f"{mode} turn needs background support for the active learning node."

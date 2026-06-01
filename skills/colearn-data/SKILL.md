@@ -6,23 +6,23 @@ always: true
 
 # CoLearn Data Access
 
-The harness sets `COLEARN_SESSION_ID` for you each turn — most commands work without arguments.
+Access CoLearn learning state via CLI commands. Most commands require explicit `--session_id` parameter.
 
 ## Quick start
 
 ```bash
-python -m colearn.cli get_current        # everything you need: session, board, recent messages
-python -m colearn.cli list_signals       # what the harness observed (understood/blocked concepts)
+python -m colearn.cli get_current --session_id <id>        # everything you need: session, board, recent messages
+python -m colearn.cli list_signals --session_id <id>       # what the harness observed (understood/blocked concepts)
 ```
 
 ## Command groups
 
 ```bash
 # Primary
-python -m colearn.cli get_current
-python -m colearn.cli list_signals [--session_id <id>] [--limit 10]
-python -m colearn.cli get_board [--session_id <id>]
-python -m colearn.cli get_session_detail [--session_id <id>] [--messages 5]
+python -m colearn.cli get_current --session_id <id>
+python -m colearn.cli list_signals --session_id <id> [--limit 10]
+python -m colearn.cli get_board --session_id <id>
+python -m colearn.cli get_session_detail --session_id <id> [--messages 5]
 
 # Diagnostics
 python -m colearn.cli search_memory --query "关键词" [--session_id <id>] [--limit 5]
@@ -52,4 +52,4 @@ JSON to stdout. Errors include `{"error": "..."}` with a human-readable detail.
 ## Notes
 
 - Most context is injected into your prompt automatically. Use these tools when you need to verify or fetch extra detail.
-- `get_current` is your one-stop check — prefer it over discovering session_id manually.
+- `get_current` is your one-stop check — pass the session_id from the injected context.

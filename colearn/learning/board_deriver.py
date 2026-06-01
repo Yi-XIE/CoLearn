@@ -26,6 +26,7 @@ from colearn.learning.state import (
     ProgressFacts,
     StudentSnapshot,
 )
+from colearn.learning.hook_utils import normalize_turn_mode
 from colearn.logging_config import get_logger
 from colearn.memory.store import MemoryEvent
 
@@ -73,7 +74,7 @@ class BoardSnapshotDeriver:
 
         try:
             llm_output = self._llm_call(system=BOARD_CONSOLIDATION_SYSTEM, user=prompt_user)
-        except Exception as exc:
+        except (RuntimeError, ValueError, OSError, TimeoutError) as exc:
             logger.warning("BoardSnapshotDeriver LLM call failed: %s", exc)
             return current_board, {"changes": {}, "event_count": len(recent), "status": "llm_failed", "error": str(exc)}
 
@@ -84,7 +85,7 @@ class BoardSnapshotDeriver:
 
         try:
             new_board = _build_board_from_snapshot(parsed, fallback=current_board)
-        except Exception as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             logger.warning("BoardSnapshotDeriver could not build BoardFacts: %s", exc)
             return current_board, {"changes": {}, "event_count": len(recent), "status": "build_failed", "error": str(exc)}
 
@@ -134,7 +135,7 @@ def _build_board_from_snapshot(snapshot: dict[str, Any], *, fallback: BoardFacts
     return BoardFacts(
         project_id=fallback.project_id,
         session_id=fallback.session_id,
-        current_turn_mode=str(snapshot.get("current_turn_mode") or fallback.current_turn_mode),
+        current_turn_mode=normalize_turn_mode(str(snapshot.get("current_turn_mode") or fallback.current_turn_mode)),
         board_version=int(fallback.board_version or 1) + 1,
         updated_at=fallback.updated_at,
         current_progress=ProgressFacts(

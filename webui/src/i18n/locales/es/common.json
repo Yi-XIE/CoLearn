@@ -155,6 +155,7 @@
     "empty": {
       "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo.",
       "greeting": "¿Qué puedo hacer por ti?",
+      "subtitle": "Dime por dónde te gustaría empezar.",
       "quickActions": {
         "plan": {
           "title": "Crear un plan de proyecto",

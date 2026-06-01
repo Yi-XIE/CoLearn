@@ -1,24 +1,227 @@
-import { useCallback, useEffect, useState } from "react";
-import { FileText, Network, RefreshCw, Upload } from "lucide-react";
+﻿import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  FolderOpen,
+  RotateCcw,
+  Settings2,
+  Upload,
+  X,
+} from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   createKnowledgeBase,
+  fetchKnowledgeFilePreview,
   fetchKnowledgeGraph,
   listKnowledgeBases,
   listKnowledgeFiles,
-  reindexKnowledgeBase,
   uploadKnowledgeFiles,
 } from "@/lib/api";
-import type { KnowledgeBaseSummary, KnowledgeGraphPayload } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type {
+  KnowledgeBaseSummary,
+  KnowledgeFilePreview,
+  KnowledgeGraphPayload,
+} from "@/lib/types";
 
-import { KnowledgeGraphView } from "./knowledge/KnowledgeGraphView";
+import { MarkdownText } from "@/components/MarkdownText";
+
+import {
+  KnowledgeGraphView,
+  type KnowledgeGraphPreviewNode,
+  type KnowledgeGraphSettings,
+} from "./knowledge/KnowledgeGraphView";
 import { EmptyHint, InfoCard } from "./knowledge/KnowledgePanelPrimitives";
 import { PanelView, type PanelShellProps } from "./PanelView";
 
-type KnowledgeGardenMode = "graph" | "library";
+type PreviewDocument = KnowledgeFilePreview & { sourceLabel?: string };
+
+function normalizePreviewPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function buildFolderMarkdown(
+  library: KnowledgeBaseSummary | null,
+  folderPath: string,
+): PreviewDocument {
+  const normalizedFolder = normalizePreviewPath(folderPath).replace(/\/+$/, "");
+  const files = (library?.files ?? []).filter((file) => {
+    const filePath = normalizePreviewPath(file.path || file.name);
+    if (!normalizedFolder) return !filePath.includes("/");
+    return filePath.startsWith(`${normalizedFolder}/`);
+  });
+  const directChildren = files
+    .map((file) => normalizePreviewPath(file.path || file.name).slice(normalizedFolder ? normalizedFolder.length + 1 : 0))
+    .filter((name) => name && !name.includes("/"))
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    name: normalizedFolder || library?.name || "资料库",
+    path: normalizedFolder,
+    kind: "markdown",
+    content: `# ${normalizedFolder || library?.name || "资料库"}
+
+${directChildren.length ? directChildren.map((name) => `- ${name}`).join("\n") : "这一层暂时没有可预览的文件。"}`,
+    sourceLabel: library?.id,
+  };
+}
+
+function buildMockPreviewMarkdown(title: string): string {
+  return `# ${title}
+
+这是临时的 Markdown 预览内容，用来确认知识花园的前端渲染链路是否正常。
+
+## 渲染检查
+
+- **粗体**、*斜体*、\`inline code\`
+- 列表、引用、表格、代码块
+
+> 如果这段内容可以正常排版，说明 Markdown 渲染是正常的，当前问题更可能来自预览接口加载失败。
+
+| 项目 | 状态 |
+| --- | --- |
+| 标题 | 正常 |
+| 列表 | 正常 |
+| 表格 | 正常 |
+
+\`\`\`ts
+const preview = "mock markdown";
+\`\`\``;
+}
+
+const DEFAULT_GRAPH_SETTINGS: KnowledgeGraphSettings = {
+  showLabels: true,
+  labelOpacity: 0.72,
+  nodeScale: 1,
+  edgeWidth: 1,
+  centerForce: 0.0025,
+  repulsionForce: 1,
+  springForce: 1,
+  edgeLength: 1,
+};
+
+function statusLabel(status: string): "已完成" | "待处理" {
+  const normalized = status.toLowerCase();
+  if (normalized === "ready" || normalized === "completed") return "已完成";
+  return "待处理";
+}
+
+function libraryFileCount(library: KnowledgeBaseSummary): number {
+  const files = (library.files ?? []).filter((file) => file.name);
+  return files.length || library.source_count || 0;
+}
+
+function buildNodeMarkdown(
+  node: KnowledgeGraphPreviewNode,
+  libraries: KnowledgeBaseSummary[],
+): PreviewDocument {
+  const library = libraries.find((item) => item.id === node.libraryId) ?? null;
+
+  if (node.kind === "library") {
+    const files = library?.files ?? [];
+    return {
+      name: node.label,
+      path: node.id,
+      kind: "markdown",
+      content: `# ${node.label}
+
+资料库
+
+## ${node.label}
+
+- 状态：${library ? statusLabel(library.status) : "待处理"}
+- 文件数：${files.length}
+
+${files.length ? "这个资料库已经进入知识花园。" : "这个资料库里还没有文件。"}`,
+      sourceLabel: "资料库",
+    };
+  }
+
+  if (node.kind === "concept") {
+    const source = typeof node.metadata?.source === "string" ? node.metadata.source : "图谱提取";
+    const libraryLine = library ? `\n- 资料库：${library.name}` : "";
+    return {
+      name: node.label,
+      path: node.id,
+      kind: "markdown",
+      content: `# ${node.label}
+
+概念节点
+
+## ${node.label}
+
+- 类型：概念
+- 来源：${source}${libraryLine}`,
+      sourceLabel: "概念节点",
+    };
+  }
+
+  const libraryLine = library ? `\n- 资料库：${library.name}` : "";
+  return {
+    name: node.label,
+    path: node.id,
+    kind: "markdown",
+    content: `# ${node.label}
+
+## ${node.label}
+
+- 类型：${node.kind}${libraryLine}`,
+    sourceLabel: "节点预览",
+  };
+}
+
+function IconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition hover:bg-slate-50 hover:text-slate-900"
+    >
+      {children}
+    </button>
+  );
+}
+
+function SettingSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block space-y-2">
+      <div className="text-xs text-slate-700">{label}</div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-slate-700"
+      />
+    </label>
+  );
+}
 
 export function KnowledgeGardenPanel({
   token,
@@ -26,18 +229,25 @@ export function KnowledgeGardenPanel({
 }: PanelShellProps & {
   token: string;
 }) {
+  const DEFAULT_GRAPH_SCALE = 1.3;
   const [libraries, setLibraries] = useState<KnowledgeBaseSummary[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [draftName, setDraftName] = useState("");
-  const [createFiles, setCreateFiles] = useState<File[]>([]);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [mode, setMode] = useState<KnowledgeGardenMode>("graph");
-  const [knowledgeVersion, setKnowledgeVersion] = useState(0);
   const [graphPayload, setGraphPayload] = useState<KnowledgeGraphPayload | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [resetVersion, setResetVersion] = useState(0);
+  const [graphScale, setGraphScale] = useState(DEFAULT_GRAPH_SCALE);
+  const [previewNode, setPreviewNode] = useState<KnowledgeGraphPreviewNode | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<PreviewDocument | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [expandedLibraries, setExpandedLibraries] = useState<Record<string, boolean>>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [graphSettings, setGraphSettings] = useState<KnowledgeGraphSettings>(DEFAULT_GRAPH_SETTINGS);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshKnowledge = useCallback(async () => {
     setLoading(true);
@@ -50,12 +260,17 @@ export function KnowledgeGardenPanel({
         })),
       );
       setLibraries(withFiles);
-      setSelectedId((current) =>
-        current && withFiles.some((base) => base.id === current)
-          ? current
-          : withFiles.find((base) => (base.files?.length ?? 0) > 0 || base.source_count > 0)?.id || withFiles[0]?.id || "",
-      );
-      setKnowledgeVersion((current) => current + 1);
+      setSelectedId((current) => {
+        if (current && withFiles.some((base) => base.id === current)) return current;
+        return withFiles[0]?.id ?? "";
+      });
+      setExpandedLibraries((current) => {
+        const next: Record<string, boolean> = {};
+        withFiles.forEach((base) => {
+          next[base.id] = current[base.id] ?? false;
+        });
+        return next;
+      });
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -69,258 +284,548 @@ export function KnowledgeGardenPanel({
   }, [refreshKnowledge]);
 
   useEffect(() => {
-    if (mode !== "graph" || !selectedId) {
+    if (!selectedId) {
       setGraphPayload(null);
       setGraphLoading(false);
       return;
     }
+
     let cancelled = false;
     setGraphLoading(true);
     fetchKnowledgeGraph(token, selectedId)
       .then((payload) => {
-        if (!cancelled) {
-          setGraphPayload(payload.nodes.length > 0 ? payload : null);
-        }
+        if (!cancelled) setGraphPayload(payload.nodes.length > 0 ? payload : null);
       })
-      .catch(() => {
-        if (!cancelled) setGraphPayload(null);
+      .catch((err) => {
+        if (!cancelled) {
+          setGraphPayload(null);
+          setError((err as Error).message);
+        }
       })
       .finally(() => {
         if (!cancelled) setGraphLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [knowledgeVersion, mode, selectedId, token]);
+  }, [selectedId, token]);
 
-  const selected = libraries.find((item) => item.id === selectedId) ?? null;
+  const selectedLibrary = useMemo(
+    () => libraries.find((library) => library.id === selectedId) ?? null,
+    [libraries, selectedId],
+  );
 
-  const handleCreate = async () => {
-    const name = draftName.trim();
-    if (!name) return;
-    setBusy("create");
-    try {
-      await createKnowledgeBase(token, { name, files: createFiles });
-      setDraftName("");
-      setCreateFiles([]);
-      await refreshKnowledge();
-      setSelectedId(name);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(null);
-    }
+  const completedLibraries = useMemo(
+    () => libraries.filter((library) => statusLabel(library.status) === "已完成"),
+    [libraries],
+  );
+  const pendingLibraries = useMemo(
+    () => libraries.filter((library) => statusLabel(library.status) === "待处理"),
+    [libraries],
+  );
+  const completedFileCount = useMemo(
+    () => completedLibraries.reduce((sum, library) => sum + libraryFileCount(library), 0),
+    [completedLibraries],
+  );
+  const pendingFileCount = useMemo(
+    () => pendingLibraries.reduce((sum, library) => sum + libraryFileCount(library), 0),
+    [pendingLibraries],
+  );
+
+  const handlePickFiles = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFilesChanged = (event: ChangeEvent<HTMLInputElement>) => {
+    setSelectedFiles(Array.from(event.target.files ?? []));
   };
 
   const handleUpload = async () => {
-    if (!selected || uploadFiles.length === 0) return;
-    setBusy("upload");
+    if (!selectedFiles.length) return;
+    const targetName = draftName.trim() || selectedLibrary?.id || "";
+    if (!targetName) return;
+
+    setSubmitting(true);
+    setError(null);
     try {
-      await uploadKnowledgeFiles(token, { name: selected.id, files: uploadFiles });
-      setUploadFiles([]);
+      const existing =
+        libraries.find((library) => library.id === targetName)
+        ?? libraries.find((library) => library.name === targetName);
+      if (existing) {
+        await uploadKnowledgeFiles(token, { name: existing.id, files: selectedFiles });
+      } else {
+        await createKnowledgeBase(token, { name: targetName, files: selectedFiles });
+      }
       await refreshKnowledge();
+      setSelectedId(existing?.id ?? targetName);
+      setDraftName("");
+      setSelectedFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setBusy(null);
+      setSubmitting(false);
     }
   };
 
-  const handleReindex = async () => {
-    if (!selected) return;
-    setBusy("reindex");
-    try {
-      await reindexKnowledgeBase(token, selected.id);
-      await refreshKnowledge();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  };
+  const handlePreviewNode = useCallback(
+    async (node: KnowledgeGraphPreviewNode) => {
+      setPreviewNode(node);
+      setPreviewLoading(true);
+      setPreviewDocument(null);
+      try {
+        if (node.kind === "file" && node.libraryId) {
+          const filePath = typeof node.metadata?.path === "string" ? node.metadata.path : node.label;
+          const preview = await fetchKnowledgeFilePreview(token, node.libraryId, filePath);
+          setPreviewDocument({ ...preview, sourceLabel: node.libraryId });
+        } else {
+          setPreviewDocument(buildNodeMarkdown(node, libraries));
+        }
+      } catch (err) {
+        setPreviewDocument({
+          name: `${node.label}（Mock）`,
+          path: node.id,
+          kind: "markdown",
+          content: buildMockPreviewMarkdown(node.label),
+          sourceLabel: "Mock 预览",
+        });
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [libraries, token],
+  );
 
-  return (
-    <PanelView title="知识花园" subtitle="像 Obsidian 一样查看资料、概念与学习线索之间的关系。" {...panelProps}>
-      {error ? <InfoCard title="当前状态" body={error} /> : null}
+  const handlePreviewFolder = useCallback(
+    (libraryId: string | undefined, folderPath: string) => {
+      if (!libraryId) return;
+      const library = libraries.find((item) => item.id === libraryId) ?? null;
+      setPreviewNode({
+        id: folderPath ? `folder:${libraryId}:${folderPath}` : `library:${libraryId}`,
+        label: folderPath || library?.name || libraryId,
+        kind: "library",
+        metadata: { library_id: libraryId, path: folderPath },
+        libraryId,
+      });
+      setPreviewDocument(buildFolderMarkdown(library, folderPath));
+      setPreviewLoading(false);
+    },
+    [libraries],
+  );
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card/80 p-3 shadow-[0_16px_50px_rgba(15,23,42,0.05)]">
-        <div className="inline-flex rounded-full border border-border/60 bg-muted/40 p-1">
-          <Button
-            type="button"
-            size="sm"
-            variant={mode === "graph" ? "default" : "ghost"}
-            onClick={() => setMode("graph")}
-            className="h-8 rounded-full gap-2"
-          >
-            <Network className="h-4 w-4" />
-            图谱
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={mode === "library" ? "default" : "ghost"}
-            onClick={() => setMode("library")}
-            className="h-8 rounded-full gap-2"
-          >
-            <FileText className="h-4 w-4" />
-            资料
-          </Button>
-        </div>
-        <Button
+  const renderPreviewBreadcrumb = () => {
+    if (!previewDocument) return null;
+    const libraryId = previewNode?.libraryId || previewDocument.sourceLabel;
+    const library = libraries.find((item) => item.id === libraryId) ?? null;
+    const path = normalizePreviewPath(previewDocument.path || previewDocument.name);
+    const parts = path ? path.split("/").filter(Boolean) : [];
+    const folderParts = previewNode?.kind === "file" ? parts.slice(0, -1) : parts;
+    const currentLabel = previewNode?.kind === "file" ? parts.at(-1) || previewDocument.name : previewDocument.name;
+
+    return (
+      <nav aria-label="预览位置" className="mb-6 flex min-h-8 w-full max-w-[calc(100%-48px)] items-center justify-start gap-1 overflow-hidden border-b border-slate-200/80 pb-3 text-left text-sm text-slate-500">
+        <button
           type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => void refreshKnowledge()}
-          disabled={loading}
-          className="h-8 rounded-full gap-2"
+          onClick={() => handlePreviewFolder(libraryId, "")}
+          className="max-w-[160px] truncate rounded-md px-1.5 py-1 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
         >
-          <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
-          刷新
-        </Button>
+          {library?.name || libraryId || "资料库"}
+        </button>
+        {folderParts.map((part, index) => {
+          const folderPath = folderParts.slice(0, index + 1).join("/");
+          return (
+            <span key={folderPath} className="flex min-w-0 items-center gap-1">
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
+              <button
+                type="button"
+                onClick={() => handlePreviewFolder(libraryId, folderPath)}
+                className="max-w-[150px] truncate rounded-md px-1.5 py-1 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              >
+                {part}
+              </button>
+            </span>
+          );
+        })}
+        {currentLabel ? (
+          <span className="flex min-w-0 items-center gap-1">
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
+            <span className="truncate px-1.5 py-1 font-medium text-slate-900">{currentLabel}</span>
+          </span>
+        ) : null}
+      </nav>
+    );
+  };
+
+  const renderLibraryItem = (library: KnowledgeBaseSummary) => {
+    const active = library.id === selectedId;
+    const isExpanded = expandedLibraries[library.id] ?? false;
+    const files = (library.files ?? []).filter((file) => file.name);
+
+    return (
+      <div key={library.id} className="rounded-xl px-2 py-0.5 transition">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label={isExpanded ? `收起 ${library.name}` : `展开 ${library.name}`}
+            onClick={() =>
+              setExpandedLibraries((current) => ({
+                ...current,
+                [library.id]: !isExpanded,
+              }))}
+            className="flex h-5.5 w-5.5 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedId(library.id)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left"
+          >
+            <FolderOpen className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            <span
+              className={`truncate text-[14px] leading-[18px] ${
+                active ? "font-medium text-slate-900" : "text-slate-600"
+              }`}
+            >
+              {library.name}
+            </span>
+          </button>
+        </div>
+
+        {isExpanded ? (
+          <div className="mt-0.5 space-y-0.5 pl-8">
+            {files.length ? (
+              files.map((file) => (
+                <button
+                  key={`${library.id}-${file.path}`}
+                  type="button"
+                  onClick={() =>
+                    void handlePreviewNode({
+                      id: `file:${library.id}:${file.path}`,
+                      label: file.name,
+                      kind: "file",
+                      metadata: {
+                        library_id: library.id,
+                        path: file.path,
+                        size: file.size,
+                        modified: file.modified,
+                        mime_type: file.mime_type,
+                      },
+                      libraryId: library.id,
+                    })}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-slate-500 transition hover:bg-[#F2F3F3] hover:text-slate-700"
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
+                  <span className="truncate text-xs leading-[18px]">{file.name}</span>
+                </button>
+              ))
+            ) : (
+              <div className="px-2 py-1 text-xs leading-[18px] text-slate-400">暂无文件</div>
+            )}
+          </div>
+        ) : null}
       </div>
+    );
+  };
 
-      {mode === "graph" ? (
-        <KnowledgeGraphView
-          libraries={libraries}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          loading={loading || graphLoading}
-          graphPayload={graphPayload}
-        />
-      ) : null}
+  const renderStatusCard = (
+    label: "已完成" | "待处理",
+    fileCount: number,
+    items: KnowledgeBaseSummary[],
+  ) => (
+    <section aria-label={`${label}文件`} className="space-y-2">
+      <div className="flex items-center justify-between gap-3 px-1">
+        <div className="flex min-w-0 items-center gap-2 font-medium text-slate-900">
+          <FileText className="h-4 w-4 shrink-0" aria-hidden />
+          <span className="truncate">{label}文件</span>
+        </div>
+        <div className="shrink-0 text-xs text-slate-500 tabular-nums">{fileCount} 个文件</div>
+      </div>
+      <div className="scrollbar-none max-h-[360px] overflow-y-auto rounded-[18px] border border-slate-200/80 bg-white/90 px-2.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.07)]">
+        {items.length ? (
+          <div className="space-y-1">{items.map(renderLibraryItem)}</div>
+        ) : (
+          <div className="px-3 py-2 text-xs leading-6 text-slate-400">
+            还没有{label === "已完成" ? "完成" : "待处理"}文件
+          </div>
+        )}
+      </div>
+    </section>
+  );
 
-      {mode === "library" ? (
-        <>
-      <InfoCard
-        title="新建资料库"
-        body={
-          <div className="space-y-3">
-            <Input
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              placeholder="输入资料库名称"
-              className="max-w-sm"
-            />
-            <input
-              type="file"
-              multiple
-              onChange={(event) => setCreateFiles(Array.from(event.target.files ?? []))}
-            />
-            <div className="text-xs text-muted-foreground">
-              支持上传 Markdown、文本、PDF、Office 文档，先建立最小可用闭环。
+  const graphToolbar = (
+    <div className="relative flex items-center gap-3 rounded-full border border-slate-200 bg-white/96 px-3 py-2 shadow-[0_6px_18px_rgba(15,23,42,0.06)] backdrop-blur">
+      <IconButton label="上传资料" onClick={handlePickFiles}>
+        <Upload className="h-4 w-4" aria-hidden />
+      </IconButton>
+      <IconButton
+        label="复位图谱"
+        onClick={() => {
+          setResetVersion((value) => value + 1);
+          setGraphScale(DEFAULT_GRAPH_SCALE);
+        }}
+      >
+        <RotateCcw className="h-4 w-4" aria-hidden />
+      </IconButton>
+      <IconButton label="图谱设置" onClick={() => setSettingsOpen((open) => !open)}>
+        <Settings2 className="h-4 w-4" aria-hidden />
+      </IconButton>
+
+      <label className="ml-1 flex items-center">
+        <span className="sr-only">图谱缩放</span>
+        <div className="relative w-32">
+          <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-slate-200" />
+          <div
+            className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[#013FF8]"
+            style={{ width: `${((graphScale - 0.72) / (2.2 - 0.72)) * 100}%` }}
+          />
+          <input
+            aria-label="图谱缩放"
+            type="range"
+            min={0.72}
+            max={2.2}
+            step={0.01}
+            value={graphScale}
+            onChange={(event) => setGraphScale(Number(event.target.value))}
+            className="knowledge-garden-zoom relative top-px z-10 h-6 w-full cursor-pointer appearance-none bg-transparent"
+          />
+        </div>
+      </label>
+
+      {settingsOpen ? (
+        <div className="absolute bottom-full left-0 z-30 mb-3 w-[320px] rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_14px_34px_rgba(15,23,42,0.08)]">
+          <div className="space-y-4">
+            <div>
+              <div className="pb-3 text-sm font-semibold text-slate-900">外观</div>
+              <div className="space-y-3">
+                <label className="flex items-center justify-between gap-3 text-xs text-slate-700">
+                  <span>显示标签</span>
+                  <button
+                    type="button"
+                    aria-pressed={graphSettings.showLabels}
+                    onClick={() =>
+                      setGraphSettings((current) => ({
+                        ...current,
+                        showLabels: !current.showLabels,
+                      }))}
+                    className={`relative h-6 w-11 rounded-full transition ${
+                      graphSettings.showLabels ? "bg-slate-900" : "bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+                        graphSettings.showLabels ? "left-[22px]" : "left-0.5"
+                      }`}
+                    />
+                  </button>
+                </label>
+                <SettingSlider
+                  label="文本透明度"
+                  min={20}
+                  max={100}
+                  step={1}
+                  value={Math.round(graphSettings.labelOpacity * 100)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, labelOpacity: value / 100 }))}
+                />
+                <SettingSlider
+                  label="节点大小"
+                  min={70}
+                  max={150}
+                  step={1}
+                  value={Math.round(graphSettings.nodeScale * 100)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, nodeScale: value / 100 }))}
+                />
+                <SettingSlider
+                  label="连线粗细"
+                  min={50}
+                  max={180}
+                  step={1}
+                  value={Math.round(graphSettings.edgeWidth * 100)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, edgeWidth: value / 100 }))}
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <div className="pb-3 text-sm font-semibold text-slate-900">力度</div>
+              <div className="space-y-3">
+                <SettingSlider
+                  label="图谱向心力"
+                  min={10}
+                  max={80}
+                  step={1}
+                  value={Math.round(graphSettings.centerForce * 10000)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, centerForce: value / 10000 }))}
+                />
+                <SettingSlider
+                  label="节点间排斥力"
+                  min={50}
+                  max={180}
+                  step={1}
+                  value={Math.round(graphSettings.repulsionForce * 100)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, repulsionForce: value / 100 }))}
+                />
+                <SettingSlider
+                  label="相连节点间的吸引力"
+                  min={50}
+                  max={180}
+                  step={1}
+                  value={Math.round(graphSettings.springForce * 100)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, springForce: value / 100 }))}
+                />
+                <SettingSlider
+                  label="连线长度"
+                  min={70}
+                  max={160}
+                  step={1}
+                  value={Math.round(graphSettings.edgeLength * 100)}
+                  onChange={(value) =>
+                    setGraphSettings((current) => ({ ...current, edgeLength: value / 100 }))}
+                />
+              </div>
             </div>
           </div>
-        }
-        actions={
-          <Button
-            size="sm"
-            onClick={handleCreate}
-            disabled={busy === "create" || !draftName.trim()}
-            className="rounded-full"
-          >
-            {busy === "create" ? "创建中..." : "创建"}
-          </Button>
-        }
-      />
-
-      <InfoCard
-        title="资料库概览"
-        body={
-          loading ? (
-            <EmptyHint text="正在读取知识花园..." />
-          ) : libraries.length > 0 ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              {libraries.map((library) => {
-                const active = library.id === selectedId;
-                return (
-                  <button
-                    key={library.id}
-                    type="button"
-                    onClick={() => setSelectedId(library.id)}
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-left transition-colors",
-                      active
-                        ? "border-foreground/20 bg-muted/70"
-                        : "border-border/50 hover:bg-muted/40",
-                    )}
-                  >
-                    <div className="text-sm font-semibold text-foreground">{library.name}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {library.source_count} 份资料 · {library.status} · {library.provider ?? "LightRAG"}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <EmptyHint text="还没有资料库。创建一个新的知识花园后，这里会显示索引和文件清单。" />
-          )
-        }
-      />
-
-      <InfoCard
-        title="当前资料库"
-        body={
-          selected ? (
-            <div className="space-y-4">
-              <div className="text-sm text-foreground">
-                <span className="font-medium">{selected.name}</span>
-                <span className="ml-3 text-muted-foreground">
-                  共 {selected.files?.length ?? 0} 个文件，状态 {selected.status}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <input
-                  type="file"
-                  multiple
-                  onChange={(event) => setUploadFiles(Array.from(event.target.files ?? []))}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleUpload}
-                  disabled={busy === "upload" || uploadFiles.length === 0}
-                  className="rounded-full gap-2"
-                >
-                  <Upload className="h-4 w-4" />
-                  {busy === "upload" ? "上传中..." : "上传资料"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleReindex}
-                  disabled={busy === "reindex"}
-                  className="rounded-full gap-2"
-                >
-                  <RefreshCw className={cn("h-4 w-4", busy === "reindex" ? "animate-spin" : "")} />
-                  {busy === "reindex" ? "索引中..." : "重建索引"}
-                </Button>
-              </div>
-              {selected.files && selected.files.length > 0 ? (
-                <div className="space-y-2">
-                  {selected.files.map((file) => (
-                    <div
-                      key={file.path}
-                      className="flex items-center justify-between rounded-xl border border-border/40 px-3 py-2 text-sm"
-                    >
-                      <span className="truncate pr-4">{file.name}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {Math.max(1, Math.round(file.size / 1024))} KB
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyHint text="当前资料库还没有文件。" />
-              )}
-            </div>
-          ) : (
-            <EmptyHint text="先在上面选择一个资料库，这里会显示文件、上传和索引操作。" />
-          )
-        }
-      />
-        </>
+        </div>
       ) : null}
+    </div>
+  );
+
+  return (
+    <PanelView
+      title="知识花园"
+      subtitle="把资料、概念和线索收进同一张可探索的知识图谱。"
+      fluidContent
+      contentClassName="px-6 pt-6 pb-0"
+      {...panelProps}
+    >
+      {error ? <InfoCard title="当前状态" body={error} /> : null}
+
+      <section className="relative min-h-0 flex-1">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFilesChanged}
+          accept=".md,.txt,.pdf,.docx,.pptx,.xlsx"
+        />
+
+        {selectedFiles.length ? (
+          <div className="absolute left-6 top-4 z-20 flex max-w-[min(520px,calc(100%-2rem))] flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white/94 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.12)] backdrop-blur">
+            <input
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              placeholder={selectedLibrary ? `留空则上传到 ${selectedLibrary.name}` : "输入资料库名称"}
+              className="h-9 min-w-[220px] flex-1 rounded-xl border border-slate-200 px-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-300"
+            />
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleUpload}
+              className="h-9 rounded-xl bg-slate-950 px-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting ? "上传中..." : "开始上传"}
+            </button>
+            {selectedFiles.slice(0, 3).map((file) => (
+              <span
+                key={`${file.name}-${file.size}`}
+                className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
+              >
+                {file.name}
+              </span>
+            ))}
+            {selectedFiles.length > 3 ? (
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">
+                +{selectedFiles.length - 3}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {loading && libraries.length === 0 ? (
+          <InfoCard title="知识花园" body={<EmptyHint text="正在整理知识图谱..." />} />
+        ) : libraries.length === 0 ? (
+          <InfoCard title="知识花园" body={<EmptyHint text="先上传资料，图谱会慢慢长出来。" />} />
+        ) : (
+          <>
+            <div
+              className={
+                previewNode
+                  ? "flex h-[calc(100vh-170px)] w-[60vw] max-w-[calc(100%-40vw)] items-center -translate-y-4"
+                  : "flex h-[calc(100vh-170px)] w-[calc(100%-320px)] items-center -translate-y-4"
+              }
+            >
+              <KnowledgeGraphView
+                libraries={libraries}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onPreviewNode={handlePreviewNode}
+                loading={graphLoading}
+                graphPayload={graphPayload}
+                minimal
+                resetVersion={resetVersion}
+                settings={graphSettings}
+                scale={graphScale}
+                onScaleChange={setGraphScale}
+              />
+            </div>
+
+            <div className="pointer-events-none absolute bottom-10 left-6 z-20 flex">
+              <div className="pointer-events-auto">{graphToolbar}</div>
+            </div>
+
+            {!previewNode ? (
+              <aside className="fixed inset-y-0 right-0 z-30 w-[320px] bg-white">
+                <div className="scrollbar-none h-full space-y-4 overflow-y-auto px-4 pb-4 pt-[112px] text-xs text-slate-500">
+                  {renderStatusCard("已完成", completedFileCount, completedLibraries)}
+                  {renderStatusCard("待处理", pendingFileCount, pendingLibraries)}
+                </div>
+              </aside>
+            ) : (
+              <aside className="fixed inset-y-0 right-0 z-30 w-[40vw] min-w-[520px] border-l border-slate-200/90 bg-white">
+                <button
+                  type="button"
+                  aria-label="关闭预览"
+                  onClick={() => {
+                    setPreviewNode(null);
+                    setPreviewDocument(null);
+                    setPreviewLoading(false);
+                  }}
+                  className="absolute right-6 top-6 z-10 flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+
+                <div className="h-full overflow-y-auto px-8 pb-8 pt-14">
+                  {previewLoading ? (
+                    <div className="pt-10 text-sm leading-7 text-slate-500">正在加载预览...</div>
+                  ) : previewDocument ? (
+                    <>
+                      {renderPreviewBreadcrumb()}
+                      <MarkdownText className="pr-10 text-sm leading-8 text-slate-700">
+                        {previewDocument.content}
+                      </MarkdownText>
+                    </>
+                  ) : (
+                    <div className="pt-10 text-sm leading-7 text-slate-500">暂无预览内容。</div>
+                  )}
+                </div>
+              </aside>
+            )}
+          </>
+        )}
+      </section>
     </PanelView>
   );
 }

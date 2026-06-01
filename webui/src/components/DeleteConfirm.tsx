@@ -36,23 +36,23 @@ export function DeleteConfirm({
               <Trash2 className="h-5 w-5" strokeWidth={2.4} aria-hidden />
             </div>
           </div>
-          <AlertDialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
+          <AlertDialogTitle className="text-center text-2xl font-semibold leading-tight tracking-[-0.02em] text-foreground">
             {t("deleteConfirm.title", { title })}
           </AlertDialogTitle>
-          <AlertDialogDescription className="mt-3 max-w-[17rem] text-center text-[14px] leading-6 text-muted-foreground">
+          <AlertDialogDescription className="mt-3 max-w-[17rem] text-center text-sm leading-6 text-muted-foreground">
             {t("deleteConfirm.description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="mt-7 grid grid-cols-2 gap-3 space-x-0">
           <AlertDialogCancel
             onClick={onCancel}
-            className="mt-0 h-11 rounded-full border-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+            className="mt-0 h-11 rounded-full border-0 bg-muted/70 px-5 text-sm font-semibold text-foreground shadow-none hover:bg-muted"
           >
             {t("deleteConfirm.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
-            className="h-11 rounded-full bg-destructive px-5 text-[15px] font-semibold text-destructive-foreground shadow-[0_10px_25px_rgba(239,68,68,0.28)] hover:bg-destructive/90"
+            className="h-11 rounded-full bg-destructive px-5 text-sm font-semibold text-destructive-foreground shadow-[0_10px_25px_rgba(239,68,68,0.28)] hover:bg-destructive/90"
           >
             {t("deleteConfirm.confirm")}
           </AlertDialogAction>

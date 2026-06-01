@@ -2,6 +2,7 @@ import type {
   ChatSummary,
   KnowledgeBaseSummary,
   KnowledgeFileSummary,
+  KnowledgeFilePreview,
   KnowledgeGraphPayload,
   KnowledgeTaskResult,
   LearningSupportPayload,
@@ -13,6 +14,7 @@ import type {
   SettingsPayload,
   SettingsUpdate,
   SlashCommand,
+  SkillDetail,
   SkillSummary,
   WebSearchSettingsUpdate,
   WebuiThreadPersistedPayload,
@@ -44,6 +46,9 @@ type RawSettingsState = {
   ui?: {
     theme?: string;
     language?: string;
+  };
+  memory?: {
+    enabled?: boolean;
   };
   runtime?: {
     config_path?: string;
@@ -94,6 +99,10 @@ async function request<T>(
     throw new ApiError(res.status, `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
+}
+
+function encodePathForRoute(path: string): string {
+  return path.split(/[\\/]+/).map(encodeURIComponent).join("/");
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
@@ -200,6 +209,9 @@ function normalizeSettingsPayload(raw: RawSettingsState): SettingsPayload {
         ),
       })),
     },
+    memory: {
+      enabled: raw.memory?.enabled !== false,
+    },
     runtime: {
       config_path: String(raw.runtime?.config_path ?? "").trim(),
     },
@@ -286,7 +298,9 @@ export async function listSessions(
     created_at?: string | null;
     updated_at?: string | null;
     title?: string;
+    title_is_custom?: boolean;
     last_message?: string;
+    mode?: "chat" | "learning";
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/v1/sessions`,
@@ -298,7 +312,9 @@ export async function listSessions(
     createdAt: normalizeSessionDate(s.created_at),
     updatedAt: normalizeSessionDate(s.updated_at),
     title: s.title ?? "",
+    titleIsCustom: Boolean(s.title_is_custom),
     preview: s.last_message ?? "",
+    mode: s.mode === "learning" ? "learning" : "chat",
   }));
 }
 
@@ -363,6 +379,7 @@ export async function fetchLearningSupport(
   const lastTurn = (session.last_turn_result ?? {}) as Record<string, unknown>;
   const runtime = (lastTurn.runtime_v2 ?? {}) as Record<string, unknown>;
   const retrieval = ((runtime.retrieval as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const retrievalActive = Boolean(retrieval.retrieval_active);
   const promptSupport =
     (retrieval.prompt_support_bundle as LearningSupportPayload["prompt_support_bundle"] | undefined)
     ?? [];
@@ -372,8 +389,32 @@ export async function fetchLearningSupport(
   const hits =
     (retrieval.retrieval_hits as LearningSupportPayload["retrieval_hits"] | undefined)
     ?? [];
-  if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0) return null;
+  const learningPlan = runtime.learning_plan as LearningSupportPayload["learning_plan"] | undefined;
+  const learningBoard = runtime.learning_board as LearningSupportPayload["learning_board"] | undefined;
+  const hasLearningState = Boolean(
+    learningPlan?.goal
+      || learningPlan?.current_node_id
+      || learningPlan?.plan_nodes?.length
+      || learningBoard?.current_progress
+      || learningBoard?.completed_nodes?.length
+      || learningBoard?.blockers?.length
+      || learningBoard?.objections?.length
+      || learningBoard?.evidence_refs?.length
+      || learningBoard?.continuation,
+  );
+  if (!retrievalActive && !hasLearningState) return null;
+  if (promptSupport.length === 0 && hits.length === 0 && misses.length === 0 && !hasLearningState) return null;
+  const sessionData = session as Record<string, unknown>;
   return {
+    retrieval_active: retrievalActive,
+    turn_mode: typeof runtime.turn_mode === "string" ? runtime.turn_mode : undefined,
+    learning_phase: typeof runtime.learning_phase === "string" ? runtime.learning_phase : undefined,
+    session_mode: (sessionData.mode === "learning" || sessionData.mode === "chat") ? sessionData.mode : undefined,
+    mastery_level: typeof runtime.mastery_level === "number" ? runtime.mastery_level : undefined,
+    session_summary: runtime.session_summary as LearningSupportPayload["session_summary"] | undefined,
+    next_recall: runtime.next_recall as LearningSupportPayload["next_recall"] | undefined,
+    learning_plan: learningPlan,
+    learning_board: learningBoard,
     prompt_support_bundle: promptSupport,
     retrieval_hits: hits,
     retrieval_misses: misses,
@@ -386,6 +427,42 @@ export async function fetchLearningSupport(
     continuation_retrieval_hint:
       (retrieval.continuation_retrieval_hint as LearningSupportPayload["continuation_retrieval_hint"] | undefined)
       ?? {},
+  };
+}
+
+export async function setSessionMode(
+  token: string,
+  sessionId: string,
+  mode: "chat" | "learning",
+  base: string = "",
+): Promise<ChatSummary> {
+  const endpoint = mode === "learning" ? "resume" : "pause";
+  const body = await request<{
+    session: {
+      session_id?: string;
+      created_at?: string | number | null;
+      updated_at?: string | number | null;
+      title?: string;
+      title_is_custom?: boolean;
+      last_message?: string;
+      mode?: "chat" | "learning";
+    };
+  }>(
+    `${base}/api/v1/sessions/${encodeURIComponent(sessionId)}/${endpoint}`,
+    token,
+    { method: "POST" },
+  );
+  const session = body.session ?? {};
+  const sessionKey = String(session.session_id ?? sessionId);
+  return {
+    key: sessionKey,
+    ...splitKey(sessionKey),
+    createdAt: normalizeSessionDate(session.created_at),
+    updatedAt: normalizeSessionDate(session.updated_at),
+    title: String(session.title ?? ""),
+    titleIsCustom: Boolean(session.title_is_custom),
+    preview: String(session.last_message ?? ""),
+    mode: session.mode === "learning" ? "learning" : "chat",
   };
 }
 
@@ -414,7 +491,9 @@ export async function updateSessionTitle(
       created_at?: string | number | null;
       updated_at?: string | number | null;
       title?: string;
+      title_is_custom?: boolean;
       last_message?: string;
+      mode?: "chat" | "learning";
     };
   }>(
     `${base}/api/v1/sessions/${encodeURIComponent(splitKey(key).chatId || key)}`,
@@ -433,7 +512,9 @@ export async function updateSessionTitle(
     createdAt: normalizeSessionDate(session.created_at),
     updatedAt: normalizeSessionDate(session.updated_at),
     title: String(session.title ?? ""),
+    titleIsCustom: Boolean(session.title_is_custom),
     preview: String(session.last_message ?? ""),
+    mode: session.mode === "learning" ? "learning" : "chat",
   };
 }
 
@@ -551,6 +632,19 @@ export async function updateWebSearchSettings(
   return applySettingsCatalogState(token, catalog, base);
 }
 
+export async function updateMemorySettings(
+  token: string,
+  update: { enabled: boolean },
+  base: string = "",
+): Promise<SettingsPayload> {
+  await request<{ memory: { enabled: boolean } }>(`${base}/api/v1/settings/memory`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
+  return normalizeSettingsPayload(await fetchRawSettingsState(token, base));
+}
+
 export async function listKnowledgeBases(
   token: string,
   base: string = "",
@@ -572,6 +666,19 @@ export async function listKnowledgeFiles(
     token,
   );
   return body.files;
+}
+
+export async function fetchKnowledgeFilePreview(
+  token: string,
+  name: string,
+  filePath: string,
+  base: string = "",
+): Promise<KnowledgeFilePreview> {
+  const encodedFilePath = encodePathForRoute(filePath);
+  return request<KnowledgeFilePreview>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/files/${encodedFilePath}/preview`,
+    token,
+  );
 }
 
 export async function fetchKnowledgeGraph(
@@ -623,6 +730,18 @@ export async function reindexKnowledgeBase(
 ): Promise<KnowledgeTaskResult> {
   return request<KnowledgeTaskResult>(
     `${base}/api/v1/knowledge/${encodeURIComponent(name)}/reindex`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export async function importLocalKnowledgeFiles(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<KnowledgeTaskResult> {
+  return request<KnowledgeTaskResult>(
+    `${base}/api/v1/knowledge/${encodeURIComponent(name)}/import-local`,
     token,
     { method: "POST" },
   );
@@ -683,5 +802,24 @@ export async function listSkills(
     name: String(skill.name ?? "").trim() || "unknown",
     description: String(skill.description ?? "").trim(),
     tags: Array.isArray(skill.tags) ? skill.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    always: Boolean(skill.always),
   }));
+}
+
+export async function fetchSkillDetail(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SkillDetail> {
+  const skill = await request<Partial<SkillDetail> & { name?: string; description?: string; content?: string; tags?: string[] }>(
+    `${base}/api/v1/skills/${encodeURIComponent(name)}`,
+    token,
+  );
+  return {
+    name: String(skill.name ?? name).trim() || name,
+    description: String(skill.description ?? "").trim(),
+    content: String(skill.content ?? "").trim(),
+    tags: Array.isArray(skill.tags) ? skill.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    always: Boolean(skill.always),
+  };
 }

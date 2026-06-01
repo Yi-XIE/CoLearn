@@ -36,7 +36,8 @@ class SessionCreatePayload(BaseModel):
     title: str = ""
     project_id: str
     project_title: str = ""
-    turn_mode: str = "EXPLORE"
+    mode: Literal["chat", "learning"] = "chat"
+    turn_mode: str = ""
     source_refs: list[str] = Field(default_factory=list)
     memory_refs: list[str] = Field(default_factory=list)
 
@@ -79,6 +80,7 @@ class StartTurnPayload(BaseModel):
     project_id: str | None = None
     project_title: str | None = None
     session_id: str | None = None
+    mode: Literal["chat", "learning"] | None = None
     attachments: list[AttachmentSchema] = Field(default_factory=list)
     language: str = "zh"
     config: dict[str, Any] = Field(default_factory=dict)
@@ -113,6 +115,10 @@ class PingPayload(BaseModel):
 class SettingsUiPayload(BaseModel):
     theme: str | None = None
     language: str | None = None
+
+
+class SettingsMemoryPayload(BaseModel):
+    enabled: bool | None = None
 
 
 class SettingsCatalogPayload(BaseModel):

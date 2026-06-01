@@ -7,6 +7,7 @@ from typing import Any
 
 from colearn.projects.service import LearningProjectService
 from colearn.sessions.store import LearningSession
+from colearn.sessions.titles import derive_session_title, first_user_message
 
 
 def serialize_session_summary(
@@ -16,16 +17,21 @@ def serialize_session_summary(
 ) -> dict[str, Any]:
     project = project_service.get_project(session.project_id) if session.project_id else None
     messages = list(session.messages)
-    last_message = messages[-1]["content"] if messages else ""
+    preview_message = first_user_message(messages)
+    title = str(session.title or "").strip()
+    if not title and preview_message:
+        title = derive_session_title(preview_message)
     board_facts = dict(session.board_facts or {})
     latest_review = dict(getattr(session, "pending_review", {}) or {})
     latest_review_status = str(latest_review.get("status") or ("ready" if latest_review.get("summary") else "empty"))
     return {
         "id": session.session_id,
         "session_id": session.session_id,
-        "title": session.title or "",
+        "title": title,
+        "title_is_custom": bool(getattr(session, "title_is_custom", False)),
         "project_id": session.project_id,
         "project_title": project.title if project else session.project_id,
+        "mode": str(getattr(session, "mode", "") or "chat"),
         "turn_mode": session.turn_mode,
         "board_facts": board_facts,
         "board_version": int(session.board_version or 1),
@@ -37,7 +43,7 @@ def serialize_session_summary(
         "created_at": session.created_at,
         "updated_at": session.updated_at,
         "message_count": len(messages),
-        "last_message": str(last_message or ""),
+        "last_message": preview_message,
         "status": session.status,
         "active_turn_id": session.active_turn_id,
         "preferences": {

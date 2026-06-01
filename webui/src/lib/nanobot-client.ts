@@ -4,6 +4,7 @@ import type {
   Outbound,
   OutboundImageGeneration,
   OutboundMedia,
+  SessionMode,
   GoalStateWsPayload,
 } from "./types";
 export { ColearnWsClient } from "./colearn-ws-client";
@@ -99,8 +100,9 @@ export interface NanobotClientLike {
     chatId: string,
     content: string,
     media?: OutboundMedia[],
-    options?: { imageGeneration?: OutboundImageGeneration },
+    options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void;
+  cancelTurn(chatId: string, turnId?: string): void;
 }
 
 export interface NanobotClientOptions {
@@ -312,7 +314,7 @@ export class NanobotClient implements NanobotClientLike {
     chatId: string,
     content: string,
     media?: OutboundMedia[],
-    options?: { imageGeneration?: OutboundImageGeneration },
+    options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void {
     this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -321,9 +323,18 @@ export class NanobotClient implements NanobotClientLike {
       content,
       ...(media && media.length > 0 ? { media } : {}),
       ...(options?.imageGeneration ? { image_generation: options.imageGeneration } : {}),
+      ...(options?.sessionMode ? { mode: options.sessionMode } : {}),
       webui: true,
     };
     this.queueSend(frame);
+  }
+
+  cancelTurn(chatId: string, turnId?: string): void {
+    this.queueSend({
+      type: "cancel_turn",
+      chat_id: chatId,
+      turn_id: turnId || chatId,
+    } as unknown as Outbound);
   }
 
   // -- internals ---------------------------------------------------------
@@ -579,8 +590,10 @@ export class OfflineNanobotClient implements NanobotClientLike {
     _chatId: string,
     _content: string,
     _media?: OutboundMedia[],
-    _options?: { imageGeneration?: OutboundImageGeneration },
+    _options?: { imageGeneration?: OutboundImageGeneration; sessionMode?: SessionMode },
   ): void {}
+
+  cancelTurn(_chatId: string, _turnId?: string): void {}
 
   private setStatus(status: ConnectionStatus): void {
     if (this.status_ === status) return;

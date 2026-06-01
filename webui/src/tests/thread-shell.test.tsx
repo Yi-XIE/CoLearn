@@ -117,6 +117,31 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("shows the intake questionnaire when learning mode is enabled on an empty session", async () => {
+    const client = makeClient();
+    const { container } = render(wrap(
+      client,
+      <ThreadShell
+        session={null}
+        title="New chat"
+        onToggleSidebar={() => {}}
+        onGoHome={() => {}}
+        onNewChat={() => {}}
+      />,
+    ));
+
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "/brand/colearn_penguin_question_transparent.png",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle learning mode" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+
+    // An empty learning session now opens the intake questionnaire instead of
+    // the study-penguin empty state.
+    expect(await screen.findByText("What's your current background?")).toBeInTheDocument();
+  });
+
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
     const onGoHome = vi.fn();
@@ -164,6 +189,7 @@ describe("ThreadShell", () => {
         "chat-a",
         "persist me across tabs",
         undefined,
+        { sessionMode: "chat" },
       ),
     );
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
@@ -201,6 +227,220 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
+  it("asks before enabling learning mode for learning-like chat messages", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/resume")) {
+          return httpJson({
+            session: {
+              session_id: "chat-a",
+              mode: "learning",
+            },
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "I want to learn matrices" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        "chat-a",
+        "I want to learn matrices",
+        undefined,
+        { sessionMode: "chat" },
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Turn on Learning Mode?");
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v1/sessions/chat-a/resume",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("asks before enabling learning mode from the composer toggle", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/resume")) {
+          return httpJson({
+            session: {
+              session_id: "chat-a",
+              mode: "learning",
+            },
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle learning mode" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Turn on Learning Mode?");
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([input]) => String(input).includes("/resume")),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v1/sessions/chat-a/resume",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("persists closing learning mode and sends the next turn as chat", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/pause")) {
+          return httpJson({
+            session: {
+              session_id: "chat-a",
+              mode: "chat",
+            },
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={{ ...session("chat-a"), mode: "learning" }}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle learning mode" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v1/sessions/chat-a/pause",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "plain chat now" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        "chat-a",
+        "plain chat now",
+        undefined,
+        { sessionMode: "chat" },
+      ),
+    );
+  });
+
+  it("shows the learning phase label in the header for a learning session", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/v1/sessions/chat-a")) {
+          return httpJson({
+            session: {
+              session_id: "chat-a",
+              mode: "learning",
+              last_turn_result: {
+                runtime_v2: {
+                  learning_phase: "diagnose",
+                  turn_mode: "LEARN",
+                  learning_board: { current_progress: "Variables" },
+                },
+              },
+            },
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={{ ...session("chat-a"), mode: "learning" }}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText(/· Diagnosing/)).toBeInTheDocument());
+  });
+
   it("clears the old thread when the active session is removed", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");
@@ -228,6 +468,7 @@ describe("ThreadShell", () => {
         "chat-a",
         "delete me cleanly",
         undefined,
+        { sessionMode: "chat" },
       ),
     );
     expect(screen.getByText("delete me cleanly")).toBeInTheDocument();
@@ -331,6 +572,7 @@ describe("ThreadShell", () => {
         "chat-new",
         "first message should stay",
         undefined,
+        { sessionMode: "chat" },
       ),
     );
     await waitFor(() =>
@@ -428,6 +670,7 @@ describe("ThreadShell", () => {
         "chat-a",
         "only in chat a",
         undefined,
+        { sessionMode: "chat" },
       ),
     );
     expect(screen.getByText("only in chat a")).toBeInTheDocument();
@@ -673,6 +916,7 @@ describe("ThreadShell", () => {
         "chat-a",
         "do not disappear",
         undefined,
+        { sessionMode: "chat" },
       ),
     );
     expect(screen.getByText("do not disappear")).toBeInTheDocument();

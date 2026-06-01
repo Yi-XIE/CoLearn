@@ -26,6 +26,7 @@ class TurnContext:
     language: str = "zh"
     attachments: list[dict[str, Any]] = field(default_factory=list)
     requested_skills: list[str] = field(default_factory=list)
+    requested_mode: str | None = None
     stream_emit: Callable[[dict[str, Any]], None] | None = None
     cancel_check: Callable[[], bool] | None = None
 
@@ -35,6 +36,12 @@ class TurnContext:
     board: BoardFacts | None = None
     snapshot: Any = None
     source_profile: dict[str, Any] = field(default_factory=dict)
+    session_mode: str = "chat"
+
+    # --- filled by PlanStage -------------------------------------------
+    plan_patch: dict[str, Any] = field(default_factory=dict)
+    plan_stage: dict[str, Any] = field(default_factory=dict)
+    goal_lifecycle: dict[str, Any] = field(default_factory=dict)
 
     # --- filled by Retrieval -------------------------------------------
     retrieval_focus: dict[str, Any] = field(default_factory=dict)
@@ -42,6 +49,7 @@ class TurnContext:
     retrieval_query_context: dict[str, Any] = field(default_factory=dict)
     retrieval_bundle: Any = None
     parallel_support: dict[str, Any] = field(default_factory=dict)
+    external_web_fallback: dict[str, Any] = field(default_factory=dict)
     prefetched_references: list[dict[str, Any]] = field(default_factory=list)
     prompt_support_bundle: list[dict[str, Any]] = field(default_factory=list)
 
@@ -49,6 +57,9 @@ class TurnContext:
     turn_policy: Any = None
     request: LearningTurnRequest | None = None
     compressed: Any = None
+    final_text: str = ""
+    closure_payload: dict[str, Any] = field(default_factory=dict)
+    raw_learning_result: dict[str, Any] = field(default_factory=dict)
     result: Any = None  # LearningTurnResult
 
     # --- filled by Finalize --------------------------------------------
@@ -72,6 +83,7 @@ class TurnContext:
             "retrieval_reason": self.retrieval_reason,
             "retrieval_query_context": self.retrieval_query_context,
             "parallel_support": self.parallel_support,
+            "external_web_fallback": self.external_web_fallback,
             "retrieval_bundle": self.retrieval_bundle,
             "prefetched_references": self.prefetched_references,
             "prompt_support_bundle": self.prompt_support_bundle,

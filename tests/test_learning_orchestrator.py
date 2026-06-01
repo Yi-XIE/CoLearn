@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import asyncio
 import json
 from pathlib import Path
@@ -11,6 +11,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from colearn.app.learning_orchestrator import LearningOrchestrator
+from colearn.api.state import MemoryDocStateService, SettingsStateService
 from colearn.knowledge import KnowledgeWorkspaceService
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.state import BoardFacts, Blocker, GapsAndBlockers, LearningStateSnapshot, ProgressFacts, StudentSnapshot
@@ -26,19 +27,30 @@ from colearn.storage.json_store import JsonStateStore
 
 @dataclass
 class FakeExecutor:
-    def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
-        self.last_request = request
-        return LearningTurnResult(
-            final_text=f"Answering: {request.user_message}",
-            board_before=request.board_facts,
-            board_after=request.board_facts,
-            turn_mode_before=request.metadata.get("turn_mode_before", "EXPLORE"),
-            turn_mode_after=request.turn_mode,
-            retrieval_bundle=request.retrieval_bundle,
-            raw_learning_result={"tool_events": [], "raw_messages": []},
-        )
+    workspace: Path | None = None
 
-    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    def __post_init__(self) -> None:
+        self.goal_syncs = []
+
+    def sync_sustained_goal(self, *, session_id: str, objective: str, ui_summary: str = "") -> dict:
+        payload = {"session_id": session_id, "objective": objective, "ui_summary": ui_summary}
+        self.goal_syncs.append(payload)
+        return {"status": "active_started", **payload}
+
+    def complete_sustained_goal(self, *, session_id: str, recap: str = "") -> dict:
+        self.completed_goal = {"session_id": session_id, "recap": recap}
+        objective = self.goal_syncs[-1]["objective"] if self.goal_syncs else ""
+        return {"status": "completed", "objective": objective}
+
+    def _make_result(self, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
+        self.last_request = request
+        final_text = f"Answering: {request.user_message}"
+        messages: list = []
+        tools_used: list = []
+        raw_learning_result = {"tool_events": [], "raw_messages": []}
+        return (final_text, messages, tools_used, raw_learning_result)
+
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         return self._make_result(request)
 
     def finalize(
@@ -58,6 +70,7 @@ class FakeExecutor:
 class FakeRetrievalService:
     def __init__(self) -> None:
         self.last_bundle_query = ""
+        self.bundle_calls = 0
 
     def sync_source_refs(self, *, project_id: str, source_refs: list[str], libraries=None):
         _ = (project_id, libraries)
@@ -71,8 +84,14 @@ class FakeRetrievalService:
             "warnings": [],
         }
 
+    async def async_sync_source_refs(self, *, project_id: str, source_refs: list[str], libraries=None):
+        return self.sync_source_refs(
+            project_id=project_id, source_refs=source_refs, libraries=libraries
+        )
+
     def build_bundle(self, *, project, session, query: str, libraries=None):
         _ = (project, session, libraries)
+        self.bundle_calls += 1
         self.last_bundle_query = query
         return SimpleNamespace(
             query=query,
@@ -92,14 +111,18 @@ class FakeRetrievalService:
             metadata={},
         )
 
-    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
-        _ = (project_id, source_refs)
+    def build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None, top_k=None):
+        _ = (project_id, source_refs, top_k)
+        return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
+
+    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None, top_k=None):
+        _ = (project_id, source_refs, top_k)
         return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
 
 class EmptyRetrievalService(FakeRetrievalService):
-    def build_bundle(self, *, project, session, query: str, libraries=None):
-        _ = (project, session, libraries)
+    def build_bundle(self, *, project, session, query: str, libraries=None, top_k=None):
+        _ = (project, session, libraries, top_k)
         self.last_bundle_query = query
         return SimpleNamespace(
             query=query,
@@ -112,8 +135,8 @@ class EmptyRetrievalService(FakeRetrievalService):
             metadata={},
         )
 
-    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
-        _ = (project_id, source_refs)
+    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None, top_k=None):
+        _ = (project_id, source_refs, top_k)
         return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
 
@@ -150,18 +173,25 @@ async def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
         session_id="sess-1",
         project_id="proj-1",
         user_message="Explain why matrix multiplication is not commutative.",
+        requested_mode="learning",
     )
 
     saved_session = session_store.get_session("sess-1")
     saved_project = project_service.get_project("proj-1")
 
-    assert result.turn_mode_after == "EXPLORE"
+    assert result.turn_mode_after == "LEARN"
     assert saved_session is not None
     assert saved_project is not None
     assert len(saved_session.messages) == 2
+    assert saved_session.title == "Explain why matrix multiplication is not commutative."
+    assert saved_session.title_is_custom is False
     assert "board_patch" in saved_session.last_turn_result
+    assert saved_session.last_turn_result["board_patch"]["learning_plan"]["goal"] == "Linear Algebra"
+    assert saved_session.last_turn_result["board_patch"]["learning_board"]["current_progress"] == "Linear Algebra: orientation"
     assert saved_session.continuation_prompt
-    assert saved_session.board_facts["current_turn_mode"] == "EXPLORE"
+    assert saved_session.board_facts["current_turn_mode"] == "LEARN"
+    assert saved_session.board_facts["learning_plan"]["current_node_id"] == "linear-algebra-1"
+    assert saved_session.board_facts["learning_board"]["evidence_refs"]
     assert saved_project.board_facts == {}
     assert saved_project.board_version == saved_session.board_version
 
@@ -177,6 +207,273 @@ async def test_orchestrator_writes_back_review_and_memory_events(tmp_path):
     assert saved_session.last_turn_result["product_compression"]["status"] == "completed"
 
 
+async def test_chat_mode_skips_learning_retrieval(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-chat", "General Chat")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-chat", project_id="proj-chat")
+    retrieval = FakeRetrievalService()
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=retrieval,
+    )
+
+    result = await orchestrator.run_turn_async(
+        session_id="sess-chat",
+        project_id="proj-chat",
+        user_message="Just say hello.",
+    )
+
+    saved_session = session_store.get_session("sess-chat")
+    assert saved_session is not None
+    assert saved_session.mode == "chat"
+    assert result.turn_mode_after == "PAUSED"
+    assert retrieval.bundle_calls == 0
+    assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_active"] is False
+    assert saved_session.last_turn_result["runtime_v2"]["goal_state"]["active"] is False
+    assert saved_session.last_turn_result["product_compression"]["status"] == "scheduled"
+
+
+async def test_learning_mode_runs_learning_retrieval(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-learn", "Decision Trees")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-learn", project_id="proj-learn")
+    retrieval = FakeRetrievalService()
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=retrieval,
+    )
+
+    await orchestrator.run_turn_async(
+        session_id="sess-learn",
+        project_id="proj-learn",
+        user_message="I want to learn decision trees.",
+        requested_mode="learning",
+    )
+
+    saved_session = session_store.get_session("sess-learn")
+    assert saved_session is not None
+    assert saved_session.mode == "learning"
+    assert saved_session.last_turn_result["runtime_v2"]["goal_state"]["active"] is True
+    assert saved_session.last_turn_result["runtime_v2"]["learning_plan"]["goal"] == "Decision Trees"
+    assert len(saved_session.board_facts["learning_plan"]["plan_nodes"]) == 4
+    assert executor.last_request.metadata["plan_stage"]["status"] == "planned"
+    assert executor.goal_syncs == [
+        {
+            "session_id": "sess-learn",
+            "objective": "Decision Trees",
+            "ui_summary": "Decision Trees: orientation",
+        }
+    ]
+    assert executor.last_request.metadata["goal_lifecycle"]["status"] == "active_started"
+    assert retrieval.bundle_calls > 0
+
+
+async def test_learning_mode_completes_native_goal_when_plan_is_done(tmp_path):
+    class CompletingExecutor(FakeExecutor):
+        def _make_result(self, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
+            final_text, messages, tools_used, raw_learning_result = super()._make_result(request)
+            plan = request.board_facts.learning_plan
+            completed_nodes = [replace(node, status="completed") for node in plan.plan_nodes]
+            completed_plan = replace(plan, plan_nodes=completed_nodes)
+            completed_board = replace(request.board_facts, learning_plan=completed_plan)
+            raw_learning_result = {
+                **dict(raw_learning_result or {}),
+                "board_after": completed_board,
+                "turn_mode_after": "PAUSED",
+            }
+            return (final_text, messages, tools_used, raw_learning_result)
+
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-done", "Completed Topic")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-done", project_id="proj-done")
+    executor = CompletingExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+
+    await orchestrator.run_turn_async(
+        session_id="sess-done",
+        project_id="proj-done",
+        user_message="I understand this now.",
+        requested_mode="learning",
+    )
+
+    saved_session = session_store.get_session("sess-done")
+    assert saved_session is not None
+    assert executor.completed_goal["session_id"] == "sess-done"
+    assert "Completed learning goal: Completed Topic" in executor.completed_goal["recap"]
+    assert saved_session.last_turn_result["runtime_v2"]["goal_state"]["active"] is False
+    assert saved_session.last_turn_result["turn_mode_after"] == "PAUSED"
+
+
+async def test_external_source_request_enables_native_web_tools(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-web", "Current AI News")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-web", project_id="proj-web")
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+
+    await orchestrator.run_turn_async(
+        session_id="sess-web",
+        project_id="proj-web",
+        user_message="Find the latest public sources about AI tutoring.",
+        requested_mode="learning",
+    )
+
+    assert "web_search" in executor.last_request.enabled_tools
+    assert "web_fetch" in executor.last_request.enabled_tools
+    fallback = executor.last_request.metadata["retrieval"]["external_web_fallback"]
+    assert fallback["recommended"] is True
+    assert fallback["reason"] == "explicit_external_source_request"
+
+
+async def test_empty_local_retrieval_recommends_external_web_fallback(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-empty-web", "Sparse Sources")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-empty-web", project_id="proj-empty-web")
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=EmptyRetrievalService(),
+    )
+
+    await orchestrator.run_turn_async(
+        session_id="sess-empty-web",
+        project_id="proj-empty-web",
+        user_message="Explain this topic with evidence.",
+        requested_mode="learning",
+    )
+
+    fallback = executor.last_request.metadata["retrieval"]["external_web_fallback"]
+    assert fallback["recommended"] is True
+    assert fallback["reason"] == "local_retrieval_insufficient"
+    assert "web_search" in executor.last_request.enabled_tools
+
+
+async def test_learning_plan_stage_does_not_replan_every_turn(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-plan", "Planning")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-plan", project_id="proj-plan")
+    executor = FakeExecutor()
+    retrieval = FakeRetrievalService()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=retrieval,
+    )
+
+    await orchestrator.run_turn_async(
+        session_id="sess-plan",
+        project_id="proj-plan",
+        user_message="I want to learn decision trees.",
+        requested_mode="learning",
+    )
+    saved_session = session_store.get_session("sess-plan")
+    assert saved_session is not None
+    first_plan_nodes = list(saved_session.board_facts["learning_plan"]["plan_nodes"])
+    assert len(first_plan_nodes) == 4
+    assert executor.last_request.metadata["plan_stage"]["status"] == "planned"
+    calls_after_first_turn = retrieval.bundle_calls
+
+    await orchestrator.run_turn_async(
+        session_id="sess-plan",
+        project_id="proj-plan",
+        user_message="Continue with the next explanation.",
+        requested_mode="learning",
+    )
+
+    saved_session = session_store.get_session("sess-plan")
+    assert saved_session is not None
+    assert saved_session.board_facts["learning_plan"]["plan_nodes"] == first_plan_nodes
+    assert executor.last_request.metadata["plan_stage"]["status"] == "skipped"
+    assert executor.last_request.metadata["plan_stage"]["reason"] == "plan_exists"
+    assert retrieval.bundle_calls == calls_after_first_turn
+
+
+
+
+async def test_learning_topic_switch_replans_and_syncs_new_goal(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    project_service = LearningProjectService(state_store=JsonStateStore(root))
+    project = project_service.create_project("proj-switch", "Decision Trees")
+    project.source_refs = ["source.md"]
+    project_service.save_project(project)
+    session_store = SessionStore(state_store=JsonStateStore(root))
+    session_store.create_session(session_id="sess-switch", project_id="proj-switch")
+    executor = FakeExecutor()
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=executor,
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+
+    await orchestrator.run_turn_async(
+        session_id="sess-switch",
+        project_id="proj-switch",
+        user_message="I want to learn decision trees.",
+        requested_mode="learning",
+    )
+    await orchestrator.run_turn_async(
+        session_id="sess-switch",
+        project_id="proj-switch",
+        user_message="change topic to random forests",
+        requested_mode="learning",
+    )
+
+    saved_session = session_store.get_session("sess-switch")
+    assert saved_session is not None
+    assert saved_session.board_facts["learning_plan"]["goal"] == "to random forests"
+    assert executor.goal_syncs[-1]["objective"] == "to random forests"
+    assert executor.last_request.metadata["plan_stage"]["status"] == "planned"
 
 
 def test_session_autocompact_keeps_tail_and_continuation(tmp_path):
@@ -306,6 +603,53 @@ def test_nanobot_dream_consolidation_success_and_failure(tmp_path):
     assert "dream_consolidation_failed:RuntimeError" in session.last_turn_result["warnings"]
 
 
+def test_memory_disabled_skips_memory_events_and_doc_sync(tmp_path):
+    root = tmp_path / ".colearn" / "state"
+    state_store = JsonStateStore(root)
+    settings_service = SettingsStateService(state_store=state_store, env_path=tmp_path / ".env")
+    settings_service.update_memory_settings(enabled=False)
+    memory_docs = MemoryDocStateService(state_store=state_store)
+    project_service = LearningProjectService(state_store=state_store)
+    project = project_service.create_project("proj-memory-off", "Memory Off")
+    session_store = SessionStore(state_store=state_store)
+    session = session_store.create_session(session_id="sess-memory-off", project_id="proj-memory-off")
+    memory_store = EventMemoryStore(state_store=state_store)
+    orchestrator = LearningOrchestrator(
+        project_service=project_service,
+        session_store=session_store,
+        executor=FakeExecutor(),
+        memory_store=memory_store,
+        retrieval_service=FakeRetrievalService(),
+        settings_service=settings_service,
+        memory_doc_service=memory_docs,
+    )
+
+    result = LearningTurnResult(
+        final_text="answer",
+        review_summary="新的学习回顾",
+        memory_events=[
+            {
+                "kind": "review_written",
+                "payload": {
+                    "session_id": "sess-memory-off",
+                    "project_id": "proj-memory-off",
+                    "summary": "新的学习回顾",
+                },
+            }
+        ],
+    )
+
+    orchestrator.writeback._write_back(
+        project=project,
+        session=session,
+        request=LearningTurnRequest(session_id="sess-memory-off", project_id="proj-memory-off", user_message="hi"),
+        result=result,
+    )
+
+    assert memory_store.list_events_for_session("sess-memory-off") == []
+    assert memory_docs.snapshot()["summary"] == ""
+
+
 async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))
@@ -316,10 +660,14 @@ async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
 
     session_store = SessionStore(state_store=JsonStateStore(root))
     session = session_store.create_session(session_id="sess-meta", project_id="proj-meta")
+    # Profile + prior message present so preflight resolves to the normal
+    # READY/LEARN path rather than the INTAKE phase (which restricts tools).
+    session.profile = {"background": "has basics"}
+    session.messages = [{"role": "user", "content": "earlier turn"}]
     session.board_facts = {
         "project_id": "proj-meta",
         "session_id": "sess-meta",
-        "current_turn_mode": "EXPLORE",
+        "current_turn_mode": "LEARN",
         "board_version": 4,
         "current_progress": {
             "active_node_id": "node-meta",
@@ -357,17 +705,18 @@ async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
         session_id="sess-meta",
         project_id="proj-meta",
         user_message="Continue this node.",
+        requested_mode="learning",
     )
 
     request = executor.last_request
-    assert request.metadata["turn_mode_before"] == "EXPLORE"
+    assert request.metadata["turn_mode_before"] == "LEARN"
     assert request.metadata["board_version_before"] == 4
     assert request.metadata["active_node_id_before"] == "node-meta"
     assert request.metadata["active_node_label_before"] == "Node Meta"
     assert request.metadata["continuation_prompt_before"] == "continue metadata"
-    assert request.metadata["enabled_tools_before"] == ["memory", "lightrag"]
+    assert request.metadata["enabled_tools_before"] == ["memory", "learning_events"]
     assert request.metadata["source_readiness_before"] in {"", "empty", "unavailable", "partial", "ready"}
-    assert request.metadata["allowed_tools_before"] == ["memory", "lightrag"]
+    assert request.metadata["allowed_tools_before"] == ["memory", "learning_events"]
     assert request.metadata["policy_restrictions"] == []
 
 
@@ -384,7 +733,7 @@ async def test_orchestrator_persists_learning_state_writeback(tmp_path):
     session.board_facts = {
         "project_id": "proj-learning",
         "session_id": "sess-learning",
-        "current_turn_mode": "EXPLORE",
+        "current_turn_mode": "LEARN",
         "board_version": 1,
         "current_progress": {
             "active_node_id": "node-1",
@@ -457,6 +806,7 @@ async def test_product_compression_failure_keeps_main_result(tmp_path):
         session_id="sess-fail",
         project_id="proj-fail",
         user_message="Explain safe async writeback.",
+        requested_mode="learning",
     )
 
     time.sleep(0.05)
@@ -479,7 +829,7 @@ def test_background_result_only_patches_review_fields(tmp_path):
     session.active_turns = []
     session.messages = [{"role": "assistant", "content": "main result"}]
     session.board_version = 7
-    session.board_facts = {"board_version": 7, "current_turn_mode": "VERIFY"}
+    session.board_facts = {"board_version": 7, "current_turn_mode": "CHECK"}
     session.last_turn_result = {"final_text": "main result", "warnings": [], "product_compression": {"status": "scheduled"}}
     session_store.save_session(session)
 
@@ -510,7 +860,7 @@ def test_background_result_only_patches_review_fields(tmp_path):
     assert saved_session is not None
     assert saved_session.messages == [{"role": "assistant", "content": "main result"}]
     assert saved_session.board_version == 7
-    assert saved_session.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_session.board_facts["current_turn_mode"] == "CHECK"
     assert saved_session.status == "completed"
     assert saved_session.active_turns == []
     assert saved_session.pending_review["summary"] == "review"
@@ -527,7 +877,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     current_project.board_facts = {
         "project_id": "proj-conflict",
         "session_id": "sess-conflict",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "board_version": 3,
     }
     project_service.save_project(current_project)
@@ -537,7 +887,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     current_session.board_facts = {
         "project_id": "proj-conflict",
         "session_id": "sess-conflict",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "board_version": 3,
     }
     session_store.save_session(current_session)
@@ -553,7 +903,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     result_board = BoardFacts(
         project_id="proj-conflict",
         session_id="sess-conflict",
-        current_turn_mode="EXPLORE",
+        current_turn_mode="LEARN",
         board_version=2,
     )
     request = LearningTurnRequest(
@@ -566,7 +916,7 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
         final_text="stale answer",
         board_before=stale_board,
         board_after=result_board,
-        turn_mode_after="EXPLORE",
+        turn_mode_after="LEARN",
     )
     stale_session = current_session.__class__(
         session_id="sess-conflict",
@@ -593,9 +943,9 @@ def test_board_version_conflict_keeps_newer_board(tmp_path):
     assert saved_session is not None
     assert saved_project is not None
     assert saved_session.board_version == 3
-    assert saved_session.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_session.board_facts["current_turn_mode"] == "CHECK"
     assert saved_project.board_version == 3
-    assert saved_project.board_facts["current_turn_mode"] == "VERIFY"
+    assert saved_project.board_facts["current_turn_mode"] == "CHECK"
     assert "board_version_conflict_session_write_skipped" in saved_session.last_turn_result["warnings"]
     assert "board_version_conflict_project_write_skipped" not in saved_session.last_turn_result["warnings"]
 
@@ -609,12 +959,12 @@ def test_build_learning_board_ignores_legacy_project_board_facts() -> None:
         board_facts={
             "project_id": "proj-board",
             "session_id": "legacy-session",
-            "current_turn_mode": "ANCHOR",
+            "current_turn_mode": "LEARN",
             "board_version": 99,
             "updated_at": "legacy-project-board",
         },
     )
-    session = SessionStore().create_session(session_id="sess-board", project_id="proj-board", turn_mode="VERIFY")
+    session = SessionStore().create_session(session_id="sess-board", project_id="proj-board", turn_mode="CHECK")
     session.board_version = 3
 
     board = build_learning_board(
@@ -625,7 +975,7 @@ def test_build_learning_board_ignores_legacy_project_board_facts() -> None:
 
     assert board.session_id == "sess-board"
     assert board.board_version == 3
-    assert board.current_turn_mode == "VERIFY"
+    assert board.current_turn_mode == "CHECK"
     assert board.current_progress.active_node_id == "proj-board"
     assert board.continuation.next_prompt_hint == "continue from review"
     assert board.evidence_refs == [{"source_ref": "source-a.md"}]
@@ -671,8 +1021,8 @@ def test_after_turn_events_are_json_safe_and_attach_evidence(tmp_path):
     assert "BLOCKER_FOUND" in event_types
     assert "EVIDENCE_ATTACHED" in event_types
     assert payload["board_after"].evidence_refs[0]["tool_name"] == "lightrag"
-    assert payload["turn_mode_after"] == "CORRECTION"
-    assert payload["turn_mode_before"] == "EXPLORE"
+    assert payload["turn_mode_after"] == "CHECK"
+    assert payload["turn_mode_before"] == "LEARN"
     assert "writeback_envelope" not in payload
     assert payload["memory_events"][0]["payload"]["base_board_version"] == 1
     assert payload["memory_events"][0]["payload"]["resolved_board_version"] == payload["board_after"].board_version
@@ -692,7 +1042,7 @@ def test_memory_store_search_events() -> None:
         MemoryEvent(
             event_id="2",
             kind="turn_completed",
-            payload={"session_id": "s1", "project_id": "p1", "turn_mode": "EXPLORE", "summary": "matrix multiplication is not commutative"},
+            payload={"session_id": "s1", "project_id": "p1", "turn_mode": "LEARN", "summary": "matrix multiplication is not commutative"},
         )
     )
     hits = store.search_events(query="matrix", session_id="s1")
@@ -770,7 +1120,7 @@ async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: P
     session.board_facts = {
         "project_id": "proj-retrieval",
         "session_id": "sess-retrieval",
-        "current_turn_mode": "VERIFY",
+        "current_turn_mode": "CHECK",
         "board_version": 2,
         "current_progress": {
             "active_node_id": "node-verify",
@@ -809,12 +1159,13 @@ async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: P
         session_id="sess-retrieval",
         project_id="proj-retrieval",
         user_message="Verify this step with evidence.",
+        requested_mode="learning",
     )
 
     saved_session = session_store.get_session("sess-retrieval")
     assert saved_session is not None
-    assert "步骤核验、来源依据、推理链" in retrieval_service.last_bundle_query
-    assert "Verify node" in retrieval_service.last_bundle_query
+    # Simplified CHECK-mode query: first blocker + user_message (focused, max 2 terms)
+    assert "Need proof" in retrieval_service.last_bundle_query
     assert "Verify this step with evidence." in retrieval_service.last_bundle_query
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["retrieval_reason"]
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["prefetched_references"]
@@ -829,7 +1180,7 @@ async def test_orchestrator_attaches_retrieval_context_and_writeback(tmp_path: P
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["knowledge_support_summary"]["active_node_id"] == "node-verify"
     assert saved_session.last_turn_result["continuation_retrieval_hint"]["active_node_id"] == "node-verify"
     assert saved_session.last_turn_result["runtime_v2"]["retrieval"]["blocker_support_refs"]["blk-1"]
-    assert result.turn_mode_after == "CORRECTION"
+    assert result.turn_mode_after == "CHECK"
 
 
 async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp_path: Path) -> None:
@@ -839,7 +1190,13 @@ async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp
     project.source_refs = ["missing.md"]
     project_service.save_project(project)
     session_store = SessionStore(state_store=JsonStateStore(root))
-    session_store.create_session(session_id="sess-miss", project_id="proj-miss")
+    session = session_store.create_session(session_id="sess-miss", project_id="proj-miss")
+    # Profile + prior message so the turn runs the LEARN path (prefetch active)
+    # rather than INTAKE/chat. A miss is only meaningful when prefetch actually
+    # ran this turn — RetrievalStage is the sole retrieval path now.
+    session.profile = {"background": "has basics"}
+    session.messages = [{"role": "user", "content": "earlier turn"}]
+    session_store.save_session(session)
     orchestrator = LearningOrchestrator(
         project_service=project_service,
         session_store=session_store,
@@ -852,6 +1209,7 @@ async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp
         session_id="sess-miss",
         project_id="proj-miss",
         user_message="Need a source-backed explanation.",
+        requested_mode="learning",
     )
 
     saved_session = session_store.get_session("sess-miss")
@@ -861,7 +1219,7 @@ async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp
     assert misses[0]["reason"] == "no_prefetched_references"
 
 
-def test_prompt_support_bundle_selects_different_material_by_turn_mode() -> None:
+def test_prompt_support_bundle_selects_material_by_three_state_mode() -> None:
     refs = [
         {"source_ref": "definition.md", "chunk_id": "d1", "text": "定义：力是改变运动状态的原因。"},
         {"source_ref": "example.md", "chunk_id": "e1", "text": "例如：推小车时速度会改变。"},
@@ -873,35 +1231,21 @@ def test_prompt_support_bundle_selects_different_material_by_turn_mode() -> None
         session_id="sess",
         current_progress=ProgressFacts(active_node_id="node-force", active_node_label="Force"),
     )
-    anchor = build_prompt_support_bundle(
+    learn = build_prompt_support_bundle(
         board=base_board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "ANCHOR"},
+        retrieval_focus={"turn_mode": "LEARN"},
         max_items=1,
     )
-    explore = build_prompt_support_bundle(
+    check = build_prompt_support_bundle(
         board=base_board,
         prefetched_references=refs,
-        retrieval_focus={"turn_mode": "EXPLORE"},
-        max_items=1,
-    )
-    verify = build_prompt_support_bundle(
-        board=base_board,
-        prefetched_references=refs,
-        retrieval_focus={"turn_mode": "VERIFY"},
-        max_items=1,
-    )
-    correction = build_prompt_support_bundle(
-        board=base_board,
-        prefetched_references=refs,
-        retrieval_focus={"turn_mode": "CORRECTION"},
+        retrieval_focus={"turn_mode": "CHECK"},
         max_items=1,
     )
 
-    assert anchor[0]["support_type"] == "definition"
-    assert explore[0]["support_type"] == "example"
-    assert verify[0]["support_type"] == "procedure"
-    assert correction[0]["support_type"] == "counterexample"
+    assert learn[0]["support_type"] == "example"
+    assert check[0]["support_type"] in {"procedure", "counterexample"}
 
 
 def test_default_nanobot_executor_receives_constructor_dependencies(tmp_path: Path) -> None:
@@ -1066,20 +1410,75 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
         project=project,
         session=session,
         retrieval_query_context=query_context,
+        turn_mode="LEARN",
     )
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "no_source_refs"
-    assert len(skipped["queries"]) == 3
+    # NORMAL cognitive_load (default) caps at 2 queries now (down from 3)
+    assert len(skipped["queries"]) == 2
 
     project.source_refs = ["source.md"]
     ready = await orchestrator.retrieval._build_parallel_support_dispatch(
         project=project,
         session=session,
         retrieval_query_context=query_context,
+        turn_mode="LEARN",
     )
     assert ready["status"] == "ready"
-    assert ready["queries"] == ["main query", "blocker one", "blocker two"]
-    assert len(ready["results"]) == 3
+    # NORMAL cognitive_load caps at 2: main query + first blocker
+    assert ready["queries"] == ["main query", "blocker one"]
+    assert len(ready["results"]) == 2
+
+
+async def test_parallel_support_skips_when_paused(tmp_path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=FakeRetrievalService(),
+    )
+    project = orchestrator.project_service.create_project("proj-paused", "Paused")
+    project.source_refs = ["source.md"]
+    session = orchestrator.session_store.create_session(session_id="sess-paused", project_id="proj-paused")
+    skipped = await orchestrator.retrieval._build_parallel_support_dispatch(
+        project=project,
+        session=session,
+        retrieval_query_context={"final_query": "main query"},
+        turn_mode="PAUSED",
+    )
+    assert skipped["status"] == "skipped"
+    assert skipped["reason"] == "turn_mode:paused"
+
+
+async def test_prefetch_bundle_skips_when_paused(tmp_path) -> None:
+    root = tmp_path / ".colearn" / "state"
+    retrieval_service = FakeRetrievalService()
+    orchestrator = LearningOrchestrator(
+        project_service=LearningProjectService(state_store=JsonStateStore(root)),
+        session_store=SessionStore(state_store=JsonStateStore(root)),
+        executor=FakeExecutor(),
+        memory_store=EventMemoryStore(state_store=JsonStateStore(root)),
+        retrieval_service=retrieval_service,
+    )
+    project = orchestrator.project_service.create_project("proj-paused-prefetch", "Paused Prefetch")
+    project.source_refs = ["source.md"]
+    session = orchestrator.session_store.create_session(
+        session_id="sess-paused-prefetch",
+        project_id="proj-paused-prefetch",
+    )
+    bundle = await orchestrator.retrieval._build_prefetch_bundle(
+        project=project,
+        session=session,
+        turn_mode="PAUSED",
+        retrieval_focus={"default_query": "default query"},
+        retrieval_query_context={"final_query": "main query"},
+        user_message="hello",
+    )
+    assert bundle.retrieval_status == "skipped"
+    assert bundle.fallback_reason == "prefetch_skipped:paused"
+    assert retrieval_service.last_bundle_query == ""
 
 
 def test_stream_hook_is_agenthook_and_requests_streaming() -> None:
@@ -1125,11 +1524,11 @@ def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
         project_id="proj-summary",
         project_title="Board Summary",
         user_message="Summarize the current state",
-        turn_mode="VERIFY",
+        turn_mode="CHECK",
         board_facts=BoardFacts(
             project_id="proj-summary",
             session_id="sess-summary",
-            current_turn_mode="VERIFY",
+            current_turn_mode="CHECK",
             current_progress=ProgressFacts(
                 active_node_id="node-verify",
                 active_node_label="Verify inference",
@@ -1158,7 +1557,7 @@ def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
     )
 
     board_summary = result.metadata["runtime_v2_board_summary"]
-    assert board_summary["turn_mode"] == "VERIFY"
+    assert board_summary["turn_mode"] == "CHECK"
     assert board_summary["active_node_id"] == "node-verify"
     assert board_summary["active_node_label"] == "Verify inference"
     assert board_summary["mastery_level"] == 0.75
@@ -1166,6 +1565,9 @@ def test_runtime_v2_result_bridge_attaches_board_summary() -> None:
     assert board_summary["critical_blocker_count"] == 1
     assert board_summary["unverified_gap_count"] == 1
     assert result.raw_learning_result["runtime_v2"]["board_summary"] == board_summary
+    assert result.raw_learning_result["runtime_v2"]["learning_plan"]["current_node_id"] == "node-verify"
+    assert result.raw_learning_result["runtime_v2"]["learning_board"]["current_progress"] == "Verify inference"
+    assert result.raw_learning_result["runtime_v2"]["goal_state"]["objective"] == "Board Summary"
 
 
 def test_runtime_v2_learning_closure_marks_runtime_metadata() -> None:
@@ -1218,6 +1620,7 @@ def test_runtime_v2_tooling_registers_memory_and_lightrag(monkeypatch) -> None:
     class FakeBot:
         def __init__(self) -> None:
             self._loop = FakeLoop()
+            self.tools = self._loop.tools
 
     class FakeTool:
         async def execute(self, **kwargs):
@@ -1244,8 +1647,8 @@ def test_runtime_v2_tooling_registers_memory_and_lightrag(monkeypatch) -> None:
 
     install_colearn_tools(bot=bot, request=request, workspace=Path.cwd())
 
-    assert "memory" in bot._loop.tools.items
-    assert "lightrag" in bot._loop.tools.items
+    assert "memory" in bot.tools.items
+    assert "lightrag" in bot.tools.items
 
 
 def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> None:
@@ -1271,6 +1674,7 @@ def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> No
     class FakeBot:
         def __init__(self) -> None:
             self._loop = FakeLoop()
+            self.tools = self._loop.tools
 
     class FakeTool:
         async def execute(self, **kwargs):
@@ -1303,9 +1707,50 @@ def test_runtime_v2_lightrag_tool_returns_structured_evidence(monkeypatch) -> No
 
     install_colearn_tools(bot=bot, request=request, workspace=Path.cwd())
 
-    tool = bot._loop.tools.items["lightrag"]
+    tool = bot.tools.items["lightrag"]
 
     result = asyncio.run(tool.execute(question="Find the source"))
     assert result["status"] in {"ready", "empty", "error"}
     assert "evidence_refs" in result
     assert isinstance(result["evidence_map"], dict)
+
+
+def test_executor_get_bot_registers_colearn_tools_once(monkeypatch) -> None:
+    from colearn.runtime_v2.executor import NanobotTurnExecutor
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.items: dict[str, object] = {}
+
+        def has(self, name: str) -> bool:
+            return name in self.items
+
+        def unregister(self, name: str) -> None:
+            self.items.pop(name, None)
+
+        def register(self, tool: object) -> None:
+            self.items[getattr(tool, "name")] = tool
+
+        def get(self, name: str) -> object | None:
+            return self.items.get(name)
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self._loop = SimpleNamespace(tools=FakeRegistry())
+
+    fake_bot = FakeBot()
+
+    class FakeNanobot:
+        @classmethod
+        def from_config(cls, **kwargs):
+            _ = kwargs
+            return fake_bot
+
+    monkeypatch.setitem(sys.modules, "nanobot.nanobot", SimpleNamespace(Nanobot=FakeNanobot))
+
+    executor = NanobotTurnExecutor(workspace=Path.cwd())
+    bot = executor._get_bot()
+    assert bot is fake_bot
+    assert getattr(bot, "tools", None) is bot._loop.tools
+    assert "memory" in bot.tools.items
+    assert "lightrag" not in bot.tools.items

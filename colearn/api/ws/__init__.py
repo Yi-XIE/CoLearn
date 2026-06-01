@@ -12,6 +12,7 @@ from .frames import (
 from .normalize import (
     normalize_attachments,
     normalize_turn_frame,
+    mode_from_frame,
     project_id_from_frame,
     project_title_from_frame,
     ready_event,
@@ -53,6 +54,7 @@ __all__ = [
     "get_session_turn",
     "message_event",
     "metadata",
+    "mode_from_frame",
     "normalize_attachments",
     "normalize_turn_frame",
     "project_id_from_frame",

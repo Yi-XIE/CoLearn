@@ -1,11 +1,15 @@
 import i18n, { currentLocale } from "@/i18n";
 
+const DEFAULT_TITLE_MAX_LENGTH = 60;
+
 /** Truncate the first user message into a chat title. */
 export function deriveTitle(preview: string | undefined, fallback: string): string {
   if (!preview) return fallback;
   const oneLine = preview.replace(/\s+/g, " ").trim();
   if (!oneLine) return fallback;
-  return oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
+  return oneLine.length > DEFAULT_TITLE_MAX_LENGTH
+    ? `${oneLine.slice(0, DEFAULT_TITLE_MAX_LENGTH - 3).trimEnd()}...`
+    : oneLine;
 }
 
 /** Loose ISO-or-epoch parser; returns ``null`` for missing/invalid input. */

@@ -1,4 +1,4 @@
-"""Tests for BoardSnapshotDeriver."""
+﻿"""Tests for BoardSnapshotDeriver."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _current_board(**overrides) -> BoardFacts:
     base = BoardFacts(
         project_id="p1",
         session_id="s1",
-        current_turn_mode="EXPLORE",
+        current_turn_mode="LEARN",
         board_version=2,
         current_progress=ProgressFacts(active_node_id="vectors", active_node_label="Vectors"),
         student_snapshot=StudentSnapshot(mastery_level=0.3, cognitive_load="NORMAL"),
@@ -46,13 +46,13 @@ def test_deriver_returns_current_when_events_empty():
     deriver = BoardSnapshotDeriver(llm_call=llm)
     board, diff = deriver.derive_snapshot(events=[], current_board=_current_board())
     assert diff["status"] == "skipped_empty"
-    assert board.current_turn_mode == "EXPLORE"
+    assert board.current_turn_mode == "LEARN"
 
 
 def test_deriver_builds_board_from_valid_json():
     def llm(*, system, user):
         return json.dumps({
-            "current_turn_mode": "CORRECTION",
+            "current_turn_mode": "CHECK",
             "mastery_level": 0.5,
             "cognitive_load": "HIGH",
             "active_node_id": "eigenvalues",
@@ -69,7 +69,7 @@ def test_deriver_builds_board_from_valid_json():
     board, diff = deriver.derive_snapshot(events=events, current_board=_current_board())
 
     assert diff["status"] == "ok"
-    assert board.current_turn_mode == "CORRECTION"
+    assert board.current_turn_mode == "CHECK"
     assert board.student_snapshot.mastery_level == 0.5
     assert board.student_snapshot.cognitive_load == "HIGH"
     assert board.current_progress.active_node_label == "Eigenvalues"
@@ -84,7 +84,7 @@ def test_deriver_extracts_json_from_markdown_fence():
     def llm(*, system, user):
         return """Here is the snapshot:
 ```json
-{"current_turn_mode": "VERIFY", "mastery_level": 0.7, "cognitive_load": "LOW",
+{"current_turn_mode": "CHECK", "mastery_level": 0.7, "cognitive_load": "LOW",
  "active_node_id": "x", "active_node_label": "X", "critical_blockers": [],
  "unverified_gaps": [], "next_prompt_hint": "h"}
 ```"""
@@ -92,7 +92,7 @@ def test_deriver_extracts_json_from_markdown_fence():
     deriver = BoardSnapshotDeriver(llm_call=llm)
     board, diff = deriver.derive_snapshot(events=_events(("turn_completed", {})), current_board=_current_board())
     assert diff["status"] == "ok"
-    assert board.current_turn_mode == "VERIFY"
+    assert board.current_turn_mode == "CHECK"
 
 
 def test_deriver_falls_back_when_llm_raises():
@@ -120,7 +120,7 @@ def test_deriver_falls_back_when_json_unparseable():
 def test_deriver_diff_captures_changes():
     def llm(*, system, user):
         return json.dumps({
-            "current_turn_mode": "CORRECTION",  # changed from EXPLORE
+            "current_turn_mode": "CHECK",
             "mastery_level": 0.7,  # changed from 0.3
             "cognitive_load": "HIGH",  # changed from NORMAL
             "active_node_id": "vectors",
@@ -133,7 +133,7 @@ def test_deriver_diff_captures_changes():
     deriver = BoardSnapshotDeriver(llm_call=llm)
     _, diff = deriver.derive_snapshot(events=_events(("turn_completed", {})), current_board=_current_board())
     changes = diff["changes"]
-    assert changes["turn_mode"] == {"old": "EXPLORE", "new": "CORRECTION"}
+    assert changes["turn_mode"] == {"old": "LEARN", "new": "CHECK"}
     assert changes["mastery_level"]["new"] == 0.7
     assert changes["cognitive_load"] == {"old": "NORMAL", "new": "HIGH"}
     assert "new_gap" in changes["gaps_added"]
@@ -145,7 +145,7 @@ def test_deriver_caps_to_max_events():
     def llm(*, system, user):
         captured_user_prompts.append(user)
         return json.dumps({
-            "current_turn_mode": "EXPLORE",
+            "current_turn_mode": "LEARN",
             "mastery_level": 0.3,
             "cognitive_load": "NORMAL",
             "active_node_id": "x",

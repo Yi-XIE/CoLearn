@@ -28,7 +28,7 @@ BOARD_CONSOLIDATION_USER_TEMPLATE = """## 学习项目
 
 ```json
 {{
-  "current_turn_mode": "EXPLORE | ANCHOR | CORRECTION | VERIFY | PAUSED",
+  "current_turn_mode": "LEARN | CHECK | PAUSED",
   "mastery_level": 0.0-1.0,
   "cognitive_load": "LOW | NORMAL | HIGH",
   "active_node_id": "学生当前关注的概念 id（短小标识符）",
@@ -45,10 +45,9 @@ BOARD_CONSOLIDATION_USER_TEMPLATE = """## 学习项目
 - mastery_level: 综合 understood_concept 数 vs still_blocked 数；初学者 0.0-0.3；中级 0.4-0.7；熟练 0.8-1.0
 - cognitive_load: 最近 3 轮里 still_blocked 信号密集 → HIGH；交替 understood/blocked → NORMAL；连续 understood → LOW
 - current_turn_mode:
-  * 学生有强烈困惑（≥1 critical_blocker）→ CORRECTION
-  * 学生刚理解某概念，需要练习巩固 → VERIFY
-  * 学生缺基础（≥2 unverified_gaps）→ ANCHOR
-  * 学生流畅探索新内容 → EXPLORE
+  * 学生有困惑、异议、待核查 gap 或需要练习巩固 → CHECK
+  * 学生流畅探索新内容 → LEARN
+  * 学生暂停或退出学习模式 → PAUSED
 - critical_blockers: 从 still_blocked 事件中提取，去重，最多 3 条
 - 仅输出 JSON，不要任何 markdown 标记或解释文字
 """

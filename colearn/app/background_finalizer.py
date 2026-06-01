@@ -86,7 +86,7 @@ class BackgroundTurnFinalizer:
                 continuation_prompt=product_output.continuation_prompt,
                 error="",
             )
-        except Exception as exc:
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:
             logger.warning(
                 "background product compression failed for session %s: %s",
                 session.session_id,
@@ -102,7 +102,7 @@ class BackgroundTurnFinalizer:
                     continuation_prompt="",
                     error=str(exc),
                 )
-            except Exception:
+            except (RuntimeError, ValueError, OSError, TypeError):
                 logger.exception(
                     "background finalizer error callback failed for session %s",
                     session.session_id,

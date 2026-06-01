@@ -185,6 +185,9 @@ describe("App layout", () => {
                 theme: "light",
                 language: "zh",
               },
+              memory: {
+                enabled: true,
+              },
               catalog: {
                 services: {
                   llm: {
@@ -341,6 +344,13 @@ describe("App layout", () => {
                   status: "ready",
                   provider: "lightrag",
                 },
+                {
+                  id: "kb-physics",
+                  name: "物理资料库",
+                  source_count: 1,
+                  status: "pending",
+                  provider: "lightrag",
+                },
               ],
             }),
           };
@@ -352,6 +362,17 @@ describe("App layout", () => {
             json: async () => ({
               files: [
                 { name: "notes.md", path: "/tmp/notes.md", size: 2048, modified: 1 },
+              ],
+            }),
+          };
+        }
+        if (url.includes("/api/v1/knowledge/kb-physics/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              files: [
+                { name: "force.md", path: "/tmp/force.md", size: 1024, modified: 1 },
               ],
             }),
           };
@@ -411,8 +432,11 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "知识花园" }));
 
     expect(await screen.findAllByText("线性代数资料库")).not.toHaveLength(0);
+    expect(await screen.findByRole("region", { name: "已完成文件" })).toHaveTextContent("1 个文件");
+    expect(await screen.findByRole("region", { name: "待处理文件" })).toHaveTextContent("1 个文件");
     expect(await screen.findByText("矩阵概念")).toBeInTheDocument();
-    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "展开 线性代数资料库" }));
+    expect((await screen.findAllByText("notes.md")).length).toBeGreaterThan(0);
   });
 
   it("renders memory and skills pages with API-backed content", async () => {
@@ -433,6 +457,20 @@ describe("App layout", () => {
               long_term_facts: [{ label: "note.md", detail: "lightrag" }],
               blockers: [{ label: "缺少证据支持", detail: "critical" }],
               recent_events: [{ event_id: "evt-1", kind: "review_written", summary: "需要进一步核对证据", recorded_at: "" }],
+            }),
+          };
+        }
+        if (url.includes("/api/v1/settings")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              catalog: { services: {} },
+              providers: { search: [] },
+              memory: { enabled: false },
+              runtime: {
+                config_path: "D:/Colearn-nightly/.colearn/nanobot-v0.2-slim.config.json",
+              },
             }),
           };
         }
@@ -461,6 +499,8 @@ describe("App layout", () => {
     expect(screen.getByDisplayValue("已沉淀的长期记忆")).toBeInTheDocument();
     expect(screen.getByText("个人画像")).toBeInTheDocument();
     expect(screen.getByText("启用记忆")).toBeInTheDocument();
+    expect(screen.getByText("自动记忆已关闭，当前仅支持手动维护。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "整理" })).toBeDisabled();
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "技能" }));
     expect(await screen.findByText("review")).toBeInTheDocument();
@@ -497,6 +537,9 @@ describe("App layout", () => {
               ui: {
                 theme: "light",
                 language: "zh",
+              },
+              memory: {
+                enabled: true,
               },
               catalog: {
                 services: {
@@ -572,6 +615,7 @@ describe("App layout", () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         title: "Q2 roadmap",
+        titleIsCustom: true,
         preview: "Project planning notes",
       },
       {
@@ -604,6 +648,42 @@ describe("App layout", () => {
 
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
+  });
+
+  it("uses the first user message as the default chat title unless the title was manually renamed", async () => {
+    mockSessions = [
+      {
+        key: "chat-auto",
+        channel: "",
+        chatId: "chat-auto",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "生成的小标题",
+        titleIsCustom: false,
+        preview: "这是用户输入的第一句话，应该显示在导航栏里而不是自动生成的小标题",
+      },
+      {
+        key: "chat-custom",
+        channel: "",
+        chatId: "chat-custom",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        title: "我手动改过的名字",
+        titleIsCustom: true,
+        preview: "这句不该覆盖手动命名",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
+    expect(
+      within(sidebar).getByText("这是用户输入的第一句话，应该显示在导航栏里而不是自动生成的小标题"),
+    ).toBeInTheDocument();
+    expect(within(sidebar).queryByText("生成的小标题")).not.toBeInTheDocument();
+    expect(within(sidebar).getByText("我手动改过的名字")).toBeInTheDocument();
   });
 
   it("opens a blank start page without creating an empty chat", async () => {
@@ -643,7 +723,7 @@ describe("App layout", () => {
 
     expect(screen.queryByRole("button", { name: "Start a new chat" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
-    await waitFor(() => expect(desktopAside.style.width).toBe("272px"));
+    await waitFor(() => expect(desktopAside.style.width).toBe("296px"));
 
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));

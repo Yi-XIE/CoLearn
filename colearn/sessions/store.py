@@ -16,9 +16,12 @@ class LearningSession:
     session_id: str
     project_id: str = ""
     title: str = ""
+    title_is_custom: bool = False
     created_at: int = 0
     updated_at: int = 0
-    turn_mode: str = "EXPLORE"
+    mode: str = "chat"
+    turn_mode: str = "PAUSED"
+    learning_phase: str = "ready"
     board_facts: dict[str, Any] = field(default_factory=dict)
     board_version: int = 1
     status: str = "idle"
@@ -30,6 +33,8 @@ class LearningSession:
     pending_review: dict[str, Any] = field(default_factory=dict)
     active_turn_id: str | None = None
     active_turns: list[dict[str, Any]] = field(default_factory=list)
+    next_recall: dict[str, Any] = field(default_factory=dict)
+    profile: dict[str, Any] = field(default_factory=dict)
 
 
 class SessionStore:
@@ -68,7 +73,7 @@ class SessionStore:
         session_id: str,
         project_id: str = "",
         title: str = "",
-        turn_mode: str = "EXPLORE",
+        turn_mode: str = "PAUSED",
     ) -> LearningSession:
         self._evict_idle()
         session = LearningSession(

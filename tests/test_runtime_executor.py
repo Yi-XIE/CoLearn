@@ -274,3 +274,79 @@ def test_cancel_session_dispatches_runtime_cancel(monkeypatch):
     assert called["key"] == "s1"
     assert called["loop"] is loop
     assert called["timeout"] == 2.0
+
+
+def test_bundled_nanobot_core_registers_long_goal_tools(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    provider = SimpleNamespace(
+        generation=SimpleNamespace(max_tokens=1000),
+        get_default_model=lambda: "test-model",
+    )
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+
+    assert loop.tools.get("long_task") is not None
+    assert loop.tools.get("complete_goal") is not None
+
+
+def test_bundled_nanobot_context_includes_active_goal_metadata(tmp_path):
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.session.goal_state import GOAL_STATE_KEY
+
+    messages = ContextBuilder(tmp_path).build_messages(
+        history=[],
+        current_message="Continue",
+        channel="websocket",
+        chat_id="chat-1",
+        session_metadata={
+            GOAL_STATE_KEY: {
+                "status": "active",
+                "objective": "Help Yi finish the learning state machine slimming plan.",
+                "ui_summary": "state machine plan",
+            },
+        },
+    )
+
+    merged = str(messages[-1]["content"])
+    assert "Goal (active):" in merged
+    assert "Help Yi finish the learning state machine slimming plan." in merged
+    assert "Summary: state machine plan" in merged
+
+
+def test_executor_sync_sustained_goal_uses_nanobot_metadata(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.goal_state import GOAL_STATE_KEY
+
+    provider = SimpleNamespace(
+        generation=SimpleNamespace(max_tokens=1000),
+        get_default_model=lambda: "test-model",
+    )
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    bot = SimpleNamespace(_loop=loop)
+    executor = NanobotTurnExecutor(_bot=bot)
+
+    first = executor.sync_sustained_goal(
+        session_id="sess-goal",
+        objective="Learn graph search",
+        ui_summary="graph search",
+    )
+    second = executor.sync_sustained_goal(
+        session_id="sess-goal",
+        objective="Learn graph search",
+        ui_summary="graph search",
+    )
+    third = executor.sync_sustained_goal(
+        session_id="sess-goal",
+        objective="Learn dynamic programming",
+        ui_summary="dp",
+    )
+
+    goal = loop.sessions.get_or_create("sess-goal").metadata[GOAL_STATE_KEY]
+    assert first["status"] == "active_started"
+    assert second["status"] == "active_existing"
+    assert third["status"] == "active_started"
+    assert goal["status"] == "active"
+    assert goal["objective"] == "Learn dynamic programming"
+    assert goal["ui_summary"] == "dp"

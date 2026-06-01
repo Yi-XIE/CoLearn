@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -35,7 +34,7 @@ async def lifespan(_app: FastAPI):
     yield
     try:
         _deps.orchestrator.shutdown(timeout=5.0)
-    except Exception as exc:
+    except (RuntimeError, OSError) as exc:
         logger.warning("orchestrator.shutdown failed: %s", exc)
 
 
@@ -54,17 +53,13 @@ app.include_router(knowledge_router)
 app.include_router(ws_router)
 
 
-# Support test monkey-patching: when tests set `app_module.orchestrator = X`,
-# propagate the change to the dependencies module so route handlers see it.
-_SYNCED_ATTRS = frozenset({"orchestrator", "session_store", "project_service"})
-_this = sys.modules[__name__]
+def override_dependency(name: str, value: object) -> None:
+    """Explicitly sync a dependency override to the shared deps module.
 
-
-class _ModuleProxy(sys.modules[__name__].__class__):
-    def __setattr__(self, name: str, value: object) -> None:
-        super().__setattr__(name, value)
-        if name in _SYNCED_ATTRS:
-            setattr(_deps, name, value)
-
-
-_this.__class__ = _ModuleProxy
+    Use in tests instead of monkey-patching module attributes directly.
+    """
+    _SYNCED_ATTRS = {"orchestrator", "session_store", "project_service"}
+    if name not in _SYNCED_ATTRS:
+        raise ValueError(f"unknown dependency: {name!r}")
+    setattr(_deps, name, value)
+    globals()[name] = value

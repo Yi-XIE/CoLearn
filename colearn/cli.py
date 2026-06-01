@@ -69,9 +69,8 @@ def cmd_retrieve(project_id: str, query: str, session_id: str = "") -> None:
 
 
 def cmd_get_board(session_id: str = "") -> None:
-    session_id = session_id or os.environ.get("COLEARN_SESSION_ID", "")
     if not session_id:
-        _out({"error": "no session_id (pass --session_id or set COLEARN_SESSION_ID)"})
+        _out({"error": "no session_id (pass --session_id)"})
         return
     ss = SessionStore(state_store=_store())
     session = ss.get_session(session_id)
@@ -81,7 +80,7 @@ def cmd_get_board(session_id: str = "") -> None:
     bf = session.board_facts or {}
     _out({
         "session_id": session.session_id,
-        "turn_mode": session.turn_mode or bf.get("current_turn_mode", "EXPLORE"),
+        "turn_mode": session.turn_mode or bf.get("current_turn_mode", "LEARN"),
         "board_version": session.board_version,
         "mastery_level": (bf.get("student_snapshot") or {}).get("mastery_level", 0),
         "cognitive_load": (bf.get("student_snapshot") or {}).get("cognitive_load", "NORMAL"),
@@ -94,9 +93,8 @@ def cmd_get_board(session_id: str = "") -> None:
 
 
 def cmd_get_session_detail(session_id: str = "", messages: str = "5") -> None:
-    session_id = session_id or os.environ.get("COLEARN_SESSION_ID", "")
     if not session_id:
-        _out({"error": "no session_id (pass --session_id or set COLEARN_SESSION_ID)"})
+        _out({"error": "no session_id (pass --session_id)"})
         return
     ss = SessionStore(state_store=_store())
     session = ss.get_session(session_id)
@@ -148,11 +146,10 @@ def cmd_list_concepts(project_id: str) -> None:
     _out({"project_id": project_id, "concepts": concepts, "total": len(concepts)})
 
 
-def cmd_get_current() -> None:
+def cmd_get_current(session_id: str = "") -> None:
     """Show the current learning context (session_id, board, recent messages)."""
-    session_id = os.environ.get("COLEARN_SESSION_ID", "")
     if not session_id:
-        _out({"error": "no current session (COLEARN_SESSION_ID not set)"})
+        _out({"error": "no session_id (pass --session_id)"})
         return
     ss = SessionStore(state_store=_store())
     session = ss.get_session(session_id)
@@ -181,9 +178,8 @@ def cmd_get_current() -> None:
 
 def cmd_list_signals(session_id: str = "", limit: str = "10") -> None:
     """List recent learning signals extracted by the harness (understood/blocked concepts)."""
-    session_id = session_id or os.environ.get("COLEARN_SESSION_ID", "")
     if not session_id:
-        _out({"error": "no session_id (pass --session_id or set COLEARN_SESSION_ID)"})
+        _out({"error": "no session_id (pass --session_id)"})
         return
     ms = EventMemoryStore(state_store=_store())
     n = int(limit)

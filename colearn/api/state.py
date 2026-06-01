@@ -4,24 +4,57 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 import secrets
 import time
 from typing import Any
 
+from colearn.nanobot_bootstrap import ensure_nanobot_on_path
 from colearn.storage import JsonStateStore
 from colearn.paths import colearn_slim_config
 
 
 def _env(name: str) -> str:
-    return os.environ.get(name, "")
+    value = str(os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if name == "DEEPSEEK_API_KEY":
+        return str(os.environ.get("OPENAI_API_KEY") or "").strip()
+    return ""
+
+
+def _provider_env_key(name: str) -> str | None:
+    provider = str(name or "").strip().lower()
+    if not provider:
+        return None
+    try:
+        ensure_nanobot_on_path()
+        from nanobot.providers.registry import find_by_name
+
+        spec = find_by_name(provider)
+        if spec and spec.env_key:
+            return str(spec.env_key).strip() or None
+    except (ImportError, ModuleNotFoundError):
+        pass
+    fallback = {
+        "deepseek": "DEEPSEEK_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "siliconflow": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+    }
+    return fallback.get(provider)
 
 
 DEFAULT_SETTINGS_STATE: dict[str, Any] = {
     "ui": {
         "theme": "dark",
         "language": "zh",
+    },
+    "memory": {
+        "enabled": True,
     },
     "catalog": {
         "version": 1,
@@ -165,6 +198,8 @@ class SettingsStateService:
                 and str(profile.get("binding") or "") == "openai"
             ):
                 profile["binding"] = "deepseek"
+            if str(profile.get("binding") or "") == "deepseek" and not str(profile.get("api_key") or "").strip():
+                profile["api_key"] = _env("DEEPSEEK_API_KEY")
         providers = self._state.get("providers") or {}
         for item in list((providers.get("llm") or [])):
             if str(item.get("label") or "").lower() == "deepseek" and str(item.get("value") or "") == "openai":
@@ -185,9 +220,12 @@ class SettingsStateService:
     def reset(self) -> None:
         self._state = deepcopy(DEFAULT_SETTINGS_STATE)
         self._dump()
+        self._write_env()
+        self._write_slim_config()
 
     def settings(self) -> dict[str, Any]:
         payload = deepcopy(self._state)
+        payload.setdefault("memory", {"enabled": True})
         payload.setdefault("runtime", {})
         payload["runtime"]["config_path"] = str(colearn_slim_config())
         return payload
@@ -198,12 +236,25 @@ class SettingsStateService:
     def providers(self) -> dict[str, Any]:
         return deepcopy(self._state["providers"])
 
+    def memory_settings(self) -> dict[str, Any]:
+        memory = dict(self._state.get("memory") or {})
+        return {
+            "enabled": bool(memory.get("enabled", True)),
+        }
+
     def update_ui(self, *, theme: str | None, language: str | None) -> dict[str, Any]:
         ui = self._state["ui"]
         ui["theme"] = str(theme or ui["theme"])
         ui["language"] = str(language or ui["language"])
         self._dump()
         return deepcopy(ui)
+
+    def update_memory_settings(self, *, enabled: bool | None = None) -> dict[str, Any]:
+        memory = self._state.setdefault("memory", {"enabled": True})
+        if enabled is not None:
+            memory["enabled"] = bool(enabled)
+        self._dump()
+        return self.memory_settings()
 
     def update_catalog(self, catalog: dict[str, Any]) -> dict[str, Any]:
         self._state["catalog"] = deepcopy(catalog)
@@ -215,6 +266,7 @@ class SettingsStateService:
             self._state["catalog"] = deepcopy(catalog)
         self._dump()
         self._write_env()
+        self._write_slim_config()
         return self.catalog()
 
     def _write_env(self) -> None:
@@ -252,14 +304,81 @@ class SettingsStateService:
                 }
             )
         else:
+            provider_name = self._provider_name(active_profile)
+            api_key = self._provider_api_key(active_profile)
+            api_base = self._string_or_none(active_profile.get("base_url"))
+            model = self._string_or_none(active_model.get("model"))
+            provider_env_key = _provider_env_key(provider_name)
             block.update(
                 {
-                    "DEEPSEEK_API_KEY": self._string_or_none(active_profile.get("api_key")),
-                    "DEEPSEEK_API_BASE": self._string_or_none(active_profile.get("base_url")),
-                    "DEEPSEEK_MODEL": self._string_or_none(active_model.get("model")),
+                    "DEEPSEEK_API_KEY": api_key if provider_name == "deepseek" else None,
+                    "DEEPSEEK_API_BASE": api_base if provider_name == "deepseek" else None,
+                    "DEEPSEEK_MODEL": model if provider_name == "deepseek" else None,
                 }
             )
+            if provider_env_key:
+                block[provider_env_key] = api_key
         return block
+
+    def _write_slim_config(self) -> None:
+        catalog = self._state.get("catalog") or {}
+        services = dict(catalog.get("services") or {})
+        active_profile, active_model = self._resolve_active_selection(services.get("llm"))
+        provider_name = self._provider_name(active_profile)
+        model_name = self._string_or_none(active_model.get("model")) or self._string_or_none(active_model.get("name"))
+        if not provider_name or not model_name:
+            return
+
+        config_path = colearn_slim_config()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, Any] = {}
+        if config_path.exists():
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    payload = raw
+            except json.JSONDecodeError:
+                payload = {}
+
+        agents = dict(payload.get("agents") or {})
+        defaults = dict(agents.get("defaults") or {})
+        defaults["provider"] = provider_name
+        defaults["model"] = model_name
+        agents["defaults"] = defaults
+        payload["agents"] = agents
+
+        provider_block: dict[str, Any] = {}
+        provider_env_key = _provider_env_key(provider_name)
+        if provider_env_key:
+            provider_block["apiKey"] = f"${{{provider_env_key}}}"
+        else:
+            api_key = self._string_or_none(active_profile.get("api_key"))
+            if api_key:
+                provider_block["apiKey"] = api_key
+        api_base = self._string_or_none(active_profile.get("base_url"))
+        if api_base:
+            provider_block["apiBase"] = api_base
+        payload["providers"] = {provider_name: provider_block}
+
+        config_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    def _provider_name(self, profile: dict[str, Any]) -> str:
+        return str(profile.get("binding") or profile.get("provider") or "openai").strip().lower()
+
+    def _provider_api_key(self, profile: dict[str, Any]) -> str | None:
+        explicit = self._string_or_none(profile.get("api_key"))
+        if explicit:
+            return explicit
+        provider_name = self._provider_name(profile)
+        if provider_name == "deepseek":
+            return _env("DEEPSEEK_API_KEY") or None
+        provider_env_key = _provider_env_key(provider_name)
+        if provider_env_key:
+            return self._string_or_none(os.environ.get(provider_env_key))
+        return None
 
     def _resolve_active_selection(self, service: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
         profiles = list((service or {}).get("profiles") or [])
@@ -297,14 +416,101 @@ class SettingsStateService:
         return value
 
 
+MEMORY_DOCS_FILE = "memory_docs.json"
+_MEMORY_AUTO_SECTION_HEADER = "## 自动沉淀"
+
+
+def _normalize_doc_payload(raw: Any) -> dict[str, Any]:
+    payload = dict(raw or {}) if isinstance(raw, dict) else {}
+    docs = dict(payload.get("docs") or {})
+    updated_at = dict(payload.get("updated_at") or {})
+    sources = dict(payload.get("auto_sources") or {})
+    normalized: dict[str, Any] = {
+        "docs": {
+            "summary": str(docs.get("summary") or ""),
+            "profile": str(docs.get("profile") or ""),
+        },
+        "updated_at": {
+            "summary": str(updated_at.get("summary") or "").strip() or None,
+            "profile": str(updated_at.get("profile") or "").strip() or None,
+        },
+        "auto_sources": {
+            "summary": list(sources.get("summary") or []),
+            "profile": list(sources.get("profile") or []),
+        },
+    }
+    return normalized
+
+
+def _split_manual_and_auto_sections(content: str) -> tuple[str, str]:
+    text = str(content or "")
+    marker = f"\n\n{_MEMORY_AUTO_SECTION_HEADER}\n"
+    if marker in text:
+        manual, auto = text.split(marker, 1)
+        return manual.rstrip(), auto.strip()
+    if text.startswith(f"{_MEMORY_AUTO_SECTION_HEADER}\n"):
+        return "", text[len(_MEMORY_AUTO_SECTION_HEADER) + 1 :].strip()
+    return text.rstrip(), ""
+
+
+def _compose_doc_text(manual_text: str, auto_section: str) -> str:
+    manual = str(manual_text or "").strip()
+    auto = str(auto_section or "").strip()
+    if manual and auto:
+        return f"{manual}\n\n{_MEMORY_AUTO_SECTION_HEADER}\n{auto}"
+    if auto:
+        return f"{_MEMORY_AUTO_SECTION_HEADER}\n{auto}"
+    return manual
+
+
+def _render_auto_entry(*, title: str, body: str) -> str:
+    clean_title = str(title or "").strip()
+    clean_body = str(body or "").strip()
+    if not clean_body:
+        return ""
+    if clean_title:
+        return f"### {clean_title}\n{clean_body}"
+    return clean_body
+
+
 @dataclass
 class MemoryDocStateService:
+    state_store: JsonStateStore = field(default_factory=JsonStateStore)
     _docs: dict[str, str] = field(default_factory=lambda: {"summary": "", "profile": ""})
     _updated_at: dict[str, str | None] = field(default_factory=lambda: {"summary": None, "profile": None})
+    _auto_sources: dict[str, list[str]] = field(default_factory=lambda: {"summary": [], "profile": []})
+
+    def __post_init__(self) -> None:
+        self._load()
+
+    def _load(self) -> None:
+        raw = self.state_store.read_json(MEMORY_DOCS_FILE, {})
+        payload = _normalize_doc_payload(raw)
+        self._docs = dict(payload["docs"])
+        self._updated_at = dict(payload["updated_at"])
+        self._auto_sources = {
+            "summary": [str(item).strip() for item in payload["auto_sources"]["summary"] if str(item).strip()],
+            "profile": [str(item).strip() for item in payload["auto_sources"]["profile"] if str(item).strip()],
+        }
+
+    def _dump(self) -> None:
+        self.state_store.write_json(
+            MEMORY_DOCS_FILE,
+            {
+                "docs": dict(self._docs),
+                "updated_at": dict(self._updated_at),
+                "auto_sources": {
+                    "summary": list(self._auto_sources["summary"]),
+                    "profile": list(self._auto_sources["profile"]),
+                },
+            },
+        )
 
     def reset(self) -> None:
         self._docs = {"summary": "", "profile": ""}
         self._updated_at = {"summary": None, "profile": None}
+        self._auto_sources = {"summary": [], "profile": []}
+        self._dump()
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -315,16 +521,47 @@ class MemoryDocStateService:
         }
 
     def update(self, file_name: str, content: str) -> dict[str, Any]:
-        self._docs[file_name] = content
+        self._docs[file_name] = str(content or "").strip()
         self._updated_at[file_name] = str(int(time.time()))
+        self._dump()
         return self.snapshot()
 
-    def refresh_summary(self, summary: str) -> bool:
-        if not summary or summary == self._docs["summary"]:
+    def append_auto_entry(
+        self,
+        file_name: str,
+        *,
+        source_key: str,
+        title: str,
+        body: str,
+    ) -> bool:
+        normalized_key = str(source_key or "").strip()
+        entry = _render_auto_entry(title=title, body=body)
+        if not normalized_key or not entry:
             return False
-        self._docs["summary"] = summary
-        self._updated_at["summary"] = str(int(time.time()))
+        existing = list(self._auto_sources.get(file_name, []) or [])
+        if normalized_key in existing:
+            return False
+        manual_text, auto_text = _split_manual_and_auto_sections(self._docs.get(file_name, ""))
+        auto_entries = [item.strip() for item in auto_text.split("\n\n") if item.strip()]
+        auto_entries.append(entry)
+        self._docs[file_name] = _compose_doc_text(manual_text, "\n\n".join(auto_entries))
+        existing.append(normalized_key)
+        self._auto_sources[file_name] = existing
+        self._updated_at[file_name] = str(int(time.time()))
+        self._dump()
         return True
+
+    def refresh_summary(self, summary: str) -> bool:
+        clean_summary = str(summary or "").strip()
+        if not clean_summary:
+            return False
+        source_key = f"review:{clean_summary}"
+        return self.append_auto_entry(
+            "summary",
+            source_key=source_key,
+            title="学习回顾",
+            body=clean_summary,
+        )
 
 
 @dataclass

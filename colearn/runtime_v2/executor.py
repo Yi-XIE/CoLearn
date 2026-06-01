@@ -6,9 +6,10 @@ import asyncio
 import concurrent.futures
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from colearn.nanobot_bootstrap import ensure_nanobot_on_path
 
@@ -16,16 +17,17 @@ ensure_nanobot_on_path()
 
 from nanobot.agent.hook import AgentHook
 
+from colearn.learning.constants import StreamEventType
 from colearn.learning.response_contract import LearningTurnResult
 from colearn.learning.turn_contract import LearningTurnRequest
 from colearn.logging_config import get_logger
 from colearn.memory.store import EventMemoryStore
 from colearn.retrieval.service import RetrievalService
 
-from .profile import COLEARN_NANOBOT_SLIM_CONFIG
+from .profile import COLEARN_NANOBOT_SLIM_CONFIG, DEFAULT_ENABLED_TOOLS
 from .prompting import build_turn_prompt
 from .result_bridge import normalize_learning_turn_result
-from .tooling import install_colearn_tools
+from .tooling import bind_colearn_tools, register_colearn_tools
 
 logger = get_logger(__name__)
 
@@ -36,6 +38,34 @@ class TurnTimeoutError(TimeoutError):
 
 class TurnCancelledError(RuntimeError):
     """Raised when a turn is cancelled cooperatively."""
+
+
+@runtime_checkable
+class TurnExecutorProtocol(Protocol):
+    """Interface the orchestrator relies on for driving a learning turn.
+
+    Both :class:`NanobotTurnExecutor` and the test doubles implement this, so
+    callers can depend on it directly instead of probing methods with
+    ``getattr(..., None)``.
+    """
+
+    workspace: Path | None
+
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]: ...
+
+    def finalize(
+        self,
+        *,
+        request: LearningTurnRequest,
+        final_text: str,
+        learning_result: dict[str, Any] | None = None,
+    ) -> LearningTurnResult: ...
+
+    def sync_sustained_goal(
+        self, *, session_id: str, objective: str, ui_summary: str = ""
+    ) -> dict[str, Any]: ...
+
+    def complete_sustained_goal(self, *, session_id: str, recap: str = "") -> dict[str, Any]: ...
 
 
 @dataclass
@@ -71,23 +101,23 @@ class NanobotTurnExecutor:
 
         async def on_stream(self, ctx, delta: str):
             if delta:
-                self._emit(NanobotTurnExecutor._coerce_stream_event("content_delta", delta))
+                self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.CONTENT_DELTA, delta))
 
         async def emit_reasoning(self, reasoning_content: str | None):
             if reasoning_content:
-                self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning_delta", reasoning_content))
+                self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.REASONING_DELTA, reasoning_content))
 
         async def emit_reasoning_end(self):
-            self._emit(NanobotTurnExecutor._coerce_stream_event("reasoning_end", ""))
+            self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.REASONING_END, ""))
 
         async def on_stream_end(self, ctx, *, resuming: bool):
-            self._emit(NanobotTurnExecutor._coerce_stream_event("stream_end", "", resuming=bool(resuming)))
+            self._emit(NanobotTurnExecutor._coerce_stream_event(StreamEventType.STREAM_END, "", resuming=bool(resuming)))
 
         async def before_execute_tools(self, ctx):
             for tool_call in list(getattr(ctx, "tool_calls", []) or []):
                 self._emit(
                     NanobotTurnExecutor._coerce_stream_event(
-                        "tool_call",
+                        StreamEventType.TOOL_CALL,
                         "",
                         tool_name=str(getattr(tool_call, "name", "") or ""),
                         args=getattr(tool_call, "arguments", {}),
@@ -99,26 +129,39 @@ class NanobotTurnExecutor:
                 for item in list(ctx.tool_events or []):
                     self._emit(
                         NanobotTurnExecutor._coerce_stream_event(
-                            str(item.get("type") or "tool_event"),
+                            str(item.get("type") or StreamEventType.TOOL_EVENT),
                             str(item.get("content") or ""),
                             **{k: v for k, v in item.items() if k not in {"type", "content"}},
                         )
                     )
 
-    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         """Async entry — drives nanobot directly without creating a new event loop."""
         final_text, messages, tools_used = await self._run_turn_async(request=request)
+
+        # Extract learning events from tool calls
+        learning_events_from_tools: list[dict] = []
+        for msg in messages:
+            if msg.get("role") == "assistant" and "tool_calls" in msg:
+                for tool_call in msg.get("tool_calls", []):
+                    if tool_call.get("function", {}).get("name") == "emit_learning_events":
+                        try:
+                            import json
+                            args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                            learning_events_from_tools.extend(args.get("events", []))
+                        except (json.JSONDecodeError, KeyError, TypeError) as e:
+                            request.metadata.setdefault("_runtime_warnings", []).append(
+                                f"learning_event_tool_parse_failed:{type(e).__name__}"
+                            )
+
         learning_result = {
+            "learning_events": learning_events_from_tools,
             "tool_events": [{"tool_name": name} for name in tools_used],
             "raw_messages": messages,
             "stream_events": list(request.metadata.get("_stream_events") or []),
             "warnings": list(request.metadata.get("_runtime_warnings") or []),
         }
-        return self.finalize(
-            request=request,
-            final_text=final_text,
-            learning_result=learning_result,
-        )
+        return (final_text, messages, tools_used, learning_result)
 
     async def _run_turn_async(
         self,
@@ -145,12 +188,12 @@ class NanobotTurnExecutor:
             if request.stream_emit is not None:
                 try:
                     request.stream_emit(dict(payload))
-                except Exception as exc:
+                except (RuntimeError, ConnectionError, OSError) as exc:
                     request.metadata.setdefault("_runtime_warnings", []).append(
                         f"stream_emit_failed:{type(exc).__name__}"
                     )
 
-        install_colearn_tools(
+        bind_colearn_tools(
             bot=bot,
             request=request,
             workspace=self.workspace,
@@ -159,8 +202,6 @@ class NanobotTurnExecutor:
         )
         if request.model_preset:
             self._apply_model_preset(bot=bot, preset=request.model_preset, request=request)
-        os.environ["COLEARN_SESSION_ID"] = request.session_id
-        os.environ["COLEARN_PROJECT_ID"] = request.project_id or ""
         timeout = request.metadata.get("turn_timeout_seconds")
         bot_coroutine = bot.run(
             prompt,
@@ -227,7 +268,7 @@ class NanobotTurnExecutor:
             return
         try:
             loop.set_model_preset(resolved)
-        except Exception as exc:
+        except (AttributeError, ValueError, RuntimeError) as exc:
             request.metadata.setdefault("_runtime_warnings", []).append(
                 f"model_preset_apply_failed:{resolved}:{type(exc).__name__}"
             )
@@ -258,7 +299,107 @@ class NanobotTurnExecutor:
             if self.workspace is not None:
                 kwargs["workspace"] = self.workspace
             self._bot = Nanobot.from_config(**kwargs)
+            # Expose the tool registry through a CoLearn-owned public surface so
+            # runtime tooling does not need to reach into nanobot internals.
+            if getattr(self._bot, "tools", None) is None and getattr(self._bot, "_loop", None) is not None:
+                self._bot.tools = self._bot._loop.tools
+            bootstrap_request = LearningTurnRequest(
+                session_id="colearn-bootstrap",
+                project_id="colearn-bootstrap",
+                enabled_tools=list(DEFAULT_ENABLED_TOOLS),
+            )
+            register_colearn_tools(
+                bot=self._bot,
+                request=bootstrap_request,
+                workspace=self.workspace,
+                retrieval_service=self.retrieval_service,
+                memory_store=self.memory_store,
+            )
         return self._bot
+
+    def sync_sustained_goal(
+        self,
+        *,
+        session_id: str,
+        objective: str,
+        ui_summary: str = "",
+    ) -> dict[str, Any]:
+        """Mirror CoLearn's learning goal into nanobot's native goal metadata."""
+        objective = str(objective or "").strip()
+        if not session_id or not objective:
+            return {"status": "skipped", "reason": "missing_goal"}
+
+        try:
+            from nanobot.session.goal_state import GOAL_STATE_KEY, discard_legacy_goal_state_key, parse_goal_state
+        except (ImportError, ModuleNotFoundError) as exc:
+            return {"status": "skipped", "reason": f"goal_state_unavailable:{type(exc).__name__}"}
+
+        try:
+            bot = self._get_bot()
+            sessions = getattr(getattr(bot, "_loop", None), "sessions", None)
+            if sessions is None:
+                return {"status": "skipped", "reason": "session_manager_unavailable"}
+            session = sessions.get_or_create(session_id)
+            metadata = session.metadata
+            prior = parse_goal_state(metadata.get(GOAL_STATE_KEY))
+            if isinstance(prior, dict) and prior.get("status") == "active":
+                prior_objective = str(prior.get("objective") or "").strip()
+                if prior_objective == objective:
+                    return {"status": "active_existing", "objective": objective}
+                metadata[GOAL_STATE_KEY] = {
+                    **prior,
+                    "status": "completed",
+                    "completed_at": datetime.now().isoformat(),
+                    "recap": "Superseded by a new CoLearn learning goal.",
+                }
+            metadata[GOAL_STATE_KEY] = {
+                "status": "active",
+                "objective": objective,
+                "ui_summary": str(ui_summary or "").strip()[:120],
+                "started_at": datetime.now().isoformat(),
+            }
+            discard_legacy_goal_state_key(metadata)
+            sessions.save(session)
+            return {"status": "active_started", "objective": objective}
+        except (AttributeError, KeyError, ValueError, RuntimeError) as exc:
+            return {"status": "skipped", "reason": f"sync_failed:{type(exc).__name__}"}
+
+    def complete_sustained_goal(
+        self,
+        *,
+        session_id: str,
+        recap: str = "",
+    ) -> dict[str, Any]:
+        """Mark nanobot's native sustained goal complete for this session."""
+        if not session_id:
+            return {"status": "skipped", "reason": "missing_session"}
+
+        try:
+            from nanobot.session.goal_state import GOAL_STATE_KEY, discard_legacy_goal_state_key, parse_goal_state
+        except (ImportError, ModuleNotFoundError) as exc:
+            return {"status": "skipped", "reason": f"goal_state_unavailable:{type(exc).__name__}"}
+
+        try:
+            bot = self._get_bot()
+            sessions = getattr(getattr(bot, "_loop", None), "sessions", None)
+            if sessions is None:
+                return {"status": "skipped", "reason": "session_manager_unavailable"}
+            session = sessions.get_or_create(session_id)
+            metadata = session.metadata
+            prior = parse_goal_state(metadata.get(GOAL_STATE_KEY))
+            if not isinstance(prior, dict) or prior.get("status") != "active":
+                return {"status": "skipped", "reason": "no_active_goal"}
+            metadata[GOAL_STATE_KEY] = {
+                **prior,
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "recap": str(recap or "").strip(),
+            }
+            discard_legacy_goal_state_key(metadata)
+            sessions.save(session)
+            return {"status": "completed", "objective": str(prior.get("objective") or "")}
+        except (AttributeError, KeyError, ValueError, RuntimeError) as exc:
+            return {"status": "skipped", "reason": f"complete_failed:{type(exc).__name__}"}
 
     def _build_prompt(self, request: LearningTurnRequest) -> str:
         return build_turn_prompt(request)
