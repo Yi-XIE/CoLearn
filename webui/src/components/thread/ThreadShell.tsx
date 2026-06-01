@@ -533,21 +533,10 @@ export function ThreadShell({
           aria-hidden
           draggable={false}
         />
-        {(() => {
-          const hour = new Date().getHours();
-          if (hour < 6) return "夜深了，学点轻松的？";
-          if (hour < 12) return "早上好，今天想学什么？";
-          if (hour < 18) return "下午好，继续探索吧";
-          return "晚上好，来充充电？";
-        })()}
+        {t("thread.empty.greeting")}
       </h1>
       <p className="mt-2 text-sm text-muted-foreground/70">
-        {[
-          "随便聊聊，我帮你理清思路",
-          "说个方向就行，剩下的交给我",
-          "从好奇心开始，没有门槛",
-          "不用想太多，先开口就对了",
-        ][Math.floor(Math.random() * 4)]}
+        {t("thread.empty.subtitle", { defaultValue: "" })}
       </p>
     </div>
   );
@@ -557,6 +546,14 @@ export function ThreadShell({
       <ThreadHeader
         title={title}
         subtitle={showIntakeCard ? null : goalHeaderLabel}
+        titleActions={
+          session && sessionMode === "learning" ? (
+            <ModeIndicator
+              mode={sessionMode}
+              learningPhase={learningSupport?.learning_phase}
+            />
+          ) : null
+        }
         onToggleSidebar={onToggleSidebar}
         theme={theme}
         onToggleTheme={onToggleTheme}
@@ -581,6 +578,8 @@ export function ThreadShell({
         planConfirmVisible={planConfirmVisible}
         onPlanConfirm={handlePlanConfirm}
         onPlanDismiss={handlePlanDismiss}
+        sessionId={session?.session_id ?? null}
+        onRefreshLearningSupport={refreshLearningSupport}
       />
     </section>
   );

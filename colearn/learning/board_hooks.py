@@ -434,6 +434,21 @@ def resolve_turn_mode_after(
     # A newly surfaced blocker forces a CHECK so we address it next turn.
     if LearningEventType.BLOCKER_FOUND in event_types:
         return TurnMode.CHECK
+
+    # Fallback: if CHECK mode persists for 3+ turns without BLOCKER_RESOLVED,
+    # force clear blockers and return to LEARN to prevent infinite CHECK loop.
+    check_turns = board_before.check_mode_turns if before_mode == TurnMode.CHECK else 0
+    if remaining_blockers and check_turns >= 3:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"CHECK mode persisted for {check_turns} turns without resolution. "
+            f"Force-clearing {len(remaining_blockers)} blockers to prevent deadlock."
+        )
+        # Clear blockers in board_after (mutate in place since we're in resolution phase)
+        board_after.gaps_and_blockers.critical_blockers = []
+        return TurnMode.LEARN
+
     # Unresolved blockers keep us in CHECK — but a blocker that was cleared this
     # turn no longer counts, so a resolved blocker can't pin CHECK forever.
     if remaining_blockers:
@@ -456,13 +471,22 @@ def apply_events(
     board: BoardFacts,
     events: list[LearningEvent],
 ) -> BoardFacts:
+    # Sort events: user corrections last (highest priority, will override model events)
+    def event_priority(event: LearningEvent) -> int:
+        source = event.payload.get("source", "")
+        if source == "user_correction":
+            return 1  # Apply last
+        return 0  # Model-derived events apply first
+
+    sorted_events = sorted(events, key=event_priority)
+
     completed_node_ids = list(board.current_progress.completed_node_ids)
     blockers = list(board.gaps_and_blockers.critical_blockers)
     continuation = board.continuation
     evidence_refs = list(board.evidence_refs)
     plan = board.learning_plan
 
-    for event in events:
+    for event in sorted_events:
         if event.type == LearningEventType.NODE_COMPLETED:
             node_id = str(event.payload.get("node_id") or "")
             if node_id and node_id not in completed_node_ids:
@@ -582,7 +606,12 @@ def apply_events(
         board_after=updated,
         events=events,
     )
-    updated = replace(updated, current_turn_mode=next_mode)
+    # Update check_mode_turns counter
+    if next_mode == TurnMode.CHECK:
+        check_turns = board.check_mode_turns + 1 if board.current_turn_mode == TurnMode.CHECK else 1
+    else:
+        check_turns = 0
+    updated = replace(updated, current_turn_mode=next_mode, check_mode_turns=check_turns)
     all_nodes_done = (
         len(plan_nodes) > 1
         and all(node.status == "completed" for node in plan_nodes)

@@ -111,18 +111,18 @@ class FakeRetrievalService:
             metadata={},
         )
 
-    def build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
-        _ = (project_id, source_refs)
+    def build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None, top_k=None):
+        _ = (project_id, source_refs, top_k)
         return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
-    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
-        _ = (project_id, source_refs)
+    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None, top_k=None):
+        _ = (project_id, source_refs, top_k)
         return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
 
 class EmptyRetrievalService(FakeRetrievalService):
-    def build_bundle(self, *, project, session, query: str, libraries=None):
-        _ = (project, session, libraries)
+    def build_bundle(self, *, project, session, query: str, libraries=None, top_k=None):
+        _ = (project, session, libraries, top_k)
         self.last_bundle_query = query
         return SimpleNamespace(
             query=query,
@@ -135,8 +135,8 @@ class EmptyRetrievalService(FakeRetrievalService):
             metadata={},
         )
 
-    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None):
-        _ = (project_id, source_refs)
+    async def async_build_bundle_for_source_refs(self, *, project_id, query, source_refs, libraries=None, top_k=None):
+        _ = (project_id, source_refs, top_k)
         return self.build_bundle(project=None, session=None, query=query, libraries=libraries)
 
 
@@ -714,9 +714,9 @@ async def test_before_turn_adds_runtime_turn_metadata(tmp_path):
     assert request.metadata["active_node_id_before"] == "node-meta"
     assert request.metadata["active_node_label_before"] == "Node Meta"
     assert request.metadata["continuation_prompt_before"] == "continue metadata"
-    assert request.metadata["enabled_tools_before"] == ["memory", "lightrag"]
+    assert request.metadata["enabled_tools_before"] == ["memory", "learning_events"]
     assert request.metadata["source_readiness_before"] in {"", "empty", "unavailable", "partial", "ready"}
-    assert request.metadata["allowed_tools_before"] == ["memory", "lightrag"]
+    assert request.metadata["allowed_tools_before"] == ["memory", "learning_events"]
     assert request.metadata["policy_restrictions"] == []
 
 
@@ -1190,7 +1190,13 @@ async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp
     project.source_refs = ["missing.md"]
     project_service.save_project(project)
     session_store = SessionStore(state_store=JsonStateStore(root))
-    session_store.create_session(session_id="sess-miss", project_id="proj-miss")
+    session = session_store.create_session(session_id="sess-miss", project_id="proj-miss")
+    # Profile + prior message so the turn runs the LEARN path (prefetch active)
+    # rather than INTAKE/chat. A miss is only meaningful when prefetch actually
+    # ran this turn — RetrievalStage is the sole retrieval path now.
+    session.profile = {"background": "has basics"}
+    session.messages = [{"role": "user", "content": "earlier turn"}]
+    session_store.save_session(session)
     orchestrator = LearningOrchestrator(
         project_service=project_service,
         session_store=session_store,
@@ -1203,6 +1209,7 @@ async def test_orchestrator_records_retrieval_miss_when_prefetch_has_no_hits(tmp
         session_id="sess-miss",
         project_id="proj-miss",
         user_message="Need a source-backed explanation.",
+        requested_mode="learning",
     )
 
     saved_session = session_store.get_session("sess-miss")
@@ -1407,7 +1414,8 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
     )
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "no_source_refs"
-    assert len(skipped["queries"]) == 3
+    # NORMAL cognitive_load (default) caps at 2 queries now (down from 3)
+    assert len(skipped["queries"]) == 2
 
     project.source_refs = ["source.md"]
     ready = await orchestrator.retrieval._build_parallel_support_dispatch(
@@ -1417,8 +1425,9 @@ async def test_parallel_support_caps_queries_and_skips_without_sources(tmp_path)
         turn_mode="LEARN",
     )
     assert ready["status"] == "ready"
-    assert ready["queries"] == ["main query", "blocker one", "blocker two"]
-    assert len(ready["results"]) == 3
+    # NORMAL cognitive_load caps at 2: main query + first blocker
+    assert ready["queries"] == ["main query", "blocker one"]
+    assert len(ready["results"]) == 2
 
 
 async def test_parallel_support_skips_when_paused(tmp_path) -> None:

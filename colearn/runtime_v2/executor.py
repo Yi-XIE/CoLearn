@@ -138,7 +138,24 @@ class NanobotTurnExecutor:
     async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         """Async entry — drives nanobot directly without creating a new event loop."""
         final_text, messages, tools_used = await self._run_turn_async(request=request)
+
+        # Extract learning events from tool calls
+        learning_events_from_tools: list[dict] = []
+        for msg in messages:
+            if msg.get("role") == "assistant" and "tool_calls" in msg:
+                for tool_call in msg.get("tool_calls", []):
+                    if tool_call.get("function", {}).get("name") == "emit_learning_events":
+                        try:
+                            import json
+                            args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                            learning_events_from_tools.extend(args.get("events", []))
+                        except (json.JSONDecodeError, KeyError, TypeError) as e:
+                            request.metadata.setdefault("_runtime_warnings", []).append(
+                                f"learning_event_tool_parse_failed:{type(e).__name__}"
+                            )
+
         learning_result = {
+            "learning_events": learning_events_from_tools,
             "tool_events": [{"tool_name": name} for name in tools_used],
             "raw_messages": messages,
             "stream_events": list(request.metadata.get("_stream_events") or []),

@@ -16,6 +16,9 @@ from colearn.learning.constants import LearningPhase, TurnMode
 from colearn.learning.state import ReplyContract, TurnPolicy
 
 
+# Kept for the future re-enable path of `_needs_lightrag` (see its docstring).
+# Currently unreferenced because nanobot's per-turn lightrag tool is disabled in
+# favor of RetrievalStage prefetch.
 LIGHTRAG_HINT_KEYWORDS: tuple[str, ...] = (
     "来源",
     "依据",
@@ -64,19 +67,16 @@ WEB_SOURCE_KEYWORDS: tuple[str, ...] = (
 
 
 def _needs_lightrag(*, board, user_message: str, turn_mode: str) -> bool:
-    if turn_mode == "LEARN":
-        return True
-    if turn_mode == "CHECK" and bool(board.gaps_and_blockers.unverified_gaps):
-        return True
-    lowered = str(user_message or "").strip().lower()
-    if lowered and any(keyword in lowered for keyword in LIGHTRAG_HINT_KEYWORDS):
-        return True
-    if turn_mode == "CHECK":
-        blockers = list(board.gaps_and_blockers.critical_blockers or [])
-        if blockers:
-            blocker_text = " ".join(str(blocker.desc or "") for blocker in blockers).lower()
-            if any(keyword in blocker_text for keyword in LIGHTRAG_HINT_KEYWORDS):
-                return True
+    """Whether nanobot should get its own lightrag tool this turn.
+
+    Disabled by default: RetrievalStage already prefetches the main query plus
+    parallel blocker/gap queries before the turn runs, and injects the results
+    into the prompt support bundle. Letting nanobot re-run lightrag mid-turn
+    duplicated that work (same query → cache hit at best, wasted tool-call +
+    round-trip at worst). Keep the signature and call sites intact so this can
+    be re-enabled per policy if prefetch ever proves insufficient.
+    """
+    _ = (board, user_message, turn_mode)
     return False
 
 
@@ -132,8 +132,8 @@ def policy(
             model_preset=None,
             main_goal="Run quick recall questions on previously weak concepts.",
             restrictions=["limit_to_3_questions", "do_not_introduce_new_topic"],
-            allowed_tools=["memory", "lightrag"] if memory_enabled else ["lightrag"],
-            enabled_tools=["memory", "lightrag"] if memory_enabled else ["lightrag"],
+            allowed_tools=["memory"] if memory_enabled else [],
+            enabled_tools=["memory"] if memory_enabled else [],
             reply_contract=ReplyContract(),
             warnings=[],
             continuation_prompt="Review weak concepts from last session.",
@@ -161,6 +161,8 @@ def policy(
         restrictions.extend(["do_not_introduce_new_topic", "do_not_give_direct_answer"])
 
     allowed_tools: list[str] = ["memory"] if memory_enabled else []
+    # Always enable learning_events tool for structured signal extraction
+    allowed_tools.append("learning_events")
     if _needs_lightrag(board=board, user_message=user_message, turn_mode=turn_mode):
         allowed_tools.append("lightrag")
     if _needs_web_tools(user_message=user_message, retrieval_context=retrieval_context):

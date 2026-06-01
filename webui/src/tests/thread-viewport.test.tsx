@@ -244,4 +244,82 @@ describe("ThreadViewport", () => {
 
     expect(aside.style.width).toBe("300px");
   });
+
+  it("mounts the support panel for a session summary with no retrieval data", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+          session_summary: {
+            topics_covered: ["Newton's laws"],
+            concepts_mastered: ["inertia"],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
+  });
+
+  it("mounts the support panel for mastery progress with no retrieval data", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+          mastery_level: 0.4,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
+  });
+
+  it("does not mount the support panel for an empty chat payload", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Resize preview panel" })).not.toBeInTheDocument();
+  });
+
+  it("mounts the support panel when only a plan confirmation is pending", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        planConfirmVisible
+        learningSupport={{
+          retrieval_active: false,
+          prompt_support_bundle: [],
+          retrieval_hits: [],
+          retrieval_misses: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize preview panel" })).toBeInTheDocument();
+  });
 });

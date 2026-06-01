@@ -465,6 +465,17 @@ async def upload_knowledge_files(
     for item in _normalize_uploads(files):
         uploads.append((item.filename or "upload.bin", await item.read(), item.content_type))
     saved = knowledge_task_service.save_files(name, uploads)
+
+    # Auto-copy files to LightRAG input directory for indexing
+    import shutil
+    lightrag_input_dir = Path.home() / ".colearn" / "knowledge"
+    lightrag_input_dir.mkdir(parents=True, exist_ok=True)
+    for file_info in saved:
+        src = Path(file_info["path"])
+        dst = lightrag_input_dir / src.name
+        if src.exists():
+            shutil.copy2(src, dst)
+
     project = project_service.get_project(name) or project_service.create_project(name, title=name)
     existing = {str(path) for path in project.source_refs}
     existing.update(str(file["path"]) for file in saved)

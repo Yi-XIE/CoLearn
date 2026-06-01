@@ -10,7 +10,7 @@ import {
 import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { LearningSupportPanel } from "@/components/thread/LearningSupportPanel";
+import { hasRenderableSupport, LearningSupportPanel } from "@/components/thread/LearningSupportPanel";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,8 @@ interface ThreadViewportProps {
   onPlanConfirm?: (nodes: Array<{ id?: string; label?: string; status?: string; summary?: string }>) => void;
   onPlanDismiss?: () => void;
   planConfirmVisible?: boolean;
+  sessionId?: string | null;
+  onRefreshLearningSupport?: () => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -47,6 +49,8 @@ export function ThreadViewport({
   onPlanConfirm,
   onPlanDismiss,
   planConfirmVisible = false,
+  sessionId = null,
+  onRefreshLearningSupport,
 }: ThreadViewportProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -63,12 +67,7 @@ export function ThreadViewport({
   const [isResizingLearningPanel, setIsResizingLearningPanel] = useState(false);
   const [learningPanelWidth, setLearningPanelWidth] = useState(LEARNING_PANEL_DEFAULT_WIDTH);
   const hasMessages = messages.length > 0;
-  const hasLearningSupport = !!learningSupport
-    && (
-      (learningSupport.prompt_support_bundle?.length ?? 0) > 0
-      || (learningSupport.retrieval_hits?.length ?? 0) > 0
-      || (learningSupport.retrieval_misses?.length ?? 0) > 0
-    );
+  const hasLearningSupport = hasRenderableSupport(learningSupport, planConfirmVisible);
 
   const clampLearningPanelWidth = useCallback((rawWidth: number) => {
     const viewportWidth = viewportRef.current?.clientWidth ?? 0;
@@ -335,6 +334,8 @@ export function ThreadViewport({
                 onPlanConfirm={onPlanConfirm}
                 onPlanDismiss={onPlanDismiss}
                 planConfirmVisible={planConfirmVisible}
+                sessionId={sessionId}
+                onBoardCorrectionApplied={onRefreshLearningSupport}
               />
             </div>
           </aside>
