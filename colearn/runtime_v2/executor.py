@@ -51,7 +51,7 @@ class TurnExecutorProtocol(Protocol):
 
     workspace: Path | None
 
-    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult: ...
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]: ...
 
     def finalize(
         self,
@@ -135,7 +135,7 @@ class NanobotTurnExecutor:
                         )
                     )
 
-    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         """Async entry — drives nanobot directly without creating a new event loop."""
         final_text, messages, tools_used = await self._run_turn_async(request=request)
         learning_result = {
@@ -144,11 +144,7 @@ class NanobotTurnExecutor:
             "stream_events": list(request.metadata.get("_stream_events") or []),
             "warnings": list(request.metadata.get("_runtime_warnings") or []),
         }
-        return self.finalize(
-            request=request,
-            final_text=final_text,
-            learning_result=learning_result,
-        )
+        return (final_text, messages, tools_used, learning_result)
 
     async def _run_turn_async(
         self,
@@ -189,8 +185,6 @@ class NanobotTurnExecutor:
         )
         if request.model_preset:
             self._apply_model_preset(bot=bot, preset=request.model_preset, request=request)
-        os.environ["COLEARN_SESSION_ID"] = request.session_id
-        os.environ["COLEARN_PROJECT_ID"] = request.project_id or ""
         timeout = request.metadata.get("turn_timeout_seconds")
         bot_coroutine = bot.run(
             prompt,

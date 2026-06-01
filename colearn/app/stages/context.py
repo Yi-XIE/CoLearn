@@ -57,6 +57,9 @@ class TurnContext:
     turn_policy: Any = None
     request: LearningTurnRequest | None = None
     compressed: Any = None
+    final_text: str = ""
+    closure_payload: dict[str, Any] = field(default_factory=dict)
+    raw_learning_result: dict[str, Any] = field(default_factory=dict)
     result: Any = None  # LearningTurnResult
 
     # --- filled by Finalize --------------------------------------------

@@ -36,19 +36,15 @@ class FakeExecutor:
     last_request: Any = None
     workspace: Any = None
 
-    def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
+    def _make_result(self, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         self.last_request = request
-        return LearningTurnResult(
-            final_text=f"Answering: {request.user_message}",
-            board_before=request.board_facts,
-            board_after=request.board_facts,
-            turn_mode_before=request.metadata.get("turn_mode_before", "LEARN"),
-            turn_mode_after=request.turn_mode,
-            retrieval_bundle=request.retrieval_bundle,
-            raw_learning_result={"tool_events": [], "raw_messages": []},
-        )
+        final_text = f"Answering: {request.user_message}"
+        messages = []
+        tools_used = []
+        raw_learning_result = {"tool_events": [], "raw_messages": []}
+        return (final_text, messages, tools_used, raw_learning_result)
 
-    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         return self._make_result(request)
 
     def finalize(

@@ -14,6 +14,13 @@ from colearn.learning.constants import (
     TurnMode,
 )
 from colearn.learning.hook_utils import json_safe, normalize_turn_mode, utc_now
+from colearn.learning.signal_extractor import (
+    detect_blocked,
+    detect_completion,
+    detect_understood,
+    extract_blocked_concept,
+    extract_understood_concepts,
+)
 from colearn.learning.state import (
     Blocker,
     BoardFacts,
@@ -248,6 +255,36 @@ def resolve_model_preset(turn_mode: TurnMode) -> str | None:
     }.get(turn_mode)
 
 
+def _first_understood_concept(text: str) -> str:
+    concepts = extract_understood_concepts(text)
+    return concepts[0] if concepts else ""
+
+
+def _match_resolved_blockers(blockers: list[Blocker], understood_concept: str) -> list[Blocker]:
+    """Pick which open blockers an "understood" signal resolves.
+
+    When a concept is parseable, resolve only blockers whose description overlaps
+    it (conservative — avoids clearing unrelated blockers). When no concept can be
+    parsed but understanding is clearly signaled and exactly one blocker is open,
+    resolve that one. With multiple open blockers and no concept, resolve nothing
+    rather than risk clearing the wrong one.
+    """
+    if not blockers:
+        return []
+    concept = (understood_concept or "").strip().lower()
+    if concept:
+        matched = [
+            blocker
+            for blocker in blockers
+            if blocker.desc and (concept in blocker.desc.lower() or blocker.desc.lower() in concept)
+        ]
+        if matched:
+            return matched
+    if len(blockers) == 1:
+        return [blockers[0]]
+    return []
+
+
 def extract_learning_events(
     *,
     board: BoardFacts,
@@ -274,44 +311,39 @@ def extract_learning_events(
         if str(item.get("tool_name") or item.get("tool") or "")
     ]
     source_refs = list(source_references or [])
-    final_lower = final_text.lower()
-    user_lower = user_message.lower()
+    active_node_id = board.current_progress.active_node_id
+    existing_blockers = list(board.gaps_and_blockers.critical_blockers or [])
 
-    if any(name == "lightrag" for name in tool_names) and board.current_progress.active_node_id:
+    # Completion signal — bilingual. Retrieval (lightrag) NEVER implies mastery;
+    # it only attaches evidence (handled in the source_refs loop below). A node is
+    # completed when the final text carries an explicit completion marker, or when
+    # the student signals understanding while in CHECK mode (i.e. they passed the
+    # check). The CHECK gate keeps a bare "I get it" mid-explanation from prematurely
+    # closing the node, while the explicit-marker path is the fallback that keeps
+    # progress moving even though mastery_level has no write source yet.
+    in_check = normalize_turn_mode(board.current_turn_mode) == TurnMode.CHECK
+    completion_signaled = detect_completion(final_text) or (in_check and detect_understood(final_text))
+
+    if active_node_id and completion_signaled:
         events.append(
             LearningEvent(
                 type=LearningEventType.NODE_COMPLETED,
                 payload=json_safe(
                     {
-                        "node_id": board.current_progress.active_node_id,
+                        "node_id": active_node_id,
                         "node_label": board.current_progress.active_node_label,
-                        "signal": "tool:lightrag",
+                        "signal": "completion_marker" if detect_completion(final_text) else "check_understood",
                     }
                 ),
             )
         )
-    elif board.current_progress.active_node_id and any(
-        marker in final_lower for marker in ["completed", "done", "finished", "resolved"]
-    ):
-        events.append(
-            LearningEvent(
-                type=LearningEventType.NODE_COMPLETED,
-                payload=json_safe(
-                    {
-                        "node_id": board.current_progress.active_node_id,
-                        "node_label": board.current_progress.active_node_label,
-                        "signal": "final_text",
-                    }
-                ),
-            )
-        )
-    elif board.current_progress.active_node_id and not board.current_progress.completed_node_ids:
+    elif active_node_id and not board.current_progress.completed_node_ids:
         events.append(
             LearningEvent(
                 type=LearningEventType.NODE_STARTED,
                 payload=json_safe(
                     {
-                        "node_id": board.current_progress.active_node_id,
+                        "node_id": active_node_id,
                         "node_label": board.current_progress.active_node_label,
                         "signal": "default",
                     }
@@ -319,8 +351,9 @@ def extract_learning_events(
             )
         )
 
-    blocker_markers = ["confused", "stuck", "unclear", "unsure", "uncertain"]
-    if any(marker in user_lower for marker in blocker_markers):
+    # Blocker detection — bilingual, read from the user's message (where confusion
+    # is expressed). Replaces the previous English-only marker list.
+    if detect_blocked(user_message):
         blocker_id = hashlib.sha1(user_message[:240].encode("utf-8")).hexdigest()[:10]
         events.append(
             LearningEvent(
@@ -329,12 +362,36 @@ def extract_learning_events(
                     {
                         "id": f"blk_{blocker_id}",
                         "type": BlockerType.CONCEPT_MISUNDERSTANDING,
-                        "desc": user_message[:240],
+                        "desc": extract_blocked_concept(user_message) or user_message[:240],
                         "signal": "user_message",
                     }
                 ),
             )
         )
+
+    # Blocker resolution — when the student signals understanding (in either the
+    # user message or the AI reply) and open blockers exist, resolve them so the
+    # state machine can leave CHECK. Without this, any blocker pinned CHECK forever.
+    if existing_blockers and (detect_understood(final_text) or detect_understood(user_message)):
+        understood_concept = ""
+        for candidate in (final_text, user_message):
+            understood_concept = _first_understood_concept(candidate)
+            if understood_concept:
+                break
+        resolved = _match_resolved_blockers(existing_blockers, understood_concept)
+        for blocker in resolved:
+            events.append(
+                LearningEvent(
+                    type=LearningEventType.BLOCKER_RESOLVED,
+                    payload=json_safe(
+                        {
+                            "id": blocker.id,
+                            "desc": blocker.desc,
+                            "signal": "understood",
+                        }
+                    ),
+                )
+            )
 
     for idx, ref in enumerate(source_refs):
         raw_ref = str(ref.get("source_ref") or ref.get("source_path") or ref.get("path") or "").strip()
@@ -363,21 +420,36 @@ def resolve_turn_mode_after(
     board_after: BoardFacts,
     events: list[LearningEvent],
 ) -> TurnMode:
+    before_mode = normalize_turn_mode(board_before.current_turn_mode)
+    # Explicit pause is sticky; only an upstream explicit resume leaves PAUSED.
+    if before_mode == TurnMode.PAUSED:
+        return TurnMode.PAUSED
+
     event_types = {event.type for event in events}
-    blockers = list(board_after.gaps_and_blockers.critical_blockers or [])
+    # board_after already had resolved blockers removed by apply_events, so this
+    # list reflects only blockers that genuinely survived this turn.
+    remaining_blockers = list(board_after.gaps_and_blockers.critical_blockers or [])
     unverified_gaps = list(board_after.gaps_and_blockers.unverified_gaps or [])
 
-    if LearningEventType.BLOCKER_FOUND in event_types or blockers:
+    # A newly surfaced blocker forces a CHECK so we address it next turn.
+    if LearningEventType.BLOCKER_FOUND in event_types:
         return TurnMode.CHECK
-    if board_before.current_turn_mode == TurnMode.LEARN and LearningEventType.NODE_COMPLETED in event_types:
+    # Unresolved blockers keep us in CHECK — but a blocker that was cleared this
+    # turn no longer counts, so a resolved blocker can't pin CHECK forever.
+    if remaining_blockers:
         return TurnMode.CHECK
-    if board_before.current_turn_mode == TurnMode.CHECK and LearningEventType.NODE_COMPLETED in event_types:
+    # Clearing the last blocker this turn returns us to normal learning.
+    if LearningEventType.BLOCKER_RESOLVED in event_types:
+        return TurnMode.LEARN
+    if before_mode == TurnMode.LEARN and LearningEventType.NODE_COMPLETED in event_types:
+        return TurnMode.CHECK
+    if before_mode == TurnMode.CHECK and LearningEventType.NODE_COMPLETED in event_types:
         return TurnMode.LEARN
     if unverified_gaps:
         return TurnMode.CHECK
     if LearningEventType.NODE_COMPLETED in event_types and board_after.current_progress.active_node_id:
         return TurnMode.LEARN
-    return normalize_turn_mode(board_before.current_turn_mode)
+    return before_mode
 
 
 def apply_events(
@@ -410,6 +482,10 @@ def apply_events(
             )
             if blocker.id not in {item.id for item in blockers}:
                 blockers.append(blocker)
+        elif event.type == LearningEventType.BLOCKER_RESOLVED:
+            resolved_id = str(event.payload.get("id") or "")
+            if resolved_id:
+                blockers = [item for item in blockers if item.id != resolved_id]
         elif event.type == LearningEventType.EVIDENCE_ATTACHED:
             source_ref = str(event.payload.get("source_ref") or "")
             if source_ref:

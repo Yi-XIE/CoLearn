@@ -43,8 +43,8 @@ class FinalizeStage:
         )
         ctx.result = normalize_learning_turn_result(
             request=request_with_metadata,
-            final_text=ctx.result.final_text,
-            learning_result=dict(ctx.result.raw_learning_result or {}),
+            final_text=ctx.final_text,
+            learning_result=dict(ctx.closure_payload or ctx.raw_learning_result or {}),
         )
         ctx.retrieval_hits = retrieval_hits
         ctx.retrieval_misses = retrieval_misses

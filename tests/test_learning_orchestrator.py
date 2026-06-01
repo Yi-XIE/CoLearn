@@ -42,19 +42,15 @@ class FakeExecutor:
         objective = self.goal_syncs[-1]["objective"] if self.goal_syncs else ""
         return {"status": "completed", "objective": objective}
 
-    def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
+    def _make_result(self, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         self.last_request = request
-        return LearningTurnResult(
-            final_text=f"Answering: {request.user_message}",
-            board_before=request.board_facts,
-            board_after=request.board_facts,
-            turn_mode_before=request.metadata.get("turn_mode_before", "LEARN"),
-            turn_mode_after=request.turn_mode,
-            retrieval_bundle=request.retrieval_bundle,
-            raw_learning_result={"tool_events": [], "raw_messages": []},
-        )
+        final_text = f"Answering: {request.user_message}"
+        messages: list = []
+        tools_used: list = []
+        raw_learning_result = {"tool_events": [], "raw_messages": []}
+        return (final_text, messages, tools_used, raw_learning_result)
 
-    async def run_turn_async(self, *, request: LearningTurnRequest) -> LearningTurnResult:
+    async def run_turn_async(self, *, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
         return self._make_result(request)
 
     def finalize(
@@ -290,20 +286,18 @@ async def test_learning_mode_runs_learning_retrieval(tmp_path):
 
 async def test_learning_mode_completes_native_goal_when_plan_is_done(tmp_path):
     class CompletingExecutor(FakeExecutor):
-        def _make_result(self, request: LearningTurnRequest) -> LearningTurnResult:
-            result = super()._make_result(request)
+        def _make_result(self, request: LearningTurnRequest) -> tuple[str, list, list, dict]:
+            final_text, messages, tools_used, raw_learning_result = super()._make_result(request)
             plan = request.board_facts.learning_plan
             completed_nodes = [replace(node, status="completed") for node in plan.plan_nodes]
             completed_plan = replace(plan, plan_nodes=completed_nodes)
             completed_board = replace(request.board_facts, learning_plan=completed_plan)
-            return replace(
-                result,
-                raw_learning_result={
-                    **dict(result.raw_learning_result or {}),
-                    "board_after": completed_board,
-                    "turn_mode_after": "PAUSED",
-                },
-            )
+            raw_learning_result = {
+                **dict(raw_learning_result or {}),
+                "board_after": completed_board,
+                "turn_mode_after": "PAUSED",
+            }
+            return (final_text, messages, tools_used, raw_learning_result)
 
     root = tmp_path / ".colearn" / "state"
     project_service = LearningProjectService(state_store=JsonStateStore(root))

@@ -423,6 +423,13 @@ class WritebackStage:
                 title="长期画像",
                 body=excerpt,
             )
+            # Mark profile as collected to prevent INTAKE re-trigger on new sessions
+            if not session.profile:
+                session.profile = {
+                    "consolidated_at": payload.get("dream_cursor"),
+                    "source": "nanobot_dream",
+                    "excerpt": excerpt[:200],  # Store a short excerpt for reference
+                }
             return
 
     def _maybe_derive_board_snapshot(

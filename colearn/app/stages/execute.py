@@ -59,7 +59,7 @@ class ExecuteStage:
             plan_stage=ctx.plan_stage,
             goal_lifecycle=ctx.goal_lifecycle,
         )
-        compressed, normalized = await self._execute_turn_async(
+        compressed, final_text, raw_learning_result, closure_payload = await self._execute_turn_async(
             project=ctx.project,
             session=ctx.session,
             request=ctx.request,
@@ -67,7 +67,9 @@ class ExecuteStage:
             turn_policy=ctx.turn_policy,
         )
         ctx.compressed = compressed
-        ctx.result = normalized
+        ctx.final_text = final_text
+        ctx.raw_learning_result = raw_learning_result
+        ctx.closure_payload = closure_payload
         return ctx
 
     # ------------------------------------------------------------------
@@ -165,28 +167,23 @@ class ExecuteStage:
         request,
         snapshot,
         turn_policy,
-    ) -> tuple[Any, Any]:
+    ) -> tuple[Any, Any, Any, Any]:
         prepared_request = before_turn(
             request=request,
             snapshot=snapshot,
             decision=turn_policy,
         )
         compressed = self.runtime_compression.compress(request=prepared_request)
-        result = await self.executor.run_turn_async(request=compressed.request)
+        final_text, messages, tools_used, raw_result = await self.executor.run_turn_async(request=compressed.request)
         closure_payload = build_learning_closure(
             project=project,
             session=session,
             request=compressed.request,
-            final_text=result.final_text,
-            raw_learning_result=result.raw_learning_result,
+            final_text=final_text,
+            raw_learning_result=raw_result,
             warnings=[
-                *list(result.warnings),
+                *list(raw_result.get("warnings") or []),
                 *compressed.notes,
             ],
         )
-        normalized = self.executor.finalize(
-            request=compressed.request,
-            final_text=result.final_text,
-            learning_result=closure_payload,
-        )
-        return compressed, normalized
+        return compressed, final_text, raw_result, closure_payload
