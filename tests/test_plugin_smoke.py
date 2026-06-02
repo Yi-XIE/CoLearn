@@ -97,6 +97,9 @@ def test_pyproject_entry_points():
     content = pyproject.read_text()
 
     assert '[project.entry-points."nanobot.tools"]' in content
-    assert 'colearn = "colearn.colearn_tools.colearn_command:TOOL_METADATA"' in content
+    assert (
+        'colearn = "colearn.colearn_adapters.colearn_nanobot_tool:ColearnDashboardTool"'
+        in content
+    )
     assert "nanobot.plugins" not in content
     assert "nanobot.channels" not in content

@@ -22,10 +22,14 @@ dev = [
 ]
 
 [project.entry-points."nanobot.tools"]
-colearn = "colearn.colearn_tools.colearn_command:TOOL_METADATA"
+colearn = "colearn.colearn_adapters.colearn_nanobot_tool:ColearnDashboardTool"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["colearn*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

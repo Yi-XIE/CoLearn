@@ -59,8 +59,38 @@ try:  # pragma: no cover - exercised only when NanoBot is installed
             parameters=metadata.get("parameters"),
         )
 
+    class ColearnDashboardTool(_NanoBotTool):
+        """Zero-arg, entry-point-discoverable `/colearn` dashboard tool.
+
+        NanoBot's ToolLoader discovers `Tool` subclasses via the ``nanobot.tools``
+        entry point and instantiates them with no arguments. This concrete class
+        is that discoverable surface; it delegates to the CoLearn command handler.
+        """
+
+        config_key = "colearn"
+
+        @property
+        def name(self) -> str:
+            return "colearn"
+
+        @property
+        def description(self) -> str:
+            from colearn.colearn_tools.colearn_command import TOOL_METADATA
+
+            return TOOL_METADATA["description"]
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {"type": "object", "properties": {}, "additionalProperties": False}
+
+        async def execute(self, **kwargs: Any) -> Any:
+            from colearn.colearn_tools.colearn_command import colearn_command
+
+            return colearn_command()
+
 except ModuleNotFoundError:  # pragma: no cover - covered indirectly
     CoLearnTool = None  # type: ignore[assignment]
+    ColearnDashboardTool = None  # type: ignore[assignment]
 
     def colearn_tool_from_metadata(metadata: dict[str, Any]) -> Any:
         raise RuntimeError(
