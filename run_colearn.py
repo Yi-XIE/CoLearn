@@ -30,6 +30,15 @@ import os
 import sys
 from pathlib import Path
 
+# Mock dulwich if missing so NanoBot's GitStore import won't crash.
+# GitStore is only for workspace template versioning; CoLearn doesn't need it.
+try:
+    import dulwich  # noqa: F401
+except ImportError:
+    from types import ModuleType
+    sys.modules["dulwich"] = ModuleType("dulwich")
+    sys.modules["dulwich.porcelain"] = ModuleType("dulwich.porcelain")
+
 REPO_ROOT = Path(__file__).resolve().parent
 SNAPSHOT_PATH = REPO_ROOT / "third_party" / "nanobot-0.2.1"
 if SNAPSHOT_PATH.is_dir() and str(SNAPSHOT_PATH) not in sys.path:
