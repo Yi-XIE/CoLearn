@@ -90,3 +90,23 @@ def test_entry_point_tool_schema_is_host_compatible():
     schema = registry.get("colearn").to_schema()
     assert schema["function"]["name"] == "colearn"
     assert "description" in schema["function"]
+
+
+def test_nanobot_toolloader_discovers_colearn_via_entry_point():
+    """NanoBot's real ToolLoader should discover CoLearn through nanobot.tools.
+
+    This only passes when the package is installed (editable is fine), so the
+    entry point metadata is visible to importlib.metadata. Skip otherwise.
+    """
+    from importlib.metadata import entry_points
+
+    eps = list(entry_points(group="nanobot.tools"))
+    if not any(ep.name == "colearn" for ep in eps):
+        pytest.skip("colearn package not installed; entry point not discoverable")
+
+    loader = pytest.importorskip("nanobot.agent.tools.loader")
+    discovered = loader.ToolLoader()._discover_plugins()
+
+    assert "colearn" in discovered
+    assert discovered["colearn"] is ColearnDashboardTool
+
