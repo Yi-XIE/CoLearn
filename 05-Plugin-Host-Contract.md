@@ -463,7 +463,7 @@ CoLearn 的 UI 声明应当**建立在** `agent-app.v1` 基础上，而不是另
 这份契约写死在当前本地源码基线：
 
 - NanoBot 版本：`v0.2.1`
-- 源码位置：`D:\CoLearn-plugins\nanobot-0.2.1`
+- 源码位置：`third_party/nanobot-0.2.1/`
 
 后续 NanoBot 升级时，兼容性检查只看五类面：
 
