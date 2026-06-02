@@ -8,21 +8,17 @@ class WikiQueryService:
     """Query service for Wiki pages using pre-built indices."""
 
     def __init__(self, index_dir: Path | str = "knowledge/generated"):
-        """
-        Initialize query service.
-
-        Args:
-            index_dir: Directory containing wiki_index.json and wiki_link_graph.json
-        """
         self.index_dir = Path(index_dir)
         self.pages: dict[str, dict[str, Any]] = {}
         self.link_graph: dict[str, list[str]] = {}
+        self.search_index: dict[str, dict[str, Any]] = {}
         self._load_indices()
 
     def _load_indices(self) -> None:
         """Load indices from JSON files."""
         index_file = self.index_dir / "wiki_index.json"
         graph_file = self.index_dir / "wiki_link_graph.json"
+        search_file = self.index_dir / "wiki_search_index.json"
 
         if index_file.exists():
             with open(index_file, "r", encoding="utf-8") as f:
@@ -36,38 +32,23 @@ class WikiQueryService:
         else:
             print(f"[WARN] Link graph file not found: {graph_file}")
 
+        if search_file.exists():
+            with open(search_file, "r", encoding="utf-8") as f:
+                self.search_index = json.load(f)
+
     def get_by_id(self, page_id: str) -> dict[str, Any] | None:
-        """
-        Get a page by its ID.
-
-        Args:
-            page_id: Page ID (e.g., "ml.model.basic")
-
-        Returns:
-            Page metadata dict or None if not found
-        """
+        """Get a page by its ID."""
         return self.pages.get(page_id)
 
     def find_by_alias(self, alias: str) -> list[dict[str, Any]]:
-        """
-        Find pages by alias (case-insensitive partial match).
-
-        Args:
-            alias: Alias to search for
-
-        Returns:
-            List of matching pages
-        """
+        """Find pages by alias (case-insensitive partial match)."""
         alias_lower = alias.lower()
         results = []
-
         for page in self.pages.values():
-            page_aliases = page.get("aliases", [])
-            for page_alias in page_aliases:
+            for page_alias in page.get("aliases", []):
                 if alias_lower in page_alias.lower():
                     results.append(page)
                     break
-
         return results
 
     def search_by_keyword(
@@ -77,57 +58,36 @@ class WikiQueryService:
         grade_band: list[str] | None = None,
         difficulty: str | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search pages by keyword in title or summary, with optional filters.
-
-        Args:
-            keyword: Keyword to search in title/summary (case-insensitive)
-            domain: Filter by domain (e.g., "ml", "physics")
-            grade_band: Filter by grade band overlap (e.g., ["10-12"])
-            difficulty: Filter by difficulty (e.g., "beginner")
-
-        Returns:
-            List of matching pages
-        """
+        """Search pages by keyword with optional filters."""
         keyword_lower = keyword.lower()
         results = []
 
-        for page in self.pages.values():
-            # Keyword match
-            title = page.get("title", "").lower()
-            summary = page.get("summary", "").lower()
-            if keyword_lower not in title and keyword_lower not in summary:
+        for page_id, page in self.pages.items():
+            search_entry = self.search_index.get(page_id, {})
+            searchable_parts = [
+                page.get("title", ""),
+                page.get("summary", ""),
+                search_entry.get("summary", ""),
+                search_entry.get("body_snippet", ""),
+                " ".join(page.get("aliases", [])),
+                " ".join(search_entry.get("headings", [])),
+            ]
+            searchable = " ".join(searchable_parts).lower()
+            if keyword_lower not in searchable:
                 continue
-
-            # Domain filter
             if domain and page.get("domain") != domain:
                 continue
-
-            # Grade band filter (check overlap)
             if grade_band:
                 page_bands = page.get("grade_band", [])
                 if not any(band in page_bands for band in grade_band):
                     continue
-
-            # Difficulty filter
             if difficulty and page.get("difficulty") != difficulty:
                 continue
-
             results.append(page)
-
         return results
 
     def expand_prerequisites(self, page_id: str, max_depth: int = 2) -> list[dict[str, Any]]:
-        """
-        Expand prerequisites recursively (BFS) with cycle detection.
-
-        Args:
-            page_id: Starting page ID
-            max_depth: Maximum depth to expand (default 2)
-
-        Returns:
-            List of prerequisite pages in BFS order
-        """
+        """Expand prerequisites recursively (BFS) with cycle detection."""
         if page_id not in self.link_graph:
             return []
 
@@ -137,31 +97,20 @@ class WikiQueryService:
 
         while queue:
             current_id, depth = queue.pop(0)
-
             if current_id in visited or depth > max_depth:
                 continue
-
             visited.add(current_id)
-
-            # Get linked pages (prerequisites and refs)
             linked_ids = self.link_graph.get(current_id, [])
-
             for linked_id in linked_ids:
                 if linked_id not in visited:
                     page = self.get_by_id(linked_id)
                     if page:
                         results.append(page)
                     queue.append((linked_id, depth + 1))
-
         return results
 
     def get_page_type_count(self) -> dict[str, int]:
-        """
-        Get count of pages by type.
-
-        Returns:
-            Dict of page_type -> count
-        """
+        """Get count of pages by type."""
         counts: dict[str, int] = {}
         for page in self.pages.values():
             page_type = page.get("page_type", "unknown")

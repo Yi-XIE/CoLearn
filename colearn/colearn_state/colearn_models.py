@@ -1,6 +1,6 @@
 """CoLearn session state data models."""
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -47,8 +47,8 @@ class LearningSession:
     profile: dict[str, Any] = field(default_factory=dict)
     board_facts: dict[str, Any] = field(default_factory=dict)
     blackboard: Blackboard = field(default_factory=Blackboard)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""

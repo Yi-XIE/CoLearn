@@ -43,8 +43,12 @@ class WikiPage:
     duration_minutes: int | None = None
     safety_level: str | None = None
 
-    # Question bank page
-    question_count: int | None = None
+    # Question entry (indexed from question bank body)
+    parent_id: str | None = None
+    question_type: str | None = None
+    related_concepts: list[str] = field(default_factory=list)
+    answer: str | None = None
+    explanation: str | None = None
 
     # File metadata (索引器自动添加)
     file_path: str | None = None

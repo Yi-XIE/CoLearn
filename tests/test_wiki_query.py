@@ -1,13 +1,20 @@
 """Tests for WikiQueryService."""
+from pathlib import Path
+
 import pytest
 
+from colearn.colearn_wiki.colearn_indexer import WikiIndexBuilder
 from colearn.colearn_wiki.colearn_query import WikiQueryService
 
 
 @pytest.fixture
-def query_service():
-    """Create a query service instance."""
-    return WikiQueryService()
+def query_service(tmp_path):
+    """Create a query service instance backed by freshly generated indices."""
+    output_dir = tmp_path / "generated"
+    builder = WikiIndexBuilder(Path("knowledge/wiki"), output_dir)
+    builder.scan_and_build()
+    builder.write_indices()
+    return WikiQueryService(output_dir)
 
 
 def test_get_by_id(query_service):
@@ -71,6 +78,12 @@ def test_list_all_ids(query_service):
     assert len(ids) >= 14
     assert "ml.model.basic" in ids
     assert "physics.force.basic" in ids
+
+
+def test_search_by_body_snippet(query_service):
+    """Test search can match body text through wiki_search_index."""
+    results = query_service.search_by_keyword("钟摆", domain="physics")
+    assert any(page["id"].startswith("exp.physics.motion.pendulum") for page in results)
 
 
 if __name__ == "__main__":

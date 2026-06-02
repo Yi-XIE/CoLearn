@@ -1,5 +1,5 @@
 ---
-id: exp.physics.motion.pendulum
+id: exp.physics.motion.pendulum_observation
 page_type: experiment
 title: 摆锤观察实验
 grade_band: [10-12, 13-15]

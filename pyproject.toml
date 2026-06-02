@@ -17,13 +17,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.0,<10.0.0",
-    "pytest-asyncio>=1.3.0,<2.0.0",
+    "pytest>=7.0.0,<10.0.0",
+    "pytest-asyncio>=1.0.0,<2.0.0",
 ]
+
+[project.entry-points."nanobot.tools"]
+colearn = "colearn.colearn_tools.colearn_command:TOOL_METADATA"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["colearn*"]
-

@@ -2,7 +2,7 @@
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from colearn.colearn_state.colearn_models import LearningSession
@@ -88,7 +88,7 @@ class SessionStore:
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # Update timestamp
-        session.updated_at = datetime.utcnow().isoformat() + "Z"
+        session.updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         session.blackboard.runtime.last_update_ts = int(time.time())
 
         # Serialize to JSON
