@@ -4,6 +4,7 @@ This script is the recommended entry point for running NanoBot with CoLearn
 attached. It supports three modes:
 
     serve   start the OpenAI-compatible HTTP API (default; matches `nanobot serve`)
+    webui   start the WebUI gateway (matches `nanobot gateway`, browser UI)
     run     execute a single SDK turn from the command line and print the result
     chat    open an interactive REPL bound to one CoLearn session
 
@@ -14,6 +15,7 @@ turn runs. The script does not modify NanoBot source.
 Examples::
 
     python run_colearn.py serve --port 8765
+    python run_colearn.py webui --port 8080
     python run_colearn.py run --message "我想学机器学习" --session user-42
     python run_colearn.py chat --session user-42
 
@@ -37,7 +39,7 @@ if SNAPSHOT_PATH.is_dir() and str(SNAPSHOT_PATH) not in sys.path:
 from nanobot import Nanobot  # noqa: E402
 
 from colearn.colearn_plugin import CoLearnPlugin  # noqa: E402
-from colearn.colearn_runtime import install_colearn  # noqa: E402
+from colearn.colearn_runtime import enable_for_nanobot, install_colearn  # noqa: E402
 
 DEFAULT_STATE_ROOT = ".colearn/state/sessions"
 DEFAULT_WIKI_INDEX = "knowledge/generated"
@@ -127,6 +129,39 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_webui(args: argparse.Namespace) -> int:
+    """Start the NanoBot WebUI gateway with CoLearn auto-installed.
+
+    Delegates to NanoBot's own `gateway` command so all WebUI assets, channel
+    routing, cron service, and message-tool wiring stay identical to upstream.
+    `enable_for_nanobot()` patches `AgentLoop.from_config` ahead of time, so the
+    loop the gateway builds has CoLearn already attached.
+    """
+    enable_for_nanobot(_build_plugin(args))
+    from nanobot.cli.commands import gateway
+
+    gateway_argv: list[str] = []
+    if args.config:
+        gateway_argv += ["--config", args.config]
+    if args.workspace:
+        gateway_argv += ["--workspace", args.workspace]
+    if args.port is not None:
+        gateway_argv += ["--port", str(args.port)]
+    if args.verbose:
+        gateway_argv += ["--verbose"]
+
+    try:
+        gateway(  # type: ignore[misc]
+            port=args.port,
+            workspace=args.workspace,
+            verbose=args.verbose,
+            config=args.config,
+        )
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run a single SDK turn and print the result."""
     bot = _build_bot(args)
@@ -180,6 +215,11 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=None)
     serve.add_argument("--timeout", type=float, default=None)
     serve.set_defaults(func=cmd_serve)
+
+    webui = subparsers.add_parser("webui", help="Run the NanoBot WebUI gateway")
+    webui.add_argument("--port", type=int, default=None)
+    webui.add_argument("--verbose", action="store_true")
+    webui.set_defaults(func=cmd_webui)
 
     run = subparsers.add_parser("run", help="Run a single SDK turn")
     run.add_argument("--message", required=True)

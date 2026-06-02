@@ -87,3 +87,39 @@ def _install_tools(loop: Any, plugin: CoLearnPlugin) -> None:
     if callable(has) and has(TOOL_METADATA["name"]):
         return
     ToolRegistryAdapter(registry).register(TOOL_METADATA)
+
+
+_PATCHED_FROM_CONFIG_FLAG = "_colearn_patched_from_config"
+
+
+def enable_for_nanobot(plugin: CoLearnPlugin | None = None) -> CoLearnPlugin:
+    """Patch ``AgentLoop.from_config`` so every loop NanoBot builds gets CoLearn.
+
+    Use this before invoking the NanoBot CLI (``serve``, ``gateway``, ``agent``)
+    so the WebUI, HTTP API, and CLI all run with CoLearn already installed. The
+    patch is idempotent; calling this twice is a no-op.
+
+    Returns the shared CoLearnPlugin instance the patched factory will install.
+    """
+    from nanobot.agent.loop import AgentLoop
+
+    if getattr(AgentLoop.from_config, _PATCHED_FROM_CONFIG_FLAG, False):
+        return getattr(AgentLoop.from_config, "_colearn_plugin")
+
+    shared_plugin = plugin or CoLearnPlugin()
+    original = AgentLoop.from_config
+
+    def patched_from_config(*args: Any, **kwargs: Any) -> Any:
+        loop = original(*args, **kwargs)
+        try:
+            install_colearn(loop, plugin=shared_plugin)
+        except Exception:
+            # Never break NanoBot startup if CoLearn install hits a snag.
+            pass
+        return loop
+
+    setattr(patched_from_config, _PATCHED_FROM_CONFIG_FLAG, True)
+    setattr(patched_from_config, "_colearn_plugin", shared_plugin)
+    AgentLoop.from_config = patched_from_config  # type: ignore[method-assign]
+    return shared_plugin
+

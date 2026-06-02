@@ -110,3 +110,46 @@ def test_nanobot_toolloader_discovers_colearn_via_entry_point():
     assert "colearn" in discovered
     assert discovered["colearn"] is ColearnDashboardTool
 
+
+def test_enable_for_nanobot_patches_from_config_idempotently():
+    """enable_for_nanobot should patch AgentLoop.from_config exactly once."""
+    from colearn.colearn_runtime import enable_for_nanobot
+    from nanobot.agent.loop import AgentLoop
+
+    original = AgentLoop.from_config
+    try:
+        plugin1 = enable_for_nanobot()
+        patched1 = AgentLoop.from_config
+        plugin2 = enable_for_nanobot()
+        patched2 = AgentLoop.from_config
+
+        assert patched1 is patched2
+        assert plugin1 is plugin2
+        assert getattr(patched1, "_colearn_patched_from_config", False) is True
+    finally:
+        AgentLoop.from_config = original  # type: ignore[method-assign]
+
+
+def test_patched_from_config_installs_colearn_on_returned_loop():
+    """A loop produced by the patched factory should have CoLearn auto-installed."""
+    from colearn.colearn_runtime import enable_for_nanobot
+    from nanobot.agent.loop import AgentLoop
+
+    class FakeLoop:
+        def __init__(self):
+            self._extra_hooks = []
+            self.tools = nanobot_tools_registry.ToolRegistry()
+
+    fake = FakeLoop()
+    original = AgentLoop.from_config
+    AgentLoop.from_config = classmethod(lambda cls, *a, **kw: fake)  # type: ignore[method-assign]
+    try:
+        enable_for_nanobot()
+        produced = AgentLoop.from_config()
+        assert produced is fake
+        assert len(fake._extra_hooks) == 4
+        assert fake.tools.has("colearn")
+    finally:
+        AgentLoop.from_config = original  # type: ignore[method-assign]
+
+
