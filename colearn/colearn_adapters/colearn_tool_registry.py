@@ -18,7 +18,7 @@ class ToolRegistryAdapter:
 
         register = getattr(self.registry, "register", None)
         if callable(register):
-            register(tool)
+            register(self._coerce_for_host_registry(tool))
             return
 
         if isinstance(self.registry, dict):
@@ -56,3 +56,16 @@ class ToolRegistryAdapter:
                 for key, value in self.registry.items()
             ]
         return []
+
+    def _coerce_for_host_registry(self, tool: dict[str, Any]) -> Any:
+        """Wrap CoLearn metadata dict into a NanoBot Tool object when supported."""
+        try:
+            from colearn.colearn_adapters.colearn_nanobot_tool import (  # noqa: WPS433
+                colearn_tool_from_metadata,
+            )
+        except Exception:
+            return tool
+        try:
+            return colearn_tool_from_metadata(tool)
+        except Exception:
+            return tool
