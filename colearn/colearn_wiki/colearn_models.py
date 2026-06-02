@@ -67,7 +67,11 @@ class WikiIndex:
                 continue
             if isinstance(value, list) and len(value) == 0:
                 continue
-            result[key] = value
+            # Convert date objects to strings for JSON serialization
+            if hasattr(value, 'isoformat'):
+                result[key] = value.isoformat()
+            else:
+                result[key] = value
         return result
 
 
