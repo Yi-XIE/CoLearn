@@ -78,3 +78,13 @@ def get_session() -> LearningSession | None:
 def save_session(session: LearningSession) -> None:
     """Save a session to disk."""
     get_session_store().save(session)
+
+
+def bind_latest_session(prefer_learning: bool = True) -> LearningSession | None:
+    """Bind the most relevant persisted session into the current turn context."""
+    store = get_session_store()
+    session = store.latest_session(prefer_learning=prefer_learning)
+    if session is None:
+        return None
+    set_current_session_id(session.session_id)
+    return session

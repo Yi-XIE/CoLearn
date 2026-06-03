@@ -211,6 +211,113 @@ async def test_cli_apps_routes_require_token_and_return_payload(
 
 
 @pytest.mark.asyncio
+async def test_colearn_routes_require_token_and_return_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.colearn_apps_payload",
+        lambda loop: {
+            "apps": [
+                {
+                    "name": "colearn",
+                    "display_name": "CoLearn",
+                    "category": "learning",
+                    "description": "Read-only CoLearn blackboard and graph view.",
+                    "requires": "run_colearn.py webui",
+                    "source": "colearn",
+                    "entry_point": "run_colearn.py",
+                    "install_supported": False,
+                    "installed": True,
+                    "available": True,
+                    "status": "installed",
+                    "skill_installed": True,
+                    "read_only": True,
+                    "session_mode": "LEARNING",
+                    "session_id": "websocket:test",
+                    "blackboard_endpoint": "/api/v1/colearn/blackboard/current",
+                    "graph_endpoint": "/api/v1/colearn/graph/current",
+                    "session_endpoint": "/api/v1/colearn/session/current",
+                }
+            ],
+            "installed_count": 1,
+            "catalog_updated_at": "2026-06-03T12:00:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.websocket.colearn_blackboard_api",
+        lambda loop: {
+            "ok": True,
+            "session_id": "websocket:test",
+            "session_mode": "LEARNING",
+            "learning": {"goal": "Learn matrices"},
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.websocket.colearn_graph_api",
+        lambda loop: {
+            "ok": True,
+            "session_id": "websocket:test",
+            "focus_node_id": "math.matrix.basic",
+            "nodes": [{"id": "math.matrix.basic", "label": "Matrices", "kind": "concept", "state": "active"}],
+            "edges": [],
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.websocket.colearn_session_api",
+        lambda loop: {
+            "ok": True,
+            "session_id": "websocket:test",
+            "has_session": True,
+            "session_mode": "LEARNING",
+            "goal": "Learn matrices",
+        },
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29914)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29914/api/settings/colearn-apps")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29914/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        apps = await _http_get(
+            "http://127.0.0.1:29914/api/settings/colearn-apps",
+            headers=auth,
+        )
+        assert apps.status_code == 200
+        assert apps.json()["apps"][0]["name"] == "colearn"
+
+        blackboard = await _http_get(
+            "http://127.0.0.1:29914/api/v1/colearn/blackboard/current",
+            headers=auth,
+        )
+        assert blackboard.status_code == 200
+        assert blackboard.json()["learning"]["goal"] == "Learn matrices"
+
+        graph = await _http_get(
+            "http://127.0.0.1:29914/api/v1/colearn/graph/current",
+            headers=auth,
+        )
+        assert graph.status_code == 200
+        assert graph.json()["focus_node_id"] == "math.matrix.basic"
+
+        session = await _http_get(
+            "http://127.0.0.1:29914/api/v1/colearn/session/current",
+            headers=auth,
+        )
+        assert session.status_code == 200
+        assert session.json()["session_mode"] == "LEARNING"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_mcp_presets_routes_require_token_and_return_payload(
     bus: MagicMock,
     tmp_path: Path,

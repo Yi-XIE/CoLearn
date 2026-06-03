@@ -1,0 +1,362 @@
+{
+  "ml.data.basic": {
+    "id": "ml.data.basic",
+    "page_type": "concept",
+    "title": "什么是数据",
+    "aliases": [
+      "数据",
+      "训练数据"
+    ],
+    "summary": "",
+    "domain": "ml",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 数据就是用来描述事物的信息。比如一张猫的照片、一条天气记录、一个人的身高体重——这些都是数据。 在机器学习中，数据是\"食材\"。就像做菜需要好食材，训练模型也需要好数据。 先修知识 不需要特别的先修知识，这是机器学习的起点。 常见误区 误区：数据越多越好 10000条好数据比100000条脏数据更有用 数据的质量（准确、全面、有代表性）比数量更重要 例子 例子1：天气数据 温度：25°C 湿度：60% 天气：晴天 这三个信息组成一条天气数据 例子2：图片数据 一张猫的照片包含几百万个像素 每个像素都是数据的一部分 动手活动 收集身边的数据：记录你一周的睡眠时间，看看能不能找到规律。 进阶连接 学完数据后，你可以继续学习： 什么是模式（ml.pattern.basic）"
+  },
+  "ml.model.basic": {
+    "id": "ml.model.basic",
+    "page_type": "concept",
+    "title": "什么是模型",
+    "aliases": [
+      "模型",
+      "AI模型"
+    ],
+    "summary": "",
+    "domain": "ml",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 机器学习中的\"模型\"就像是一个能从例子里学会规律的工具。 想象你教小朋友认水果：给他看几个苹果、几个香蕉，他就能学会\"圆的红的可能是苹果，长的黄的可能是香蕉\"。模型也是这样工作的。 先修知识 在学习这个概念之前，你最好已经了解： 什么是数据（ml.data.basic） 什么是模式（ml.pattern.basic） 常见误区 误区1：模型是把答案背下来 很多同学以为模型是\"记住\"所有训练数据 实际上，模型是学习数据中的规律 误区2：模型能100%准确 模型学到的是\"大概率的规律\"，不是绝对真理 就像人类也会判断错，模型也可能出错 例子 例子1：天气预报模型 输入：过去100天的温度、湿度、气压数据 模型学到的规律：\"气压突然下降 + 湿度上升 → 可能下雨\" 例子2：垃圾邮件识别模型 输入：1000封垃圾邮件和1000封正常邮件 模型学到的规律：\"包含'中奖''免费'等词 + 很多感叹号 → 可能是垃圾邮件\" 动手活动 推荐实验：卡片分类游戏（exp.ai.sorting.rules） 进阶连接 学完这个概念后，你可以继续学习： 模型是怎么训练的？（ml.training.basic）"
+  },
+  "ml.pattern.basic": {
+    "id": "ml.pattern.basic",
+    "page_type": "concept",
+    "title": "什么是模式",
+    "aliases": [
+      "模式",
+      "规律"
+    ],
+    "summary": "",
+    "domain": "ml",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 模式就是数据中反复出现的规律。比如\"每次气压下降，就会下雨\"——这就是一种天气模式。 机器学习的目标就是让电脑从大量数据中发现这些模式。 先修知识 在学习模式之前，你需要先了解： 什么是数据（ml.data.basic） 常见误区 误区：所有数据都有明显的模式 有些数据是随机的，没有规律 有些规律很微弱，需要大量数据才能发现 例子 例子1：水果的模式 苹果通常是：圆的、红色或绿色、表面光滑 香蕉通常是：弯的、黄色、表面有纹理 这些就是水果的模式 例子2：天气的模式 气压突然下降 + 湿度上升 → 可能下雨 这是天气数据中的一种模式 动手活动 找出图片中的共同特征：给你10张猫的照片，你能总结出猫有什么共同特点吗？ 进阶连接 学完模式后，你可以继续学习： 什么是模型（ml.model.basic）"
+  },
+  "ml.training.basic": {
+    "id": "ml.training.basic",
+    "page_type": "concept",
+    "title": "什么是训练",
+    "aliases": [
+      "训练",
+      "模型训练"
+    ],
+    "summary": "",
+    "domain": "ml",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 训练就是让模型看大量例子，自己总结规律的过程。就像小朋友学认字，看得越多，认得越准。 训练不是程序员告诉模型\"怎么判断\"，而是让模型自己从数据中学会判断。 先修知识 在学习这个概念之前，你最好已经了解： 什么是数据（ml.data.basic） 什么是模式（ml.pattern.basic） 什么是模型（ml.model.basic） 常见误区 误区：训练就是编写代码 训练不是程序员编写规则 训练是让模型自己从数据中学习规则 例子 例子1：训练识别猫的模型 1. 准备10000张猫的照片（标注\"猫\"）和10000张狗的照片（标注\"狗\"） 2. 让模型一张一张看这些照片 3. 模型逐渐学会\"猫长什么样\" 4. 训练完成后，给模型一张新照片，它就能判断是猫还是狗 例子2：训练天气预报模型 1. 准备过去10年每天的天气数据（温度、湿度、气压、是否下雨） 2. 让模型学习\"什么条件下会下雨\" 3. 训练完成后，给模型今天的天气数据，它就能预测明天会不会下雨 动手活动 调整参数游戏：体验训练过程中参数是如何调整的。 进阶连接 学完训练后，你已经掌握了机器学习的基本流程！"
+  },
+  "physics.force.basic": {
+    "id": "physics.force.basic",
+    "page_type": "concept",
+    "title": "什么是力",
+    "aliases": [
+      "力",
+      "作用力"
+    ],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 力就是物体之间的推、拉、吸引。当你推桌子，你对桌子施加了力；地球吸引你，这是重力。 力的作用是改变物体的运动：让静止的物体动起来，让运动的物体停下来，或者改变运动方向。 先修知识 不需要特别的先修知识，这是物理学的基础概念。 常见误区 误区：只有接触才能产生力 重力、磁力、电力都不需要接触 地球在很远的地方就能吸引月球 例子 例子1：推箱子 你用手推箱子，箱子开始移动 这是接触力的例子 例子2：苹果掉下来 苹果从树上掉下来，是因为地球的重力在拉它 这是非接触力的例子 动手活动 观察生活中的力：找出5个力的例子，哪些需要接触，哪些不需要？ 进阶连接 学完力之后，你可以继续学习： 什么是运动（physics.motion.basic） 什么是重力（physics.gravity.basic）"
+  },
+  "physics.friction.basic": {
+    "id": "physics.friction.basic",
+    "page_type": "concept",
+    "title": "什么是摩擦力",
+    "aliases": [
+      "摩擦力",
+      "摩擦"
+    ],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 摩擦力就是阻碍物体运动的力。当你推箱子，地面会\"拽\"着箱子，不让它滑动——这就是摩擦力。 摩擦力不总是坏事！没有摩擦力，我们无法走路，汽车无法刹车。 先修知识 在学习摩擦力之前，你需要先了解： 什么是力（physics.force.basic） 什么是运动（physics.motion.basic） 常见误区 误区：摩擦力总是有害的 没有摩擦力，你的脚会打滑，无法走路 没有摩擦力，汽车刹不住车 摩擦力是我们生活中不可缺少的 例子 例子1：推箱子 你推箱子，箱子不动——是因为摩擦力太大 你用更大的力推，箱子才开始移动 例子2：走路 你的脚往后蹬地，摩擦力把你往前推 如果地面是冰面（摩擦力很小），你就会打滑 例子3：刹车 汽车刹车时，刹车片和轮子之间的摩擦力让车停下来 如果是雨天路滑（摩擦力小），刹车距离会变长 动手活动 比较不同表面的摩擦力：在光滑的桌子和粗糙的地面上推同一个物体，感受摩擦力的大小。 进阶连接 学完摩擦力后，你已经掌握了力和运动的基本概念！"
+  },
+  "physics.gravity.basic": {
+    "id": "physics.gravity.basic",
+    "page_type": "concept",
+    "title": "什么是重力",
+    "aliases": [
+      "重力",
+      "引力",
+      "万有引力"
+    ],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 重力就是物体之间相互吸引的力。地球吸引你，你也吸引地球——只是地球太大了，你的吸引力太小，感觉不到。 重力让苹果往下掉，让月球绕地球转，让地球绕太阳转。 先修知识 在学习重力之前，你需要先了解： 什么是力（physics.force.basic） 常见误区 误区：只有地球有重力 所有物体之间都有引力 月球也有重力，只是比地球小 你和旁边的同学之间也有引力，只是太小了感觉不到 例子 例子1：苹果掉下来 地球吸引苹果，苹果就往下掉 这就是重力的作用 例子2：月球绕地球转 地球的重力吸引月球 月球想沿直线飞走，但重力把它拉回来 所以月球一直绕着地球转 动手活动 推荐实验：摆锤观察实验（exp.physics.motion.pendulum） 进阶连接 学完重力后，你可以继续学习： 什么是运动（physics.motion.basic） 什么是摩擦力（physics.friction.basic）"
+  },
+  "physics.motion.basic": {
+    "id": "physics.motion.basic",
+    "page_type": "concept",
+    "title": "什么是运动",
+    "aliases": [
+      "运动",
+      "物体运动"
+    ],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "适合学生的解释",
+      "先修知识",
+      "常见误区",
+      "例子",
+      "动手活动",
+      "进阶连接"
+    ],
+    "body_snippet": "适合学生的解释 运动就是物体的位置随时间发生变化。比如汽车从A地开到B地，小球从高处落下，这些都是运动。 静止也是一种运动状态——相对于地球静止。 先修知识 在学习运动之前，你需要先了解： 什么是力（physics.force.basic） 常见误区 误区：运动的物体一定受到力 如果没有摩擦力，匀速直线运动的物体不需要力来维持 只有改变运动状态（加速、减速、转弯）才需要力 例子 例子1：小车的运动 你推一下小车，小车开始运动（力改变了运动状态） 如果地面很光滑，小车会一直匀速滑行（不需要力维持） 例子2：地球的运动 地球绕太阳运动，是因为太阳的引力改变了地球的运动方向 如果没有太阳引力，地球会沿直线飞走 动手活动 观察不同的运动：记录3种不同的运动（加速、减速、匀速），分析每种运动需要什么力。 进阶连接 学完运动后，你可以继续学习： 什么是重力（physics.gravity.basic） 什么是摩擦力（physics.friction.basic）"
+  },
+  "exp.ai.sorting.rules": {
+    "id": "exp.ai.sorting.rules",
+    "page_type": "experiment",
+    "title": "卡片分类游戏",
+    "aliases": [],
+    "summary": "",
+    "domain": "ai",
+    "difficulty": "beginner",
+    "headings": [
+      "你会观察到什么",
+      "材料",
+      "步骤",
+      "安全提醒",
+      "记录方式",
+      "现象解释",
+      "延伸问题"
+    ],
+    "body_snippet": "你会观察到什么 在这个游戏中，你会体验从例子中学习规律的过程，就像机器学习模型一样。 材料 纸卡片20张 彩笔（至少3种颜色） 步骤 1. 在10张卡片上画圆形，5张涂红色，5张涂蓝色 2. 在另外10张卡片上画方形，5张涂红色，5张涂蓝色 3. 把卡片打乱 4. 让同学根据形状和颜色分类 5. 观察同学总结出了什么规律 安全提醒 无特殊安全注意事项。 记录方式 记录同学总结的分类规则，比如\"红色圆形一组\"\"蓝色方形一组\"。 现象解释 这个游戏模拟了机器学习中的\"分类\"任务。同学通过观察例子，总结出分类规则——这就是模型学习的过程。 延伸问题 如果增加三角形，分类规则会怎么变化？"
+  },
+  "exp.physics.motion.pendulum_observation": {
+    "id": "exp.physics.motion.pendulum_observation",
+    "page_type": "experiment",
+    "title": "摆锤观察实验",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "你会观察到什么",
+      "材料",
+      "步骤",
+      "安全提醒",
+      "记录方式",
+      "现象解释",
+      "延伸问题"
+    ],
+    "body_snippet": "你会观察到什么 摆锤来回摆动，形成规律的运动。摆动的周期基本保持不变，改变摆长会影响周期。 材料 细绳一根（约1米长） 小重物（钥匙、小石头等） 尺子 秒表或手机计时器 步骤 1. 把小重物系在细绳的一端，细绳另一端固定 2. 调整细绳长度为50厘米 3. 把重物拉到一侧，距离垂直位置约10厘米，松手 4. 计时10个完整摆动，记录总时间 5. 缩短细绳到30厘米，重复步骤3 4 安全提醒 确保重物系紧，避免甩出 摆动幅度不要太大 记录方式 记录50cm和30cm两种摆长下的10次摆动时间，计算单次周期。 现象解释 摆锤摆动是因为重力和惯性的共同作用。摆长越长，周期越长。这就是钟摆的原理。 延伸问题 如果换一个更重的重物，周期会改变吗？"
+  },
+  "exp.physics.motion.pendulum": {
+    "id": "exp.physics.motion.pendulum",
+    "page_type": "experiment",
+    "title": "摆锤观察实验",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "你会观察到什么",
+      "材料",
+      "步骤",
+      "安全提醒",
+      "记录方式",
+      "现象解释",
+      "延伸问题"
+    ],
+    "body_snippet": "你会观察到什么 摆锤来回摆动，周期基本保持不变。 材料 细绳、小重物、尺子、秒表 步骤 1. 把重物系在细绳上 2. 调整摆长为50厘米 3. 拉开重物约10厘米，松手 4. 计时10个摆动 安全提醒 确保重物系紧。 记录方式 记录10次摆动的总时间。 现象解释 摆锤摆动是重力和惯性的共同作用。 延伸问题 如果换更重的重物，周期会改变吗？"
+  },
+  "path.ai.ml.foundation": {
+    "id": "path.ai.ml.foundation",
+    "page_type": "path",
+    "title": "机器学习入门路径",
+    "aliases": [],
+    "summary": "",
+    "domain": "ai",
+    "difficulty": "beginner",
+    "headings": [
+      "这条路径适合谁",
+      "学习目标",
+      "开始前你最好会什么",
+      "学习步骤",
+      "检查点",
+      "完成标志"
+    ],
+    "body_snippet": "这条路径适合谁 这条路径适合10 15岁的学生，对AI和机器学习感兴趣，没有编程基础也可以学习。 学习目标 完成这条路径后，你将理解机器学习的基本流程：数据 → 模式 → 模型 → 训练。 开始前你最好会什么 基本的数学运算，能够观察和比较事物的规律。 学习步骤 1. 什么是数据（ml.data.basic） 20分钟 2. 什么是模式（ml.pattern.basic） 30分钟 3. 什么是模型（ml.model.basic） 25分钟 4. 什么是训练（ml.training.basic） 30分钟 检查点 完成\"什么是模型\"后，建议做自我检查。 完成标志 当你能向朋友解释\"机器学习是怎么工作的\"，恭喜你完成了！"
+  },
+  "path.physics.mechanics.foundation": {
+    "id": "path.physics.mechanics.foundation",
+    "page_type": "path",
+    "title": "力与运动基础路径",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "这条路径适合谁",
+      "学习目标",
+      "开始前你最好会什么",
+      "学习步骤",
+      "检查点",
+      "完成标志"
+    ],
+    "body_snippet": "这条路径适合谁 这条路径适合10 15岁的学生，对物理学感兴趣，希望理解生活中的力和运动现象。 学习目标 完成这条路径后，你将理解力和运动的基本关系，能够解释日常生活中的物理现象。 开始前你最好会什么 不需要特别的先修知识，这是物理学的起点。 学习步骤 1. 什么是力（physics.force.basic） 25分钟 2. 什么是运动（physics.motion.basic） 30分钟 3. 什么是重力（physics.gravity.basic） 25分钟 4. 什么是摩擦力（physics.friction.basic） 25分钟 检查点 完成每个概念后，尝试用自己的话向家人解释。 完成标志 当你能解释\"为什么苹果会掉下来\"\"为什么走路不会打滑\"，恭喜你完成了！"
+  },
+  "qbank.ai.ml.beginner": {
+    "id": "qbank.ai.ml.beginner",
+    "page_type": "question_bank",
+    "title": "机器学习入门题库",
+    "aliases": [],
+    "summary": "",
+    "domain": "ai",
+    "difficulty": "beginner",
+    "headings": [
+      "题库说明",
+      "qb.ai.ml.beginner.01",
+      "qb.ai.ml.beginner.02",
+      "qb.ai.ml.beginner.03"
+    ],
+    "body_snippet": "题库说明 本题库包含3道题目，用于检验对机器学习基础概念的理解。 qb.ai.ml.beginner.01 题目类型 : 选择题 关联概念 : ml.model.basic 难度 : beginner 题目 ：下面哪个说法最准确地描述了\"机器学习模型\"？ A. 模型是一个存储所有训练数据的数据库 B. 模型是从数据中学习规律，用来对新数据做预测的工具 C. 模型是一段固定的程序代码，不会改变 D. 模型是人工编写的规则集合 答案 : B 解释 : 模型的核心是\"从数据中学习规律\"，而不是记住所有数据。 qb.ai.ml.beginner.02 题目类型 : 判断题 关联概念 : ml.training.basic 难度 : beginner 题目 ：训练模型就是程序员编写代码告诉模型如何判断。 答案 : 错误 解释 : 训练是让模型自己从数据中学习规则，不是程序员编写规则。 qb.ai.ml.beginner.03 题目类型 : 选择题 关联概念 : ml.data.basic 难度 : beginner 题目 ：如果我们想训练一个识别猫和狗的模型，下面哪组数据最合适？ A. 10张猫的照片和10张狗的照片 B. 1000张猫的照片和5张狗的照片 C. 500张猫的照片和500张狗的照片 D. 只有猫的照片，没有狗的照片 答案 : C 解释 : C的数据量充足且平衡，最适合训练。"
+  },
+  "qb.ai.ml.beginner.01": {
+    "id": "qb.ai.ml.beginner.01",
+    "page_type": "question",
+    "title": "下面哪个说法最准确地描述了\"机器学习模型\"？\nA. 模型是一个存储所有训练数据的数据库\nB. 模型是从数据中学习规律，用来对新数据做预测的工具\nC. 模型是一段固定的程序代码，不会改变\nD. 模型是人工编写的规则集合",
+    "aliases": [],
+    "summary": "",
+    "domain": "ai",
+    "difficulty": "beginner",
+    "headings": [],
+    "body_snippet": "下面哪个说法最准确地描述了\"机器学习模型\"？ A. 模型是一个存储所有训练数据的数据库 B. 模型是从数据中学习规律，用来对新数据做预测的工具 C. 模型是一段固定的程序代码，不会改变 D. 模型是人工编写的规则集合"
+  },
+  "qb.ai.ml.beginner.02": {
+    "id": "qb.ai.ml.beginner.02",
+    "page_type": "question",
+    "title": "训练模型就是程序员编写代码告诉模型如何判断。",
+    "aliases": [],
+    "summary": "",
+    "domain": "ai",
+    "difficulty": "beginner",
+    "headings": [],
+    "body_snippet": "训练模型就是程序员编写代码告诉模型如何判断。"
+  },
+  "qb.ai.ml.beginner.03": {
+    "id": "qb.ai.ml.beginner.03",
+    "page_type": "question",
+    "title": "如果我们想训练一个识别猫和狗的模型，下面哪组数据最合适？\nA. 10张猫的照片和10张狗的照片\nB. 1000张猫的照片和5张狗的照片\nC. 500张猫的照片和500张狗的照片\nD. 只有猫的照片，没有狗的照片",
+    "aliases": [],
+    "summary": "",
+    "domain": "ai",
+    "difficulty": "beginner",
+    "headings": [],
+    "body_snippet": "如果我们想训练一个识别猫和狗的模型，下面哪组数据最合适？ A. 10张猫的照片和10张狗的照片 B. 1000张猫的照片和5张狗的照片 C. 500张猫的照片和500张狗的照片 D. 只有猫的照片，没有狗的照片"
+  },
+  "qbank.physics.motion.beginner": {
+    "id": "qbank.physics.motion.beginner",
+    "page_type": "question_bank",
+    "title": "力与运动基础题库",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [
+      "题库说明",
+      "qb.physics.motion.beginner.01",
+      "qb.physics.motion.beginner.02",
+      "qb.physics.motion.beginner.03"
+    ],
+    "body_snippet": "题库说明 本题库包含3道题目，用于检验对力与运动基础概念的理解。 qb.physics.motion.beginner.01 题目类型 : 选择题 关联概念 : physics.force.basic 难度 : beginner 题目 ：下面哪个例子不是力？ A. 你推桌子 B. 地球吸引月球 C. 桌子静止在地面上 D. 磁铁吸引铁钉 答案 : C 解释 : 桌子静止是一种状态，不是力。推、吸引都是力的作用。 qb.physics.motion.beginner.02 题目类型 : 判断题 关联概念 : physics.motion.basic 难度 : beginner 题目 ：运动的物体一定受到力的作用。 答案 : 错误 解释 : 匀速直线运动的物体不需要力来维持，只有改变运动状态才需要力。 qb.physics.motion.beginner.03 题目类型 : 选择题 关联概念 : physics.gravity.basic 难度 : beginner 题目 ：为什么月球不会掉到地球上？ A. 月球没有受到地球的引力 B. 月球的速度刚好让它保持在轨道上 C. 月球和地球之间距离太远，引力太小 D. 月球有自己的力对抗地球引力 答案 : B 解释 : 月球受到地球引力，但它的运动速度让它保持在轨道上绕地球转。"
+  },
+  "qb.physics.motion.beginner.01": {
+    "id": "qb.physics.motion.beginner.01",
+    "page_type": "question",
+    "title": "下面哪个例子不是力？\nA. 你推桌子\nB. 地球吸引月球\nC. 桌子静止在地面上\nD. 磁铁吸引铁钉",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [],
+    "body_snippet": "下面哪个例子不是力？ A. 你推桌子 B. 地球吸引月球 C. 桌子静止在地面上 D. 磁铁吸引铁钉"
+  },
+  "qb.physics.motion.beginner.02": {
+    "id": "qb.physics.motion.beginner.02",
+    "page_type": "question",
+    "title": "运动的物体一定受到力的作用。",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [],
+    "body_snippet": "运动的物体一定受到力的作用。"
+  },
+  "qb.physics.motion.beginner.03": {
+    "id": "qb.physics.motion.beginner.03",
+    "page_type": "question",
+    "title": "为什么月球不会掉到地球上？\nA. 月球没有受到地球的引力\nB. 月球的速度刚好让它保持在轨道上\nC. 月球和地球之间距离太远，引力太小\nD. 月球有自己的力对抗地球引力",
+    "aliases": [],
+    "summary": "",
+    "domain": "physics",
+    "difficulty": "beginner",
+    "headings": [],
+    "body_snippet": "为什么月球不会掉到地球上？ A. 月球没有受到地球的引力 B. 月球的速度刚好让它保持在轨道上 C. 月球和地球之间距离太远，引力太小 D. 月球有自己的力对抗地球引力"
+  }
+}

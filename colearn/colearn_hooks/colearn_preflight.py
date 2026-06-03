@@ -1,6 +1,7 @@
 """Preflight hook for mode decisions and learning context injection."""
 from __future__ import annotations
 
+from colearn.colearn_adapters.colearn_messages import append_system_context
 from colearn.colearn_board.colearn_context_builder import ContextBuilder
 from colearn.colearn_hooks.colearn_hook_base import AgentHook, AgentHookContext
 from colearn.colearn_context import get_session
@@ -29,6 +30,7 @@ class CoLearnPreflightHook(AgentHook):
                 payload = self.context_builder.build_learning_context(session)
                 if payload:
                     setattr(context, "colearn_learning_context", payload)
+                    append_system_context(context, payload)
         except Exception:
             if self._reraise:
                 raise

@@ -85,5 +85,47 @@ def test_blackboard_dual_domain(temp_store):
     assert len(loaded.blackboard.runtime.active_blind_spots) == 1
 
 
+def test_latest_session_prefers_most_recent(temp_store):
+    first = temp_store.create_session("older")
+    first.updated_at = "2026-06-01T00:00:00Z"
+    temp_store.save(first)
+
+    second = temp_store.create_session("newer")
+    second.updated_at = "2026-06-02T00:00:00Z"
+    temp_store.save(second)
+
+    latest = temp_store.latest_session()
+    assert latest is not None
+    assert latest.session_id == "newer"
+    assert temp_store.latest_session_id() == "newer"
+
+
+def test_latest_session_prefers_learning_goal_when_requested(temp_store):
+    plain = temp_store.create_session("plain")
+    temp_store.save(plain)
+
+    learning = temp_store.create_session("learning")
+    learning.blackboard.learning.goal = "Learn probability"
+    temp_store.save(learning)
+
+    latest = temp_store.latest_session(prefer_learning=True)
+    assert latest is not None
+    assert latest.session_id == "learning"
+    assert temp_store.latest_session_id(prefer_learning=True) == "learning"
+
+
+def test_session_id_with_channel_key_is_filesystem_safe(temp_store):
+    session = temp_store.create_session("cli:direct")
+    session.blackboard.learning.goal = "Learn vectors"
+
+    temp_store.save(session)
+
+    loaded = temp_store.load("cli:direct")
+    assert loaded is not None
+    assert loaded.session_id == "cli:direct"
+    assert loaded.blackboard.learning.goal == "Learn vectors"
+    assert (temp_store.state_root / "sid~cli%3Adirect" / "session.json").exists()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

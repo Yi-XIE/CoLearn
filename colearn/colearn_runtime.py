@@ -23,9 +23,8 @@ from typing import Any
 
 from colearn.colearn_adapters.colearn_tool_registry import ToolRegistryAdapter
 from colearn.colearn_plugin import CoLearnPlugin
-from colearn.colearn_tools.colearn_command import TOOL_METADATA
-
 _COLEARN_INSTALLED_FLAG = "_colearn_installed"
+_ACTIVE_PLUGIN: CoLearnPlugin | None = None
 
 
 def _resolve_loop(host: Any) -> Any:
@@ -46,7 +45,9 @@ def install_colearn(host: Any, plugin: CoLearnPlugin | None = None) -> CoLearnPl
     Returns:
         The CoLearnPlugin instance that was installed.
     """
+    global _ACTIVE_PLUGIN
     plugin = plugin or CoLearnPlugin()
+    _ACTIVE_PLUGIN = plugin
     loop = _resolve_loop(host)
 
     if getattr(loop, _COLEARN_INSTALLED_FLAG, False):
@@ -54,6 +55,7 @@ def install_colearn(host: Any, plugin: CoLearnPlugin | None = None) -> CoLearnPl
 
     _install_hooks(loop, plugin)
     _install_tools(loop, plugin)
+    _install_runtime_metadata(loop, plugin)
 
     try:
         setattr(loop, _COLEARN_INSTALLED_FLAG, True)
@@ -83,10 +85,28 @@ def _install_tools(loop: Any, plugin: CoLearnPlugin) -> None:
     registry = getattr(loop, "tools", None)
     if registry is None:
         return
+    adapter = ToolRegistryAdapter(registry)
     has = getattr(registry, "has", None)
-    if callable(has) and has(TOOL_METADATA["name"]):
-        return
-    ToolRegistryAdapter(registry).register(TOOL_METADATA)
+    for tool in plugin.get_tools():
+        name = str(tool.get("name") or "").strip()
+        if callable(has) and name and has(name):
+            continue
+        adapter.register(tool)
+
+
+def _install_runtime_metadata(loop: Any, plugin: CoLearnPlugin) -> None:
+    """Expose the installed plugin instance and config to host-side adapters."""
+    payload = plugin.host_runtime_payload()
+    for attr, value in {
+        "_colearn_plugin": plugin,
+        "_colearn_runtime": payload,
+        "_colearn_session_store": plugin.session_store,
+        "_colearn_wiki_service": plugin.wiki_service,
+    }.items():
+        try:
+            setattr(loop, attr, value)
+        except Exception:
+            continue
 
 
 _PATCHED_FROM_CONFIG_FLAG = "_colearn_patched_from_config"
@@ -106,7 +126,9 @@ def enable_for_nanobot(plugin: CoLearnPlugin | None = None) -> CoLearnPlugin:
     if getattr(AgentLoop.from_config, _PATCHED_FROM_CONFIG_FLAG, False):
         return getattr(AgentLoop.from_config, "_colearn_plugin")
 
+    global _ACTIVE_PLUGIN
     shared_plugin = plugin or CoLearnPlugin()
+    _ACTIVE_PLUGIN = shared_plugin
     original = AgentLoop.from_config
 
     def patched_from_config(*args: Any, **kwargs: Any) -> Any:
@@ -122,4 +144,9 @@ def enable_for_nanobot(plugin: CoLearnPlugin | None = None) -> CoLearnPlugin:
     setattr(patched_from_config, "_colearn_plugin", shared_plugin)
     AgentLoop.from_config = patched_from_config  # type: ignore[method-assign]
     return shared_plugin
+
+
+def get_active_colearn_plugin() -> CoLearnPlugin | None:
+    """Return the last plugin installed or prepared for NanoBot startup."""
+    return _ACTIVE_PLUGIN
 

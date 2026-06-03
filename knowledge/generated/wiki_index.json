@@ -1,0 +1,499 @@
+{
+  "ml.data.basic": {
+    "id": "ml.data.basic",
+    "page_type": "concept",
+    "title": "什么是数据",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ml",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "数据",
+      "训练数据"
+    ],
+    "learning_objectives": [
+      "理解数据是机器学习的\"食材\"",
+      "知道好数据的特点"
+    ],
+    "misconceptions": [
+      "数据越多越好（质量比数量更重要）"
+    ],
+    "file_path": "wiki\\concepts\\ml-data-basic.md"
+  },
+  "ml.model.basic": {
+    "id": "ml.model.basic",
+    "page_type": "concept",
+    "title": "什么是模型",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ml",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "模型",
+      "AI模型"
+    ],
+    "prerequisites": [
+      "ml.data.basic",
+      "ml.pattern.basic"
+    ],
+    "learning_objectives": [
+      "知道模型是\"从例子里总结规律\"的工具",
+      "理解模型和\"背答案\"的区别"
+    ],
+    "misconceptions": [
+      "模型是\"把答案背下来\"",
+      "模型能100%准确"
+    ],
+    "experiment_refs": [
+      "exp.ai.sorting.rules"
+    ],
+    "question_refs": [
+      "qb.ai.ml.beginner.01"
+    ],
+    "path_refs": [
+      "path.ai.ml.foundation"
+    ],
+    "file_path": "wiki\\concepts\\ml-model-basic.md"
+  },
+  "ml.pattern.basic": {
+    "id": "ml.pattern.basic",
+    "page_type": "concept",
+    "title": "什么是模式",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ml",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "模式",
+      "规律"
+    ],
+    "prerequisites": [
+      "ml.data.basic"
+    ],
+    "learning_objectives": [
+      "理解模式是数据中反复出现的特征",
+      "能够识别简单的模式"
+    ],
+    "misconceptions": [
+      "所有数据都有明显的模式（有些数据是随机的）"
+    ],
+    "file_path": "wiki\\concepts\\ml-pattern-basic.md"
+  },
+  "ml.training.basic": {
+    "id": "ml.training.basic",
+    "page_type": "concept",
+    "title": "什么是训练",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ml",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "训练",
+      "模型训练"
+    ],
+    "prerequisites": [
+      "ml.data.basic",
+      "ml.pattern.basic",
+      "ml.model.basic"
+    ],
+    "learning_objectives": [
+      "理解训练是让模型从数据中学习的过程",
+      "知道训练需要大量的例子"
+    ],
+    "misconceptions": [
+      "训练就是编写代码告诉模型怎么做"
+    ],
+    "file_path": "wiki\\concepts\\ml-training-basic.md"
+  },
+  "physics.force.basic": {
+    "id": "physics.force.basic",
+    "page_type": "concept",
+    "title": "什么是力",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "力",
+      "作用力"
+    ],
+    "learning_objectives": [
+      "理解力是物体间的相互作用",
+      "知道力能改变物体的运动状态"
+    ],
+    "misconceptions": [
+      "只有接触才能产生力（重力、磁力不需要接触）"
+    ],
+    "file_path": "wiki\\concepts\\physics-force-basic.md"
+  },
+  "physics.friction.basic": {
+    "id": "physics.friction.basic",
+    "page_type": "concept",
+    "title": "什么是摩擦力",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "摩擦力",
+      "摩擦"
+    ],
+    "prerequisites": [
+      "physics.force.basic",
+      "physics.motion.basic"
+    ],
+    "learning_objectives": [
+      "理解摩擦力是阻碍物体运动的力",
+      "知道摩擦力的大小与接触面有关"
+    ],
+    "misconceptions": [
+      "摩擦力总是有害的（没有摩擦力我们无法走路）"
+    ],
+    "file_path": "wiki\\concepts\\physics-friction-basic.md"
+  },
+  "physics.gravity.basic": {
+    "id": "physics.gravity.basic",
+    "page_type": "concept",
+    "title": "什么是重力",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "重力",
+      "引力",
+      "万有引力"
+    ],
+    "prerequisites": [
+      "physics.force.basic"
+    ],
+    "learning_objectives": [
+      "理解重力是物体间相互吸引的力",
+      "知道重力的大小与质量有关"
+    ],
+    "misconceptions": [
+      "只有地球有重力（所有物体之间都有引力）"
+    ],
+    "experiment_refs": [
+      "exp.physics.motion.pendulum"
+    ],
+    "file_path": "wiki\\concepts\\physics-gravity-basic.md"
+  },
+  "physics.motion.basic": {
+    "id": "physics.motion.basic",
+    "page_type": "concept",
+    "title": "什么是运动",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "aliases": [
+      "运动",
+      "物体运动"
+    ],
+    "prerequisites": [
+      "physics.force.basic"
+    ],
+    "learning_objectives": [
+      "理解运动是位置随时间的变化",
+      "知道力可以改变运动状态"
+    ],
+    "misconceptions": [
+      "运动的物体一定受到力（匀速直线运动不需要力维持）"
+    ],
+    "file_path": "wiki\\concepts\\physics-motion-basic.md"
+  },
+  "exp.ai.sorting.rules": {
+    "id": "exp.ai.sorting.rules",
+    "page_type": "experiment",
+    "title": "卡片分类游戏",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ai",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "concept_refs": [
+      "ml.pattern.basic",
+      "ml.model.basic"
+    ],
+    "materials": [
+      "纸卡片20张",
+      "彩笔"
+    ],
+    "duration_minutes": 20,
+    "safety_level": "low",
+    "file_path": "wiki\\experiments\\ai-sorting-rules.md"
+  },
+  "exp.physics.motion.pendulum_observation": {
+    "id": "exp.physics.motion.pendulum_observation",
+    "page_type": "experiment",
+    "title": "摆锤观察实验",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "concept_refs": [
+      "physics.gravity.basic",
+      "physics.motion.basic"
+    ],
+    "materials": [
+      "细绳（约1米长）",
+      "小重物（如钥匙）",
+      "尺子",
+      "秒表"
+    ],
+    "duration_minutes": 15,
+    "safety_level": "low",
+    "file_path": "wiki\\experiments\\physics-pendulum-observation.md"
+  },
+  "exp.physics.motion.pendulum": {
+    "id": "exp.physics.motion.pendulum",
+    "page_type": "experiment",
+    "title": "摆锤观察实验",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "concept_refs": [
+      "physics.gravity.basic",
+      "physics.motion.basic"
+    ],
+    "materials": [
+      "细绳",
+      "小重物",
+      "尺子",
+      "秒表"
+    ],
+    "duration_minutes": 15,
+    "safety_level": "low",
+    "file_path": "wiki\\experiments\\physics-pendulum.md"
+  },
+  "path.ai.ml.foundation": {
+    "id": "path.ai.ml.foundation",
+    "page_type": "path",
+    "title": "机器学习入门路径",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ai",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "ordered_concepts": [
+      "ml.data.basic",
+      "ml.pattern.basic",
+      "ml.model.basic",
+      "ml.training.basic"
+    ],
+    "file_path": "wiki\\paths\\ai-ml-foundation-path.md"
+  },
+  "path.physics.mechanics.foundation": {
+    "id": "path.physics.mechanics.foundation",
+    "page_type": "path",
+    "title": "力与运动基础路径",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "ordered_concepts": [
+      "physics.force.basic",
+      "physics.motion.basic",
+      "physics.gravity.basic",
+      "physics.friction.basic"
+    ],
+    "file_path": "wiki\\paths\\physics-mechanics-foundation-path.md"
+  },
+  "qbank.ai.ml.beginner": {
+    "id": "qbank.ai.ml.beginner",
+    "page_type": "question_bank",
+    "title": "机器学习入门题库",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ai",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "concept_refs": [
+      "ml.model.basic",
+      "ml.data.basic",
+      "ml.training.basic"
+    ],
+    "file_path": "wiki\\question-banks\\ai-ml-beginner.md",
+    "question_count": 3
+  },
+  "qb.ai.ml.beginner.01": {
+    "id": "qb.ai.ml.beginner.01",
+    "page_type": "question",
+    "title": "下面哪个说法最准确地描述了\"机器学习模型\"？\nA. 模型是一个存储所有训练数据的数据库\nB. 模型是从数据中学习规律，用来对新数据做预测的工具\nC. 模型是一段固定的程序代码，不会改变\nD. 模型是人工编写的规则集合",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ai",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "parent_id": "qbank.ai.ml.beginner",
+    "question_type": "选择题",
+    "related_concepts": [
+      "ml.model.basic"
+    ],
+    "answer": "B",
+    "explanation": "模型的核心是\"从数据中学习规律\"，而不是记住所有数据。",
+    "file_path": "wiki\\question-banks\\ai-ml-beginner.md"
+  },
+  "qb.ai.ml.beginner.02": {
+    "id": "qb.ai.ml.beginner.02",
+    "page_type": "question",
+    "title": "训练模型就是程序员编写代码告诉模型如何判断。",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ai",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "parent_id": "qbank.ai.ml.beginner",
+    "question_type": "判断题",
+    "related_concepts": [
+      "ml.training.basic"
+    ],
+    "answer": "错误",
+    "explanation": "训练是让模型自己从数据中学习规则，不是程序员编写规则。",
+    "file_path": "wiki\\question-banks\\ai-ml-beginner.md"
+  },
+  "qb.ai.ml.beginner.03": {
+    "id": "qb.ai.ml.beginner.03",
+    "page_type": "question",
+    "title": "如果我们想训练一个识别猫和狗的模型，下面哪组数据最合适？\nA. 10张猫的照片和10张狗的照片\nB. 1000张猫的照片和5张狗的照片\nC. 500张猫的照片和500张狗的照片\nD. 只有猫的照片，没有狗的照片",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "ai",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "parent_id": "qbank.ai.ml.beginner",
+    "question_type": "选择题",
+    "related_concepts": [
+      "ml.data.basic"
+    ],
+    "answer": "C",
+    "explanation": "C的数据量充足且平衡，最适合训练。",
+    "file_path": "wiki\\question-banks\\ai-ml-beginner.md"
+  },
+  "qbank.physics.motion.beginner": {
+    "id": "qbank.physics.motion.beginner",
+    "page_type": "question_bank",
+    "title": "力与运动基础题库",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "concept_refs": [
+      "physics.force.basic",
+      "physics.motion.basic",
+      "physics.gravity.basic"
+    ],
+    "file_path": "wiki\\question-banks\\physics-motion-beginner.md",
+    "question_count": 3
+  },
+  "qb.physics.motion.beginner.01": {
+    "id": "qb.physics.motion.beginner.01",
+    "page_type": "question",
+    "title": "下面哪个例子不是力？\nA. 你推桌子\nB. 地球吸引月球\nC. 桌子静止在地面上\nD. 磁铁吸引铁钉",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "parent_id": "qbank.physics.motion.beginner",
+    "question_type": "选择题",
+    "related_concepts": [
+      "physics.force.basic"
+    ],
+    "answer": "C",
+    "explanation": "桌子静止是一种状态，不是力。推、吸引都是力的作用。",
+    "file_path": "wiki\\question-banks\\physics-motion-beginner.md"
+  },
+  "qb.physics.motion.beginner.02": {
+    "id": "qb.physics.motion.beginner.02",
+    "page_type": "question",
+    "title": "运动的物体一定受到力的作用。",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "parent_id": "qbank.physics.motion.beginner",
+    "question_type": "判断题",
+    "related_concepts": [
+      "physics.motion.basic"
+    ],
+    "answer": "错误",
+    "explanation": "匀速直线运动的物体不需要力来维持，只有改变运动状态才需要力。",
+    "file_path": "wiki\\question-banks\\physics-motion-beginner.md"
+  },
+  "qb.physics.motion.beginner.03": {
+    "id": "qb.physics.motion.beginner.03",
+    "page_type": "question",
+    "title": "为什么月球不会掉到地球上？\nA. 月球没有受到地球的引力\nB. 月球的速度刚好让它保持在轨道上\nC. 月球和地球之间距离太远，引力太小\nD. 月球有自己的力对抗地球引力",
+    "grade_band": [
+      "10-12",
+      "13-15"
+    ],
+    "domain": "physics",
+    "difficulty": "beginner",
+    "updated_at": "2026-06-02",
+    "parent_id": "qbank.physics.motion.beginner",
+    "question_type": "选择题",
+    "related_concepts": [
+      "physics.gravity.basic"
+    ],
+    "answer": "B",
+    "explanation": "月球受到地球引力，但它的运动速度让它保持在轨道上绕地球转。",
+    "file_path": "wiki\\question-banks\\physics-motion-beginner.md"
+  }
+}

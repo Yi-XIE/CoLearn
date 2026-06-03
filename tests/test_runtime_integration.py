@@ -9,10 +9,12 @@ nanobot_hook = pytest.importorskip("nanobot.agent.hook")
 nanobot_tools_registry = pytest.importorskip("nanobot.agent.tools.registry")
 nanobot_tools_base = pytest.importorskip("nanobot.agent.tools.base")
 
-from colearn.colearn_adapters.colearn_nanobot_tool import ColearnDashboardTool
+from colearn.colearn_adapters.colearn_nanobot_tool import ColearnDashboardTool, colearn_tool_from_metadata
 from colearn.colearn_context import set_current_session_id, set_session_store
 from colearn.colearn_runtime import install_colearn
+from colearn.colearn_host_integration import cmd_colearn, cmd_learn
 from colearn.colearn_state.colearn_store import SessionStore
+from colearn.colearn_tools.learn_command import LEARN_TOOL_METADATA
 
 
 class FakeLoop:
@@ -39,6 +41,7 @@ def test_install_colearn_attaches_hooks_and_tool_to_loop():
     assert len(loop._extra_hooks) == 4
     assert all(isinstance(h, nanobot_hook.AgentHook) for h in loop._extra_hooks)
     assert loop.tools.has("colearn")
+    assert loop.tools.has("learn")
     assert isinstance(loop.tools.get("colearn"), nanobot_tools_base.Tool)
 
 
@@ -50,7 +53,7 @@ def test_install_colearn_is_idempotent():
     install_colearn(loop)
 
     assert len(loop._extra_hooks) == 4
-    assert len(loop.tools) == 1
+    assert len(loop.tools) == 2
 
 
 def test_install_colearn_accepts_facade():
@@ -62,6 +65,18 @@ def test_install_colearn_accepts_facade():
 
     assert len(loop._extra_hooks) == 4
     assert loop.tools.has("colearn")
+    assert loop.tools.has("learn")
+
+
+def test_learn_tool_schema_is_host_compatible():
+    """The /learn tool should also register as a NanoBot-compatible tool."""
+    registry = nanobot_tools_registry.ToolRegistry()
+    registry.register(colearn_tool_from_metadata(LEARN_TOOL_METADATA))
+
+    schema = registry.get("learn").to_schema()
+    assert schema["function"]["name"] == "learn"
+    properties = schema["function"]["parameters"]["properties"]
+    assert "goal" in properties
 
 
 def test_entry_point_tool_class_executes(tmp_path):
@@ -149,7 +164,51 @@ def test_patched_from_config_installs_colearn_on_returned_loop():
         assert produced is fake
         assert len(fake._extra_hooks) == 4
         assert fake.tools.has("colearn")
+        assert fake.tools.has("learn")
     finally:
         AgentLoop.from_config = original  # type: ignore[method-assign]
+
+
+def test_install_colearn_exposes_runtime_metadata():
+    loop = FakeLoop()
+
+    plugin = install_colearn(loop)
+
+    assert getattr(loop, "_colearn_plugin") is plugin
+    runtime = getattr(loop, "_colearn_runtime")
+    assert runtime["plugin"] is plugin
+    assert runtime["session_store"] is plugin.session_store
+
+
+@pytest.mark.asyncio
+async def test_host_slash_commands_bind_real_session_key(tmp_path):
+    from nanobot.bus.events import InboundMessage
+    from nanobot.command.router import CommandContext
+
+    loop = FakeLoop()
+    plugin = install_colearn(loop)
+    session = plugin.setup_session("cli:direct")
+    session.blackboard.learning.goal = "Learn vectors"
+    plugin.session_store.save(session)
+
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/colearn")
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/colearn", loop=loop)
+    out = await cmd_colearn(ctx)
+    assert "CoLearn Dashboard" in out.content
+
+    learn_msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/learn study tensors")
+    learn_ctx = CommandContext(
+        msg=learn_msg,
+        session=None,
+        key=learn_msg.session_key,
+        raw="/learn study tensors",
+        args="study tensors",
+        loop=loop,
+    )
+    learn_out = await cmd_learn(learn_ctx)
+    assert "CoLearn Learning Session" in learn_out.content
+    saved = plugin.session_store.load("cli:direct")
+    assert saved is not None
+    assert saved.blackboard.learning.goal == "study tensors"
 
 

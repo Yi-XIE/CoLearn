@@ -13,6 +13,7 @@ import {
   Bot,
   Brain,
   Check,
+  CircleDot,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
   EyeOff,
   Gem,
   Globe2,
+  GraduationCap,
   Grid3X3,
   HardDrive,
   Hexagon,
@@ -31,6 +33,7 @@ import {
   Loader2,
   LogOut,
   Moon,
+  Network,
   PlayCircle,
   Plus,
   Orbit,
@@ -72,6 +75,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createModelConfiguration,
+  fetchCoLearnApps,
   fetchSettings,
   fetchCliApps,
   fetchMcpPresets,
@@ -103,6 +107,8 @@ import { useClient } from "@/providers/ClientProvider";
 import type {
   CliAppInfo,
   CliAppsPayload,
+  CoLearnAppInfo,
+  CoLearnAppsPayload,
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
   McpPresetsPayload,
@@ -125,10 +131,11 @@ export type SettingsSectionKey =
 
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
-type AppsKindFilter = "all" | "cli" | "mcp";
+type AppsKindFilter = "all" | "cli" | "mcp" | "colearn";
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
-  | { id: string; kind: "mcp"; preset: McpPresetInfo };
+  | { id: string; kind: "mcp"; preset: McpPresetInfo }
+  | { id: string; kind: "colearn"; app: CoLearnAppInfo };
 
 interface LocalPreferences {
   density: LocalDensity;
@@ -328,9 +335,11 @@ export function SettingsView({
   const { token } = useClient();
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
+  const [colearnApps, setCoLearnApps] = useState<CoLearnAppsPayload | null>(null);
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
+  const [colearnAppsLoading, setCoLearnAppsLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modelConfigurationOpen, setModelConfigurationOpen] = useState(false);
@@ -355,6 +364,7 @@ export function SettingsView({
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
+  const [colearnFocusName, setCoLearnFocusName] = useState<string | null>(null);
   const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
@@ -500,6 +510,29 @@ export function SettingsView({
       })
       .finally(() => {
         if (!cancelled) setCliAppsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, token]);
+
+  useEffect(() => {
+    if (activeSection !== "apps") return;
+    let cancelled = false;
+    setCoLearnAppsLoading(true);
+    fetchCoLearnApps(token)
+      .then((payload) => {
+        if (!cancelled) {
+          setCoLearnApps(payload);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCoLearnApps({ apps: [], installed_count: 0 });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCoLearnAppsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1234,8 +1267,10 @@ export function SettingsView({
         return (
           <AppsCatalogSettings
             cliApps={cliApps}
+            colearnApps={colearnApps}
             mcpPresets={mcpPresets}
             cliAppsLoading={cliAppsLoading}
+            colearnAppsLoading={colearnAppsLoading}
             mcpPresetsLoading={mcpPresetsLoading}
             query={appsQuery}
             filter={appsKindFilter}
@@ -1244,6 +1279,7 @@ export function SettingsView({
             cliMessage={cliAppsMessage}
             cliError={cliAppsError}
             cliFocusName={cliAppsFocusName}
+            colearnFocusName={colearnFocusName}
             mcpMessage={mcpMessage}
             mcpError={mcpError}
             mcpFieldValues={mcpFieldValues}
@@ -1254,6 +1290,7 @@ export function SettingsView({
             onQueryChange={setAppsQuery}
             onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
+            onOpenCoLearn={(name) => setCoLearnFocusName((current) => (current === name ? null : name))}
             onMcpAction={handleMcpPresetAction}
             onDismissStatus={() => {
               setCliAppsMessage(null);
@@ -2768,8 +2805,10 @@ function WebSettings({
 
 function AppsCatalogSettings({
   cliApps,
+  colearnApps,
   mcpPresets,
   cliAppsLoading,
+  colearnAppsLoading,
   mcpPresetsLoading,
   query,
   filter,
@@ -2778,6 +2817,7 @@ function AppsCatalogSettings({
   cliMessage,
   cliError,
   cliFocusName,
+  colearnFocusName,
   mcpMessage,
   mcpError,
   mcpFieldValues,
@@ -2788,6 +2828,7 @@ function AppsCatalogSettings({
   onQueryChange,
   onFilterChange,
   onCliAction,
+  onOpenCoLearn,
   onMcpAction,
   onDismissStatus,
   onBackToChat,
@@ -2801,8 +2842,10 @@ function AppsCatalogSettings({
   isRestarting,
 }: {
   cliApps: CliAppsPayload | null;
+  colearnApps: CoLearnAppsPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
+  colearnAppsLoading: boolean;
   mcpPresetsLoading: boolean;
   query: string;
   filter: AppsKindFilter;
@@ -2811,6 +2854,7 @@ function AppsCatalogSettings({
   cliMessage: string | null;
   cliError: string | null;
   cliFocusName: string | null;
+  colearnFocusName: string | null;
   mcpMessage: string | null;
   mcpError: string | null;
   mcpFieldValues: Record<string, Record<string, string>>;
@@ -2821,6 +2865,7 @@ function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+  onOpenCoLearn: (name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
@@ -2839,10 +2884,16 @@ function AppsCatalogSettings({
     { value: "all", label: tx("settings.apps.filterAll", "All") },
     { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
     { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
+    { value: "colearn", label: tx("settings.apps.filterCoLearn", "CoLearn") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
   const items: AppsCatalogItem[] = [
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
+    ...(colearnApps?.apps ?? []).map((app) => ({
+      id: `colearn:${app.name}`,
+      kind: "colearn" as const,
+      app,
+    })),
     ...(mcpPresets?.presets ?? []).map((preset) => ({
       id: `mcp:${preset.name}`,
       kind: "mcp" as const,
@@ -2858,12 +2909,20 @@ function AppsCatalogSettings({
   const focusedApp = cliFocusName
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
-  const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
-  const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
+  const focusedCoLearn = colearnFocusName
+    ? (colearnApps?.apps ?? []).find((app) => app.name === colearnFocusName)
+    : null;
+  const loading =
+    items.length === 0 &&
+    (
+      (filter === "all" && (cliAppsLoading || colearnAppsLoading || mcpPresetsLoading)) ||
+      (filter === "cli" && cliAppsLoading) ||
+      (filter === "colearn" && colearnAppsLoading) ||
+      (filter === "mcp" && mcpPresetsLoading)
+    );
+  const statusMessage =
+    cliError || mcpError || (!(focusedApp || focusedCoLearn) ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
-  const caption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
-    .replace("{{cli}}", String(cliApps?.installed_count ?? 0))
-    .replace("{{mcp}}", String(mcpPresets?.installed_count ?? 0));
 
   return (
     <div className="space-y-7">
@@ -2875,7 +2934,12 @@ function AppsCatalogSettings({
               "Add local app adapters and connected tool servers that nanobot can use from chat.",
             )}
           </p>
-          <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
+          <span className="text-[12px] font-medium text-muted-foreground">
+            {tx("settings.apps.caption", "{{cli}} CLI | {{mcp}} MCP | {{colearn}} CoLearn")
+              .replace("{{cli}}", String(cliApps?.installed_count ?? 0))
+              .replace("{{mcp}}", String(mcpPresets?.installed_count ?? 0))
+              .replace("{{colearn}}", String(colearnApps?.installed_count ?? 0))}
+          </span>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
@@ -2920,6 +2984,14 @@ function AppsCatalogSettings({
             <X className="h-3.5 w-3.5" aria-hidden />
           </button>
         </div>
+      ) : null}
+
+      {focusedCoLearn ? (
+        <CoLearnReadyPanel
+          app={focusedCoLearn}
+          onBackToChat={onBackToChat}
+          onToggleOpen={onOpenCoLearn}
+        />
       ) : null}
 
       {focusedApp ? (
@@ -2972,6 +3044,13 @@ function AppsCatalogSettings({
                   showBrandLogos={showBrandLogos}
                   onAction={onCliAction}
                 />
+              ) : item.kind === "colearn" ? (
+                <CoLearnAppsCatalogRow
+                  key={item.id}
+                  app={item.app}
+                  isOpen={colearnFocusName === item.app.name}
+                  onOpen={onOpenCoLearn}
+                />
               ) : (
                 <McpAppsCatalogRow
                   key={item.id}
@@ -2993,7 +3072,7 @@ function AppsCatalogSettings({
         )}
       </section>
 
-      {filter !== "cli" ? (
+      {filter === "all" || filter === "mcp" ? (
         <McpCustomServerPanel
           form={customMcpForm}
           configImport={mcpConfigImport}
@@ -3092,6 +3171,55 @@ function CliAppsCatalogRow({
             <Plus className="h-4 w-4" aria-hidden />
           </AppsActionButton>
         )}
+      </div>
+    </article>
+  );
+}
+
+function CoLearnAppsCatalogRow({
+  app,
+  isOpen,
+  onOpen,
+}: {
+  app: CoLearnAppInfo;
+  isOpen: boolean;
+  onOpen: (name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const goal = app.blackboard?.learning?.goal || tx("settings.colearn.noGoal", "No active goal");
+  const nodeCount = app.graph?.nodes.length ?? 0;
+  const edgeCount = app.graph?.edges.length ?? 0;
+
+  return (
+    <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] bg-blue-600/10 text-blue-700 dark:text-blue-300">
+        <GraduationCap className="h-5 w-5" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{app.display_name}</h3>
+          <AppsTypeBadge>{tx("settings.apps.colearnLabel", "CoLearn")}</AppsTypeBadge>
+        </div>
+        <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{goal}</p>
+        <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+          {tx("settings.colearn.graphSummary", "{{nodes}} nodes • {{edges}} edges")
+            .replace("{{nodes}}", String(nodeCount))
+            .replace("{{edges}}", String(edgeCount))}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <AppsActionButton
+          ariaLabel={
+            isOpen
+              ? tx("settings.colearn.hideDetails", "Hide CoLearn details")
+              : tx("settings.colearn.showDetails", "Show CoLearn details")
+          }
+          tone={isOpen ? "installed" : "default"}
+          onClick={() => onOpen(app.name)}
+        >
+          {isOpen ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
+        </AppsActionButton>
       </div>
     </article>
   );
@@ -3372,6 +3500,174 @@ function AppsTypeBadge({ children }: { children: ReactNode }) {
   );
 }
 
+function CoLearnReadyPanel({
+  app,
+  onBackToChat,
+  onToggleOpen,
+}: {
+  app: CoLearnAppInfo;
+  onBackToChat: () => void;
+  onToggleOpen: (name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const learning = app.blackboard?.learning;
+  const runtime = app.blackboard?.runtime;
+  const graph = app.graph;
+  const statusRows = [
+    {
+      label: tx("settings.colearn.mode", "Mode"),
+      value: app.session_mode || tx("settings.values.unknown", "Unknown"),
+    },
+    {
+      label: tx("settings.colearn.session", "Session"),
+      value: app.session_id || tx("settings.colearn.none", "None"),
+    },
+    {
+      label: tx("settings.colearn.activeNode", "Active node"),
+      value: learning?.active_node_id || tx("settings.colearn.none", "None"),
+    },
+    {
+      label: tx("settings.colearn.updated", "Updated"),
+      value: runtime?.last_update || app.blackboard?.updated_at || tx("settings.colearn.none", "None"),
+    },
+  ];
+  const pendingChecks = learning?.pending_checks ?? [];
+  const blockers = learning?.blockers ?? [];
+  const completedNodes = learning?.completed_nodes ?? [];
+  const plannedNodes = learning?.planned_nodes ?? [];
+
+  return (
+    <section className="rounded-[12px] border border-blue-500/15 bg-card/88 px-4 py-4 shadow-[0_8px_26px_rgba(15,23,42,0.055)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-blue-600/10 text-blue-700 dark:text-blue-300">
+              <Network className="h-4.5 w-4.5" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{app.display_name}</h3>
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                {learning?.goal || tx("settings.colearn.noGoal", "No active learning goal yet.")}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => onToggleOpen(app.name)}
+            className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground hover:bg-muted/65 hover:text-foreground"
+          >
+            {tx("settings.colearn.hideDetails", "Hide details")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onBackToChat}
+            className="h-8 rounded-full px-3 text-[12px] font-semibold"
+          >
+            {tx("settings.cliApps.openChat", "Open chat")}
+            <ChevronRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {statusRows.map((row) => (
+          <div key={row.label} className="rounded-[10px] border border-border/45 bg-muted/20 px-3 py-2.5">
+            <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+              {row.label}
+            </div>
+            <div className="mt-1 truncate text-[12.5px] text-foreground">{row.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+        <div className="rounded-[10px] border border-border/45 bg-muted/15 p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+            <CircleDot className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" aria-hidden />
+            {tx("settings.colearn.progress", "Progress")}
+          </div>
+          <p className="mt-2 text-[12.5px] leading-5 text-muted-foreground">
+            {learning?.current_progress || tx("settings.colearn.noProgress", "No summarized progress yet.")}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <CoLearnChip icon={GraduationCap} label={tx("settings.colearn.goalChip", "Goal")} value={learning?.goal} />
+            <CoLearnChip icon={Activity} label={tx("settings.colearn.continuationChip", "Continuation")} value={learning?.continuation} />
+            <CoLearnChip
+              icon={Network}
+              label={tx("settings.colearn.graphChip", "Graph")}
+              value={tx("settings.colearn.graphSummary", "{{nodes}} nodes • {{edges}} edges")
+                .replace("{{nodes}}", String(graph?.nodes.length ?? 0))
+                .replace("{{edges}}", String(graph?.edges.length ?? 0))}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-[10px] border border-border/45 bg-muted/15 p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+            <CircleDot className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" aria-hidden />
+            {tx("settings.colearn.focusNodes", "Focus")}
+          </div>
+          <div className="mt-2 space-y-2 text-[12.5px] text-muted-foreground">
+            <CoLearnMiniList title={tx("settings.colearn.pendingChecks", "Pending checks")} items={pendingChecks} />
+            <CoLearnMiniList title={tx("settings.colearn.blockers", "Blockers")} items={blockers} />
+            <CoLearnMiniList title={tx("settings.colearn.completedNodes", "Completed nodes")} items={completedNodes} />
+            <CoLearnMiniList title={tx("settings.colearn.plannedNodes", "Planned nodes")} items={plannedNodes} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CoLearnChip({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value?: string | null;
+}) {
+  if (!value) return null;
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/55 bg-background/70 px-2.5 py-1 text-[11.5px] text-muted-foreground">
+      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="font-medium text-foreground">{label}:</span>
+      <span className="truncate">{value}</span>
+    </span>
+  );
+}
+
+function CoLearnMiniList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{title}</div>
+      <div className="mt-1">
+        {items.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {items.slice(0, 4).map((item) => (
+              <span
+                key={item}
+                className="inline-flex max-w-full rounded-full bg-background/70 px-2 py-0.5 text-[11.5px] text-foreground"
+              >
+                <span className="truncate">{item}</span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[12px] text-muted-foreground">None</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const AppsActionButton = forwardRef<HTMLButtonElement, {
   ariaLabel: string;
   busy?: boolean;
@@ -3410,11 +3706,14 @@ const AppsActionButton = forwardRef<HTMLButtonElement, {
 });
 
 function appsTitle(item: AppsCatalogItem): string {
-  return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
+  if (item.kind === "cli" || item.kind === "colearn") return item.app.display_name;
+  return item.preset.display_name;
 }
 
 function appsReady(item: AppsCatalogItem): boolean {
-  return item.kind === "cli" ? item.app.installed : item.preset.installed && item.preset.configured;
+  if (item.kind === "cli") return item.app.installed;
+  if (item.kind === "colearn") return item.app.installed && item.app.available;
+  return item.preset.installed && item.preset.configured;
 }
 
 function appsSearchText(item: AppsCatalogItem): string {
@@ -3428,6 +3727,25 @@ function appsSearchText(item: AppsCatalogItem): string {
       app.requires,
       app.entry_point,
       app.source,
+    ]
+      .join(" ")
+      .toLowerCase();
+  }
+  if (item.kind === "colearn") {
+    const app = item.app;
+    return [
+      app.display_name,
+      app.name,
+      app.category,
+      app.description,
+      app.requires,
+      app.entry_point,
+      app.source,
+      app.session_mode ?? "",
+      app.session_id ?? "",
+      app.blackboard?.learning?.goal ?? "",
+      app.blackboard?.learning?.active_node_id ?? "",
+      ...(app.graph?.nodes.map((node) => `${node.id} ${node.label}`) ?? []),
     ]
       .join(" ")
       .toLowerCase();

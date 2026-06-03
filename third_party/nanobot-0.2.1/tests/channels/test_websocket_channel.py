@@ -1726,6 +1726,8 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> No
         commands = {row["command"]: row for row in body["commands"]}
         assert commands["/stop"]["title"] == "Stop current task"
         assert commands["/history"]["arg_hint"] == "[n]"
+        assert commands["/learn"]["arg_hint"] == "<goal>"
+        assert commands["/colearn"]["title"] == "Show CoLearn dashboard"
         assert all("description" in row for row in body["commands"])
     finally:
         await channel.stop()

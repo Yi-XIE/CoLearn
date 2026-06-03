@@ -17,6 +17,7 @@ from websockets.http11 import Response
 
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.bus.queue import MessageBus
+from colearn.colearn_host_integration import colearn_apps_payload
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
 from nanobot.webui.settings_api import (
@@ -65,6 +66,7 @@ class WebUISettingsRouter:
         error_response: Callable[[int, str | None], Response],
         runtime_surface: str,
         runtime_capabilities: dict[str, Any],
+        host_loop: Any | None = None,
     ) -> None:
         self.bus = bus
         self.logger = logger
@@ -74,6 +76,7 @@ class WebUISettingsRouter:
         self._error_response = error_response
         self._runtime_surface = runtime_surface
         self._runtime_capabilities = runtime_capabilities
+        self._host_loop = host_loop
         self._restart_sections: set[str] = set()
 
     async def dispatch(self, request: WsRequest, path: str) -> Response | None:
@@ -101,6 +104,8 @@ class WebUISettingsRouter:
             return self._handle_settings_network_safety_update(request)
         if path == "/api/settings/cli-apps":
             return self._handle_settings_cli_apps(request)
+        if path == "/api/settings/colearn-apps":
+            return self._handle_settings_colearn_apps(request)
         if path == "/api/settings/cli-apps/install":
             return await self._handle_settings_cli_apps_action(request, "install")
         if path == "/api/settings/cli-apps/update":
@@ -284,6 +289,16 @@ class WebUISettingsRouter:
         except Exception:
             self.logger.exception("failed to load CLI Apps payload")
             return self._error_response(500, "failed to load CLI Apps")
+        return self._json_response(payload)
+
+    def _handle_settings_colearn_apps(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = colearn_apps_payload(self._host_loop)
+        except Exception:
+            self.logger.exception("failed to load CoLearn Apps payload")
+            return self._error_response(500, "failed to load CoLearn Apps")
         return self._json_response(payload)
 
     async def _handle_settings_cli_apps_action(

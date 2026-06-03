@@ -4,6 +4,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from colearn.colearn_state.colearn_models import LearningSession
 
@@ -20,9 +21,29 @@ class SessionStore:
         """
         self.state_root = Path(state_root)
 
+    @staticmethod
+    def _session_dir_name(session_id: str) -> str:
+        """Map a session id to a filesystem-safe directory name."""
+        safe = quote(session_id, safe="")
+        if safe == session_id and safe not in {"", ".", ".."}:
+            return session_id
+        return f"sid~{safe}"
+
+    @staticmethod
+    def _decode_session_dir_name(dir_name: str) -> str:
+        """Recover a logical session id from an encoded directory name."""
+        if dir_name.startswith("sid~"):
+            return unquote(dir_name[4:])
+        return dir_name
+
     def _session_dir(self, session_id: str) -> Path:
         """Get the directory path for a session."""
-        return self.state_root / session_id
+        encoded = self._session_dir_name(session_id)
+        encoded_path = self.state_root / encoded
+        legacy_path = self.state_root / session_id
+        if encoded != session_id and legacy_path.exists() and not encoded_path.exists():
+            return legacy_path
+        return encoded_path
 
     def _session_file(self, session_id: str) -> Path:
         """Get the session.json file path."""
@@ -74,7 +95,7 @@ class SessionStore:
 
         Implementation:
         1. Write to .session.json.tmp
-        2. Rename to session.json (atomic on POSIX)
+        2. Replace session.json atomically when the platform supports it
         3. Set file permissions to 0600
 
         Args:
@@ -101,8 +122,8 @@ class SessionStore:
                 f.flush()
                 os.fsync(f.fileno())
 
-            # Atomic rename
-            temp_file.rename(session_file)
+            # Replace the destination in-place so repeated saves also work on Windows.
+            os.replace(temp_file, session_file)
 
             # Set file permissions to 0600 (user read/write only)
             os.chmod(session_file, 0o600)
@@ -128,6 +149,41 @@ class SessionStore:
             if item.is_dir():
                 session_file = item / "session.json"
                 if session_file.exists():
-                    sessions.append(item.name)
+                    sessions.append(self._decode_session_dir_name(item.name))
 
         return sorted(sessions)
+
+    def latest_session(self, prefer_learning: bool = False) -> LearningSession | None:
+        """Return the most recently updated session.
+
+        When ``prefer_learning`` is enabled, sessions with an active learning
+        goal are preferred; within that pool the newest ``updated_at`` wins.
+        """
+        loaded: list[LearningSession] = []
+        for session_id in self.list_sessions():
+            session = self.load(session_id)
+            if session is not None:
+                loaded.append(session)
+        if not loaded:
+            return None
+
+        pool = loaded
+        if prefer_learning:
+            learning_sessions = [
+                session for session in loaded if session.blackboard.learning.goal
+            ]
+            if learning_sessions:
+                pool = learning_sessions
+
+        return max(
+            pool,
+            key=lambda session: (
+                session.updated_at or "",
+                session.session_id,
+            ),
+        )
+
+    def latest_session_id(self, prefer_learning: bool = False) -> str | None:
+        """Return the session id chosen by :meth:`latest_session`."""
+        session = self.latest_session(prefer_learning=prefer_learning)
+        return session.session_id if session is not None else None

@@ -1,31 +1,174 @@
 # CoLearn Plugins
 
-This repository contains the standalone CoLearn plugin runtime and the NanoBot host adapter.
+CoLearn is a NanoBot-oriented learning plugin demo. This repository packages:
 
-## Scope
+- a standalone `colearn` plugin runtime
+- NanoBot host wiring for hooks, commands, and read-only Apps UI
+- `.colearn/` session state and wiki-backed learning context
+- a vendored NanoBot reference snapshot in `third_party/nanobot-0.2.1/`
 
-- CoLearn plugin core
-- NanoBot adapter
-- Blackboard and session state integration
-- Wiki-backed learning flow
-- Slash command and UI extension contracts
-- NanoBot reference snapshot under `third_party/nanobot-0.2.1/`
+## Demo Scope
 
-## Naming
+This branch targets a working demo, not a finished product:
 
-- Brand Name: `CoLearn`
-- Package Name: `colearn`
-- Plugin Name: `colearn`
-- File/Dir Prefix: `colearn_*`
-- State Dir: `.colearn/`
+- NanoBot and CoLearn can start together
+- `/learn` can create or continue a learning session
+- `/colearn` can show the current blackboard snapshot
+- LEARNING mode injects CoLearn context into the real model request path
+- turn end performs minimal blackboard writeback
+- WebUI Apps can show a read-only CoLearn entry
+- CoLearn exposes read-only host APIs for blackboard, graph, and session state
 
-## Current Status
+CoLearn remains the source of truth for learning data:
 
-This repository is being extracted from the main CoLearn product line so the plugin can evolve as an independent deliverable while still targeting NanoBot as the first and only host.
+- knowledge truth: `.colearn/wiki/`
+- learning truth: `.colearn/state/sessions/`
 
-## Third-party Reference
+## Install
 
-`third_party/nanobot-0.2.1/` is a checked-in host reference snapshot for interface lookup and integration validation.
+From the repo root:
 
-- Treat it as read-only reference code.
-- Keep CoLearn plugin implementation under `colearn/`.
+```bash
+pip install -e .
+```
+
+For tests:
+
+```bash
+pip install -e ".[dev]"
+```
+
+For WebUI development inside the vendored NanoBot snapshot:
+
+```bash
+cd third_party/nanobot-0.2.1/webui
+npm ci
+```
+
+## Required Runtime Config
+
+CoLearn runs on top of NanoBot, so you still need a valid NanoBot config file.
+
+Default path:
+
+```text
+~/.nanobot/config.json
+```
+
+Minimum things that must be configured:
+
+- a valid `provider`
+- a valid `model`
+- the matching API key or provider auth
+
+If these are missing, WebUI may still boot, but actual learning turns will not complete.
+
+## Build Wiki Index
+
+If you change content under `knowledge/wiki/`, rebuild the generated index:
+
+```bash
+python -m colearn.colearn_wiki.colearn_indexer
+```
+
+Generated files land in:
+
+```text
+knowledge/generated/
+```
+
+## Recommended Start Commands
+
+### WebUI
+
+```bash
+python run_colearn.py webui --port 8080
+```
+
+This is the main demo entry. It starts NanoBot WebUI with CoLearn auto-mounted.
+
+### HTTP API
+
+```bash
+python run_colearn.py serve --port 8765
+```
+
+### Single Turn
+
+```bash
+python run_colearn.py run --message "I want to learn machine learning" --session user-42
+```
+
+### Interactive Session
+
+```bash
+python run_colearn.py chat --session user-42
+```
+
+## What To Verify
+
+After `python run_colearn.py webui --port 8080`:
+
+1. open NanoBot WebUI
+2. open the command palette or type commands directly
+3. verify `/learn` and `/colearn` are available
+4. run `/learn linear algebra basics`
+5. open Settings > Apps
+6. verify the CoLearn app card is visible
+7. open the CoLearn read-only view and confirm blackboard / graph data load
+
+## Host Endpoints
+
+CoLearn adds these read-only APIs through the NanoBot host surface:
+
+- `/api/v1/colearn/blackboard/current`
+- `/api/v1/colearn/graph/current`
+- `/api/v1/colearn/session/current`
+- `/api/settings/colearn-apps`
+
+## Commands
+
+CoLearn currently exposes two host-level commands:
+
+- `/learn <goal>`
+- `/colearn`
+
+`/learn` is the formal learning-mode entry.
+
+`/colearn` is read-only and does not switch mode by itself.
+
+## Current Integration Shape
+
+- CoLearn hooks are installed into NanoBot at runtime
+- NanoBot remains the execution host
+- CoLearn-specific host coupling is kept in `colearn_*` adapters and minimal host glue
+- the vendored NanoBot snapshot includes only the minimal demo host wiring needed for Apps and command exposure
+
+## Test Commands
+
+Repo tests:
+
+```bash
+pytest -q
+```
+
+Focused plugin and host tests:
+
+```bash
+pytest -q tests/test_plugin_smoke.py tests/test_colearn_api.py tests/test_state_store.py tests/test_runtime_integration.py tests/test_plugin_host_smoke.py tests/test_colearn_command.py
+```
+
+Vendored NanoBot integration tests:
+
+```bash
+set PYTHONPATH=D:\CoLearn-plugins;D:\CoLearn-plugins\third_party\nanobot-0.2.1
+python -m pytest -q third_party/nanobot-0.2.1/tests/agent/test_runner_hooks.py third_party/nanobot-0.2.1/tests/command/test_model_command.py third_party/nanobot-0.2.1/tests/channels/test_websocket_channel.py third_party/nanobot-0.2.1/tests/channels/test_websocket_http_routes.py
+```
+
+WebUI tests:
+
+```bash
+cd third_party/nanobot-0.2.1/webui
+npm test -- --run src/tests/api.test.ts src/tests/settings-view.test.tsx
+npm run build
+```

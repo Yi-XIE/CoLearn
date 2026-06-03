@@ -12,6 +12,7 @@ from colearn.colearn_hooks.colearn_preflight import CoLearnPreflightHook
 from colearn.colearn_hooks.colearn_session_binder import SessionBinderHook
 from colearn.colearn_state.colearn_store import SessionStore
 from colearn.colearn_tools.colearn_command import TOOL_METADATA
+from colearn.colearn_tools.learn_command import LEARN_TOOL_METADATA
 from colearn.colearn_wiki.colearn_query import WikiQueryService
 
 
@@ -19,14 +20,16 @@ class CoLearnPlugin:
     """Plugin entrypoint for registering CoLearn hooks, tools, and UI manifests."""
 
     name = "colearn"
+    DEFAULT_STATE_ROOT = ".colearn/state/sessions"
+    DEFAULT_WIKI_INDEX_DIR = "knowledge/generated"
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or {}
         self.session_store = SessionStore(
-            self.config.get("state_root", ".colearn/state/sessions")
+            self.config.get("state_root", self.DEFAULT_STATE_ROOT)
         )
         self.wiki_service = WikiQueryService(
-            Path(self.config.get("wiki_index_dir", "knowledge/generated"))
+            Path(self.config.get("wiki_index_dir", self.DEFAULT_WIKI_INDEX_DIR))
         )
         self.context_builder = ContextBuilder(self.wiki_service)
         self.blackboard_writer = BlackboardWriter()
@@ -34,7 +37,7 @@ class CoLearnPlugin:
         self.session_binder_hook = SessionBinderHook(self.session_store, reraise=False)
         self.preflight_hook = CoLearnPreflightHook(self.context_builder, reraise=False)
         self.blackboard_monitor_hook = BlackboardMonitorHook(reraise=False)
-        self.finalize_hook = CoLearnFinalizeHook(reraise=False)
+        self.finalize_hook = CoLearnFinalizeHook(self.blackboard_writer, reraise=False)
 
     def setup_session(self, session_id: str) -> Any:
         """Bind a CoLearn session ID to the current turn context and return the session."""
@@ -57,11 +60,21 @@ class CoLearnPlugin:
 
     def get_tools(self) -> list[dict[str, Any]]:
         """Return tool metadata exported by the plugin."""
-        return [TOOL_METADATA]
+        return [TOOL_METADATA, LEARN_TOOL_METADATA]
 
     def list_ui_extensions(self, slot: str | None = None) -> list[dict[str, Any]]:
         """Return CoLearn UI extension manifests for host fixed slots."""
         return self.ui_extensions.list(slot)
+
+    def host_runtime_payload(self) -> dict[str, Any]:
+        """Return host-facing runtime services and settings for NanoBot wiring."""
+        return {
+            "plugin": self,
+            "state_root": str(self.session_store.state_root),
+            "wiki_index_dir": str(self.wiki_service.index_dir),
+            "wiki_service": self.wiki_service,
+            "session_store": self.session_store,
+        }
 
 
 ColearnPlugin = CoLearnPlugin

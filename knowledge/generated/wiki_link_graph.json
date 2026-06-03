@@ -1,0 +1,92 @@
+{
+  "ml.model.basic": [
+    "ml.data.basic",
+    "ml.pattern.basic",
+    "exp.ai.sorting.rules",
+    "qb.ai.ml.beginner.01",
+    "path.ai.ml.foundation"
+  ],
+  "ml.pattern.basic": [
+    "ml.data.basic"
+  ],
+  "ml.training.basic": [
+    "ml.data.basic",
+    "ml.pattern.basic",
+    "ml.model.basic"
+  ],
+  "physics.friction.basic": [
+    "physics.force.basic",
+    "physics.motion.basic"
+  ],
+  "physics.gravity.basic": [
+    "physics.force.basic",
+    "exp.physics.motion.pendulum"
+  ],
+  "physics.motion.basic": [
+    "physics.force.basic"
+  ],
+  "exp.ai.sorting.rules": [
+    "ml.pattern.basic",
+    "ml.model.basic"
+  ],
+  "exp.physics.motion.pendulum_observation": [
+    "physics.gravity.basic",
+    "physics.motion.basic"
+  ],
+  "exp.physics.motion.pendulum": [
+    "physics.gravity.basic",
+    "physics.motion.basic"
+  ],
+  "path.ai.ml.foundation": [
+    "ml.data.basic",
+    "ml.pattern.basic",
+    "ml.model.basic",
+    "ml.training.basic"
+  ],
+  "path.physics.mechanics.foundation": [
+    "physics.force.basic",
+    "physics.motion.basic",
+    "physics.gravity.basic",
+    "physics.friction.basic"
+  ],
+  "qbank.ai.ml.beginner": [
+    "ml.model.basic",
+    "ml.data.basic",
+    "ml.training.basic",
+    "qb.ai.ml.beginner.01",
+    "qb.ai.ml.beginner.02",
+    "qb.ai.ml.beginner.03"
+  ],
+  "qb.ai.ml.beginner.01": [
+    "qbank.ai.ml.beginner",
+    "ml.model.basic"
+  ],
+  "qb.ai.ml.beginner.02": [
+    "qbank.ai.ml.beginner",
+    "ml.training.basic"
+  ],
+  "qb.ai.ml.beginner.03": [
+    "qbank.ai.ml.beginner",
+    "ml.data.basic"
+  ],
+  "qbank.physics.motion.beginner": [
+    "physics.force.basic",
+    "physics.motion.basic",
+    "physics.gravity.basic",
+    "qb.physics.motion.beginner.01",
+    "qb.physics.motion.beginner.02",
+    "qb.physics.motion.beginner.03"
+  ],
+  "qb.physics.motion.beginner.01": [
+    "qbank.physics.motion.beginner",
+    "physics.force.basic"
+  ],
+  "qb.physics.motion.beginner.02": [
+    "qbank.physics.motion.beginner",
+    "physics.motion.basic"
+  ],
+  "qb.physics.motion.beginner.03": [
+    "qbank.physics.motion.beginner",
+    "physics.gravity.basic"
+  ]
+}

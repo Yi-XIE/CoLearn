@@ -16,7 +16,7 @@ Examples::
 
     python run_colearn.py serve --port 8765
     python run_colearn.py webui --port 8080
-    python run_colearn.py run --message "我想学机器学习" --session user-42
+    python run_colearn.py run --message "I want to learn machine learning" --session user-42
     python run_colearn.py chat --session user-42
 
 The `--config` flag is forwarded to NanoBot's config loader. When omitted, the
@@ -111,6 +111,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(runtime_config),
     )
+    setattr(bus, "_agent_loop", agent_loop)
 
     install_colearn(agent_loop, plugin=_build_plugin(args))
 

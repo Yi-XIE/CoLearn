@@ -106,6 +106,9 @@ class AgentRunSpec:
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: str | None = None
+    channel: str | None = None
+    chat_id: str | None = None
+    user_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -285,12 +288,19 @@ class AgentRunner:
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
+            context = AgentHookContext(iteration=iteration, messages=messages)
+            context.session_key = spec.session_key
+            context.session_id = spec.session_key
+            context.channel = spec.channel
+            context.chat_id = spec.chat_id
+            context.user_id = spec.user_id
+            await hook.before_iteration(context)
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
                 # those synthetic edits must not shift the append boundary used
                 # later when the caller saves only the new turn.
-                messages_for_model = self._drop_orphan_tool_results(messages)
+                messages_for_model = self._drop_orphan_tool_results(context.messages)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
@@ -305,12 +315,10 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = self._drop_orphan_tool_results(messages)
+                    messages_for_model = self._drop_orphan_tool_results(context.messages)
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
-                    messages_for_model = messages
-            context = AgentHookContext(iteration=iteration, messages=messages)
-            await hook.before_iteration(context)
+                    messages_for_model = list(context.messages)
             response = await self._request_model(spec, messages_for_model, hook, context)
             raw_usage = self._usage_dict(response.usage)
             context.response = response

@@ -467,6 +467,90 @@ export interface CliAppsPayload {
   };
 }
 
+export interface CoLearnGraphNode {
+  id: string;
+  label: string;
+  kind: string;
+  state: string;
+}
+
+export interface CoLearnGraphEdge {
+  source: string;
+  target: string;
+  kind: string;
+}
+
+export interface CoLearnBlackboardPayload {
+  ok: boolean;
+  error?: string;
+  session_id?: string | null;
+  session_mode?: string;
+  turn_mode?: string | null;
+  runtime?: {
+    current_task_status?: string;
+    last_update_ts?: number;
+    last_update?: string;
+    last_observed_ip?: string | null;
+    active_blind_spots?: string[];
+  };
+  learning?: {
+    goal?: string | null;
+    active_node_id?: string | null;
+    current_progress?: string;
+    planned_nodes?: string[];
+    completed_nodes?: string[];
+    blockers?: string[];
+    objections?: string[];
+    evidence_refs?: string[];
+    continuation?: string;
+    pending_checks?: string[];
+    recall_plan?: Record<string, unknown> | null;
+  };
+  updated_at?: string;
+}
+
+export interface CoLearnGraphPayload {
+  ok: boolean;
+  error?: string;
+  session_id?: string | null;
+  focus_node_id?: string | null;
+  learning_goal?: string | null;
+  nodes: CoLearnGraphNode[];
+  edges: CoLearnGraphEdge[];
+}
+
+export interface CoLearnSessionPayload {
+  ok: boolean;
+  error?: string;
+  session_id: string | null;
+  has_session: boolean;
+  session_mode: string;
+  turn_mode?: string | null;
+  goal?: string | null;
+  active_node_id?: string | null;
+  updated_at?: string | null;
+  state_root?: string;
+}
+
+export interface CoLearnAppInfo extends CliAppInfo {
+  read_only: boolean;
+  session_mode?: string;
+  session_id?: string | null;
+  state_root?: string;
+  blackboard_endpoint?: string;
+  graph_endpoint?: string;
+  session_endpoint?: string;
+  blackboard?: CoLearnBlackboardPayload;
+  graph?: CoLearnGraphPayload;
+  ui_extensions?: Array<Record<string, unknown>>;
+}
+
+export interface CoLearnAppsPayload {
+  apps: CoLearnAppInfo[];
+  installed_count: number;
+  catalog_updated_at?: string | null;
+}
+
 export interface McpPresetField {
   name: string;
   label: string;

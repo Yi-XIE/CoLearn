@@ -14,6 +14,11 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+from colearn.colearn_host_integration import (
+    cmd_colearn,
+    cmd_learn,
+    command_palette_entries as colearn_command_palette_entries,
+)
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,19 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "<goal>",
     ),
     BuiltinCommandSpec(
+        "/learn",
+        "Enter CoLearn learning mode",
+        "Create or continue a CoLearn learning session with a goal.",
+        "graduation-cap",
+        "<goal>",
+    ),
+    BuiltinCommandSpec(
+        "/colearn",
+        "Show CoLearn dashboard",
+        "Display the current CoLearn learning state and blackboard.",
+        "share-2",
+    ),
+    BuiltinCommandSpec(
         "/dream",
         "Run Dream",
         "Manually trigger memory consolidation.",
@@ -116,7 +134,26 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
 
 def builtin_command_palette() -> list[dict[str, str]]:
     """Return structured command metadata for UI command palettes."""
-    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
+    base = [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
+    extra = {
+        row["command"]: row
+        for row in colearn_command_palette_entries()
+    }
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in base:
+        command = row.get("command", "")
+        if command in extra:
+            merged.append(dict(extra[command]))
+            seen.add(command)
+        else:
+            merged.append(row)
+            if command:
+                seen.add(command)
+    for command, row in extra.items():
+        if command not in seen:
+            merged.append(dict(row))
+    return merged
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -641,6 +678,9 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/history ", cmd_history)
     router.exact("/goal", cmd_goal)
     router.prefix("/goal ", cmd_goal)
+    router.exact("/learn", cmd_learn)
+    router.prefix("/learn ", cmd_learn)
+    router.exact("/colearn", cmd_colearn)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)

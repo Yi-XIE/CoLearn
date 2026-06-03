@@ -46,6 +46,11 @@ from nanobot.utils.media_decode import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
+from colearn.colearn_host_integration import (
+    colearn_blackboard_api,
+    colearn_graph_api,
+    colearn_session_api,
+)
 from nanobot.webui.media_api import (
     serve_signed_media,
     sign_media_path,
@@ -534,6 +539,7 @@ class WebSocketChannel(BaseChannel):
             error_response=_http_error,
             runtime_surface=self._runtime_surface,
             runtime_capabilities=self._runtime_capabilities,
+            host_loop=getattr(bus, "_agent_loop", None),
         )
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
         # Process-local secret used to HMAC-sign media URLs. The signed URL is
@@ -740,6 +746,15 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/commands":
             return self._handle_commands(request)
 
+        if got == "/api/v1/colearn/blackboard/current":
+            return self._handle_colearn_blackboard(request)
+
+        if got == "/api/v1/colearn/graph/current":
+            return self._handle_colearn_graph(request)
+
+        if got == "/api/v1/colearn/session/current":
+            return self._handle_colearn_session(request)
+
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
 
@@ -919,6 +934,33 @@ class WebSocketChannel(BaseChannel):
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response({"commands": builtin_command_palette()})
+
+    def _handle_colearn_blackboard(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            return _http_json_response(colearn_blackboard_api(getattr(self.bus, "_agent_loop", None)))
+        except Exception:
+            self.logger.exception("failed to build CoLearn blackboard payload")
+            return _http_error(500, "failed to load CoLearn blackboard")
+
+    def _handle_colearn_graph(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            return _http_json_response(colearn_graph_api(getattr(self.bus, "_agent_loop", None)))
+        except Exception:
+            self.logger.exception("failed to build CoLearn graph payload")
+            return _http_error(500, "failed to load CoLearn graph")
+
+    def _handle_colearn_session(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            return _http_json_response(colearn_session_api(getattr(self.bus, "_agent_loop", None)))
+        except Exception:
+            self.logger.exception("failed to build CoLearn session payload")
+            return _http_error(500, "failed to load CoLearn session")
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):

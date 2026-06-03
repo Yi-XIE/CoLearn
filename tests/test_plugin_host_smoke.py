@@ -32,6 +32,7 @@ from colearn.colearn_hooks.colearn_session_binder import SessionBinderHook
 from colearn.colearn_plugin import CoLearnPlugin
 from colearn.colearn_state.colearn_store import SessionStore
 from colearn.colearn_tools.colearn_command import TOOL_METADATA, colearn_snapshot
+from colearn.colearn_tools.learn_command import LEARN_TOOL_METADATA
 
 
 def test_colearn_hooks_subclass_real_agent_hook():
@@ -53,8 +54,10 @@ def test_colearn_tool_registers_with_real_tool_registry():
     registry = nanobot_tools_registry.ToolRegistry()
 
     ToolRegistryAdapter(registry).register(TOOL_METADATA)
+    ToolRegistryAdapter(registry).register(LEARN_TOOL_METADATA)
 
     assert "colearn" in registry
+    assert "learn" in registry
     tool = registry.get("colearn")
     assert isinstance(tool, nanobot_tools_base.Tool)
     schema = tool.to_schema()
@@ -108,6 +111,7 @@ def test_install_plan_matches_real_host_surfaces():
 
     assert all(isinstance(h, nanobot_hook.AgentHook) for h in plan.hooks)
     assert plan.tools[0]["command"] == "/colearn"
+    assert any(tool["command"] == "/learn" for tool in plan.tools)
     slots = {ext["slot"] for ext in plan.ui_extensions}
     assert {"apps", "page", "thread_toolbar"}.issubset(slots)
 

@@ -1,6 +1,7 @@
 import type {
   ChatSummary,
   CliAppsPayload,
+  CoLearnAppsPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   ModelConfigurationCreate,
@@ -155,6 +156,13 @@ export async function fetchCliApps(
   base: string = "",
 ): Promise<CliAppsPayload> {
   return request<CliAppsPayload>(`${base}/api/settings/cli-apps`, token);
+}
+
+export async function fetchCoLearnApps(
+  token: string,
+  base: string = "",
+): Promise<CoLearnAppsPayload> {
+  return request<CoLearnAppsPayload>(`${base}/api/settings/colearn-apps`, token);
 }
 
 export async function runCliAppAction(

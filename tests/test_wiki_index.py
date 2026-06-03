@@ -32,7 +32,7 @@ def test_generate_index(built_indices):
     index_file = output_dir / "wiki_index.json"
     assert index_file.exists()
 
-    with open(index_file) as f:
+    with open(index_file, encoding="utf-8") as f:
         index = json.load(f)
 
     assert len(index) >= 21
@@ -49,7 +49,7 @@ def test_generate_link_graph(built_indices):
     graph_file = output_dir / "wiki_link_graph.json"
     assert graph_file.exists()
 
-    with open(graph_file) as f:
+    with open(graph_file, encoding="utf-8") as f:
         graph = json.load(f)
 
     ml_model_links = graph.get("ml.model.basic", [])
@@ -62,7 +62,7 @@ def test_generate_search_index(built_indices):
     search_file = output_dir / "wiki_search_index.json"
     assert search_file.exists()
 
-    with open(search_file) as f:
+    with open(search_file, encoding="utf-8") as f:
         search_index = json.load(f)
 
     ml_model = search_index.get("ml.model.basic")

@@ -9,7 +9,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import (
     build_help_text,
     builtin_command_palette,
+    cmd_colearn,
     cmd_goal,
+    cmd_learn,
     cmd_model,
     register_builtin_commands,
 )
@@ -190,3 +192,45 @@ def test_goal_command_in_help_and_palette() -> None:
     palette = builtin_command_palette()
     assert any(item["command"] == "/goal" and item["arg_hint"] == "<goal>" for item in palette)
     assert "/goal <goal>" in build_help_text()
+
+
+@pytest.mark.asyncio
+async def test_learn_command_shows_usage_without_args(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    out = await cmd_learn(_ctx(loop, "/learn"))
+    assert out is not None
+    assert "Usage: /learn <goal>" in out.content
+
+
+@pytest.mark.asyncio
+async def test_learn_command_registered_as_exact_and_prefix(tmp_path) -> None:
+    router = CommandRouter()
+    register_builtin_commands(router)
+    loop = _make_loop(tmp_path)
+
+    out = await router.dispatch(_ctx(loop, "/learn study vectors"))
+
+    assert out is not None
+    assert "CoLearn Learning Session" in out.content
+    assert "study vectors" in out.content
+
+
+@pytest.mark.asyncio
+async def test_colearn_command_registered_on_router(tmp_path) -> None:
+    router = CommandRouter()
+    register_builtin_commands(router)
+    loop = _make_loop(tmp_path)
+
+    out = await router.dispatch(_ctx(loop, "/colearn"))
+
+    assert out is not None
+    assert "CoLearn Dashboard" in out.content
+
+
+def test_colearn_commands_in_help_and_palette() -> None:
+    palette = builtin_command_palette()
+    assert any(item["command"] == "/learn" and item["arg_hint"] == "<goal>" for item in palette)
+    assert any(item["command"] == "/colearn" for item in palette)
+    help_text = build_help_text()
+    assert "/learn <goal>" in help_text
+    assert "/colearn" in help_text

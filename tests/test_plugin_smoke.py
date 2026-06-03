@@ -35,13 +35,16 @@ def test_plugin_get_tools():
     """CoLearnPlugin should expose colearn tool metadata."""
     from colearn.colearn_plugin import CoLearnPlugin
     from colearn.colearn_tools.colearn_command import TOOL_METADATA
+    from colearn.colearn_tools.learn_command import LEARN_TOOL_METADATA
 
     tools = CoLearnPlugin().get_tools()
 
-    assert tools == [TOOL_METADATA]
+    assert tools == [TOOL_METADATA, LEARN_TOOL_METADATA]
     assert tools[0]["name"] == "colearn"
     assert tools[0]["command"] == "/colearn"
     assert callable(tools[0]["handler"])
+    assert tools[1]["name"] == "learn"
+    assert tools[1]["command"] == "/learn"
 
 
 def test_setup_session(tmp_path):

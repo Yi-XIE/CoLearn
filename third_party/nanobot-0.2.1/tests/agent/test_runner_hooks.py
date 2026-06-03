@@ -170,3 +170,48 @@ async def test_runner_passes_cached_tokens_to_hook_context():
 
     assert len(captured_usage) == 1
     assert captured_usage[0]["cached_tokens"] == 150
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_hook_mutated_messages_for_model_request():
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    captured_messages: list[dict] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        captured_messages[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class InjectionHook(AgentHook):
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            assert getattr(context, "session_key") == "websocket:demo"
+            context.messages = [
+                *context.messages,
+                {"role": "system", "content": "colearn learning context", "source": "colearn"},
+            ]
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "teach me"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=InjectionHook(),
+        session_key="websocket:demo",
+        channel="websocket",
+        chat_id="demo",
+    ))
+
+    assert result.final_content == "done"
+    assert any(
+        message.get("role") == "system" and message.get("content") == "colearn learning context"
+        for message in captured_messages
+    )
+    assert result.messages == [{"role": "user", "content": "teach me"}, {"role": "assistant", "content": "done"}]

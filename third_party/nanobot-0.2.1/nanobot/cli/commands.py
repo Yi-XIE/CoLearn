@@ -926,6 +926,7 @@ def _run_gateway(
         ),
         provider_signature=provider_snapshot.signature,
     )
+    setattr(bus, "_agent_loop", agent)
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
     from nanobot.bus.events import OutboundMessage

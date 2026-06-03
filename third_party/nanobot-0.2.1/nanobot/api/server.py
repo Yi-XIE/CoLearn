@@ -16,6 +16,11 @@ from typing import Any
 from aiohttp import web
 from loguru import logger
 
+from colearn.colearn_host_integration import (
+    colearn_blackboard_api,
+    colearn_graph_api,
+    colearn_session_api,
+)
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
@@ -372,6 +377,21 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
+async def handle_colearn_blackboard(request: web.Request) -> web.Response:
+    """GET /api/v1/colearn/blackboard/current"""
+    return web.json_response(colearn_blackboard_api(request.app["agent_loop"]))
+
+
+async def handle_colearn_graph(request: web.Request) -> web.Response:
+    """GET /api/v1/colearn/graph/current"""
+    return web.json_response(colearn_graph_api(request.app["agent_loop"]))
+
+
+async def handle_colearn_session(request: web.Request) -> web.Response:
+    """GET /api/v1/colearn/session/current"""
+    return web.json_response(colearn_session_api(request.app["agent_loop"]))
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -396,4 +416,7 @@ def create_app(
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/v1/colearn/blackboard/current", handle_colearn_blackboard)
+    app.router.add_get("/api/v1/colearn/graph/current", handle_colearn_graph)
+    app.router.add_get("/api/v1/colearn/session/current", handle_colearn_session)
     return app
