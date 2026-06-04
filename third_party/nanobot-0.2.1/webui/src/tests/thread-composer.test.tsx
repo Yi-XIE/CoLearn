@@ -1267,4 +1267,16 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("shows a CoLearn button when the thread entry is available", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onOpenCoLearn={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "CoLearn" })).toBeInTheDocument();
+  });
+
 });

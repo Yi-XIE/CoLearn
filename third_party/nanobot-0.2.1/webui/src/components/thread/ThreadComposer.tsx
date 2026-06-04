@@ -9,7 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import { MarkdownText } from "@/components/MarkdownText";
 import {
   CliAppMentionToken,
   McpPresetMentionToken,
@@ -37,6 +37,7 @@ import {
   Sparkles,
   Square,
   SquarePen,
+  GraduationCap,
   Target,
   Trash2,
   Undo2,
@@ -110,6 +111,7 @@ interface ThreadComposerProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
+  onOpenCoLearn?: () => void;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -405,9 +407,11 @@ function RunPulseIcon() {
 function RunElapsedStrip({
   startedAt,
   goalState,
+  onOpenCoLearn,
 }: {
   startedAt: number | null;
   goalState?: GoalStateWsPayload;
+  onOpenCoLearn?: () => void;
 }) {
   const { t } = useTranslation();
   const [goalPanelOpen, setGoalPanelOpen] = useState(false);
@@ -483,8 +487,6 @@ function RunElapsedStrip({
     }
 
     relayout();
-
-    preloadMarkdownText();
     const ro =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => relayout())
@@ -634,6 +636,21 @@ function RunElapsedStrip({
             )}
           </button>
         ) : null}
+        {onOpenCoLearn ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onOpenCoLearn}
+            className={cn(
+              "ml-1 h-7 shrink-0 rounded-full px-2.5 text-[11.5px] font-medium",
+              "text-muted-foreground hover:bg-muted/55 hover:text-foreground",
+            )}
+          >
+            <GraduationCap className="mr-1 h-3.5 w-3.5" aria-hidden />
+            CoLearn
+          </Button>
+        ) : null}
       </div>
     </div>
   );
@@ -661,6 +678,7 @@ export function ThreadComposer({
   workspaceError = null,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
+  onOpenCoLearn,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -1438,7 +1456,7 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
+        <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} onOpenCoLearn={onOpenCoLearn} />
         <div className="relative">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
@@ -1528,6 +1546,18 @@ export function ThreadComposer({
             ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
+            {onOpenCoLearn ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onOpenCoLearn}
+                className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground hover:bg-muted/55 hover:text-foreground"
+              >
+                <GraduationCap className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                CoLearn
+              </Button>
+            ) : null}
             {modelLabel ? (
               <ComposerModelBadge
                 label={modelLabel}

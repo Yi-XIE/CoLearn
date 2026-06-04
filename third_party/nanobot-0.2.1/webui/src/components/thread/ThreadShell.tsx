@@ -5,9 +5,10 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
+import { fetchCliApps, fetchCoLearnApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
 import {
   CLI_APPS_CHANGED_EVENT,
   installedCliAppsFromPayload,
@@ -22,6 +23,7 @@ import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider
 import type {
   ChatSummary,
   CliAppInfo,
+  CoLearnAppInfo,
   McpPresetInfo,
   SettingsPayload,
   SlashCommand,
@@ -167,10 +169,12 @@ export function ThreadShell({
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [cliApps, setCliApps] = useState<CliAppInfo[]>([]);
+  const [colearnApps, setCoLearnApps] = useState<CoLearnAppInfo[]>([]);
   const [mcpPresets, setMcpPresets] = useState<McpPresetInfo[]>([]);
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const [colearnPanelOpen, setCoLearnPanelOpen] = useState(false);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
@@ -381,6 +385,15 @@ export function ThreadShell({
     }
   }, [token]);
 
+  const refreshCoLearnApps = useCallback(async () => {
+    try {
+      const payload = await fetchCoLearnApps(token);
+      setCoLearnApps(payload.apps.filter((app) => app.installed));
+    } catch {
+      setCoLearnApps([]);
+    }
+  }, [token]);
+
   const refreshMcpPresets = useCallback(async () => {
     try {
       const payload = await fetchMcpPresets(token);
@@ -424,6 +437,31 @@ export function ThreadShell({
       window.removeEventListener(CLI_APPS_CHANGED_EVENT, refreshOnCliAppsChanged);
     };
   }, [refreshCliApps, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const payload = await fetchCoLearnApps(token);
+        if (!cancelled) setCoLearnApps(payload.apps.filter((app) => app.installed));
+      } catch {
+        if (!cancelled) setCoLearnApps([]);
+      }
+    };
+    load();
+
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshCoLearnApps();
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [refreshCoLearnApps, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -517,6 +555,7 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={chatId}
+          onOpenCoLearn={() => setCoLearnPanelOpen(true)}
         />
       ) : (
         <ThreadComposer
@@ -543,6 +582,7 @@ export function ThreadShell({
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
+          onOpenCoLearn={() => setCoLearnPanelOpen(true)}
         />
       )}
     </>
@@ -584,6 +624,89 @@ export function ThreadShell({
         cliApps={cliApps}
         mcpPresets={mcpPresets}
       />
+      <Sheet open={colearnPanelOpen} onOpenChange={setCoLearnPanelOpen}>
+        <SheetContent
+          side="right"
+          className="w-[min(44rem,92vw)] border-l border-border/55 p-0 sm:max-w-none"
+        >
+          <SheetTitle className="sr-only">CoLearn</SheetTitle>
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="border-b border-border/55 px-4 py-3">
+              <div className="text-[13px] font-semibold text-foreground">CoLearn</div>
+              <div className="mt-1 text-[12px] text-muted-foreground">
+                只读学习看板与图谱摘要
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {colearnApps.length ? (
+                <div className="space-y-3">
+                  {colearnApps.map((app) => (
+                    <CoLearnPanelCard key={app.name} app={app} />
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[12px] border border-dashed border-border/55 p-4 text-sm text-muted-foreground">
+                  当前没有可展示的 CoLearn 会话。
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </section>
+  );
+}
+
+function CoLearnPanelCard({ app }: { app: CoLearnAppInfo }) {
+  const learning = app.blackboard?.learning;
+  const graph = app.graph;
+  return (
+    <article className="rounded-[14px] border border-border/55 bg-card p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[14px] font-semibold text-foreground">{app.display_name}</div>
+          <div className="mt-1 text-[12px] text-muted-foreground">
+            {learning?.goal || "No active learning goal"}
+          </div>
+        </div>
+        <div className="rounded-full bg-muted px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          {app.session_mode || "UNKNOWN"}
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 text-[12px] text-muted-foreground sm:grid-cols-2">
+        <InfoRow label="Session" value={app.session_id || "None"} />
+        <InfoRow label="Active node" value={learning?.active_node_id || "None"} />
+        <InfoRow label="Progress" value={learning?.current_progress || "No summary yet"} />
+        <InfoRow label="Graph" value={`${graph?.nodes.length ?? 0} nodes / ${graph?.edges.length ?? 0} edges`} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <MiniList title="Pending checks" items={learning?.pending_checks ?? []} />
+        <MiniList title="Blockers" items={learning?.blockers ?? []} />
+      </div>
+    </article>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[10px] bg-muted/20 px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function MiniList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-[10px] bg-muted/15 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{title}</div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {items.length ? items.slice(0, 4).map((item) => (
+          <span key={item} className="rounded-full bg-background px-2 py-0.5 text-[11.5px] text-foreground">
+            {item}
+          </span>
+        )) : <span className="text-[12px] text-muted-foreground">None</span>}
+      </div>
+    </div>
   );
 }

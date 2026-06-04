@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import { ClientProvider } from "@/providers/ClientProvider";
-import type { CliAppsPayload, SettingsPayload, UIMessage } from "@/lib/types";
+import type { CliAppsPayload, CoLearnAppsPayload, SettingsPayload, UIMessage } from "@/lib/types";
 
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -1293,5 +1293,73 @@ describe("ThreadShell", () => {
 
     expect(screen.getByRole("listbox", { name: "Apps" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
+  });
+
+  it("opens the CoLearn side panel from the thread composer", async () => {
+    const client = makeClient();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/settings/colearn-apps")) {
+        const payload: CoLearnAppsPayload = {
+          apps: [{
+            name: "colearn",
+            display_name: "CoLearn",
+            category: "learning",
+            description: "Learning companion",
+            requires: "",
+            source: "local",
+            entry_point: "colearn",
+            install_supported: true,
+            installed: true,
+            available: true,
+            status: "installed",
+            logo_url: null,
+            brand_color: "#2563EB",
+            skill_installed: true,
+            read_only: true,
+            session_mode: "LEARNING",
+            session_id: "session-1",
+            blackboard: {
+              ok: true,
+              learning: {
+                goal: "Learn recursive trees",
+                current_progress: "Mapped the first two branches",
+                pending_checks: ["Compare DFS and BFS"],
+                blockers: ["Need a simpler counterexample"],
+              },
+            },
+            graph: {
+              ok: true,
+              nodes: [{ id: "n1", label: "Trees", kind: "concept", state: "active" }],
+              edges: [],
+            },
+          }],
+          installed_count: 1,
+        };
+        return Promise.resolve(httpJson(payload));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-colearn")}
+        title="Chat colearn"
+        onToggleSidebar={() => {}}
+        onGoHome={() => {}}
+        onNewChat={() => {}}
+      />,
+    ));
+
+    fireEvent.click(await screen.findByRole("button", { name: "CoLearn" }));
+
+    const panel = await screen.findByRole("dialog", { name: "CoLearn" });
+    expect(within(panel).getByText("Learn recursive trees")).toBeInTheDocument();
   });
 });
