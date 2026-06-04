@@ -29,15 +29,75 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import Any
+from types import ModuleType, SimpleNamespace
 
-# Mock dulwich if missing so NanoBot's GitStore import won't crash.
-# GitStore is only for workspace template versioning; CoLearn doesn't need it.
+
+def _install_dulwich_stub() -> None:
+    """Install a tiny dulwich shim so NanoBot can run without the dependency."""
+
+    def _init_repo(path: str) -> None:
+        workspace = Path(path)
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / ".git").mkdir(exist_ok=True)
+
+    def _commit(*_args, **_kwargs) -> bytes:
+        return b"\0" * 20
+
+    def _status(*_args, **_kwargs):
+        return SimpleNamespace(unstaged=[], staged={})
+
+    def _annotate(*_args, **_kwargs):
+        return []
+
+    def _diff(*_args, **kwargs) -> None:
+        outstream = kwargs.get("outstream")
+        if outstream is None:
+            return
+        try:
+            outstream.write("")
+        except TypeError:
+            outstream.write(b"")
+
+    class _Repo:
+        def __init__(self, path: str):
+            self.path = Path(path)
+            self.refs: dict[bytes, bytes] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def __getitem__(self, _key):
+            raise KeyError(_key)
+
+    dulwich_mod = ModuleType("dulwich")
+    porcelain_mod = ModuleType("dulwich.porcelain")
+    repo_mod = ModuleType("dulwich.repo")
+
+    porcelain_mod.init = _init_repo
+    porcelain_mod.add = lambda *_args, **_kwargs: None
+    porcelain_mod.commit = _commit
+    porcelain_mod.status = _status
+    porcelain_mod.annotate = _annotate
+    porcelain_mod.diff = _diff
+    repo_mod.Repo = _Repo
+
+    dulwich_mod.porcelain = porcelain_mod
+    dulwich_mod.repo = repo_mod
+
+    sys.modules["dulwich"] = dulwich_mod
+    sys.modules["dulwich.porcelain"] = porcelain_mod
+    sys.modules["dulwich.repo"] = repo_mod
+
+
+# Mock dulwich if missing so NanoBot's GitStore can degrade cleanly.
 try:
     import dulwich  # noqa: F401
 except ImportError:
-    from types import ModuleType
-    sys.modules["dulwich"] = ModuleType("dulwich")
-    sys.modules["dulwich.porcelain"] = ModuleType("dulwich.porcelain")
+    _install_dulwich_stub()
 
 REPO_ROOT = Path(__file__).resolve().parent
 SNAPSHOT_PATH = REPO_ROOT / "third_party" / "nanobot-0.2.1"
@@ -68,6 +128,47 @@ def _build_bot(args: argparse.Namespace) -> Nanobot:
     if config_path is not None:
         config_path = str(Path(config_path).expanduser())
     return Nanobot.from_config(config_path, workspace=args.workspace)
+
+
+def _configure_webui_gateway(config: Any, *, port: int | None) -> int:
+    """Ensure the browser WebUI always has a local websocket channel to talk to."""
+    resolved_port = int(port if port is not None else config.gateway.port)
+    config.gateway.host = "127.0.0.1"
+    config.gateway.port = resolved_port
+
+    extras = dict(getattr(config.channels, "__pydantic_extra__", None) or {})
+    websocket_cfg = extras.get("websocket")
+    if not isinstance(websocket_cfg, dict):
+        websocket_cfg = {}
+    websocket_cfg["enabled"] = True
+    websocket_cfg["host"] = "127.0.0.1"
+    websocket_cfg["port"] = resolved_port
+    websocket_cfg.setdefault("path", "/")
+    websocket_cfg.setdefault("allow_from", ["*"])
+    websocket_cfg.setdefault("streaming", True)
+    extras["websocket"] = websocket_cfg
+    config.channels.__pydantic_extra__ = extras
+    return resolved_port
+
+
+def _enable_gateway_verbose_logging() -> None:
+    from loguru import logger
+
+    from nanobot.cli.commands import _log_handler_id
+
+    logger.remove(_log_handler_id)
+    logger.add(
+        sys.stderr,
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+            "<level>{level: <5}</level> | "
+            "<cyan>{extra[channel]}</cyan> | "
+            "<level>{message}</level>"
+        ),
+        level="DEBUG",
+        colorize=None,
+        filter=lambda record: record["extra"].setdefault("channel", "-") or True,
+    )
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -142,30 +243,23 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_webui(args: argparse.Namespace) -> int:
     """Start the NanoBot WebUI gateway with CoLearn auto-installed.
 
-    Delegates to NanoBot's own `gateway` command so all WebUI assets, channel
-    routing, cron service, and message-tool wiring stay identical to upstream.
-    `enable_for_nanobot()` patches `AgentLoop.from_config` ahead of time, so the
-    loop the gateway builds has CoLearn already attached.
+    Uses NanoBot's shared gateway runtime after forcing a local websocket
+    channel on the selected port. This keeps the upstream WebUI HTTP surface,
+    cron service, and channel routing while making `run_colearn.py webui`
+    genuinely turnkey.
     """
     enable_for_nanobot(_build_plugin(args))
-    from nanobot.cli.commands import gateway
-
-    gateway_argv: list[str] = []
-    if args.config:
-        gateway_argv += ["--config", args.config]
-    if args.workspace:
-        gateway_argv += ["--workspace", args.workspace]
-    if args.port is not None:
-        gateway_argv += ["--port", str(args.port)]
-    if args.verbose:
-        gateway_argv += ["--verbose"]
+    from nanobot.cli.commands import _load_runtime_config, _run_gateway
 
     try:
-        gateway(  # type: ignore[misc]
-            port=args.port,
-            workspace=args.workspace,
-            verbose=args.verbose,
-            config=args.config,
+        if args.verbose:
+            _enable_gateway_verbose_logging()
+        config = _load_runtime_config(args.config, args.workspace)
+        resolved_port = _configure_webui_gateway(config, port=args.port)
+        _run_gateway(
+            config,
+            port=resolved_port,
+            health_server_enabled=False,
         )
     except SystemExit as exc:
         return int(exc.code or 0)
