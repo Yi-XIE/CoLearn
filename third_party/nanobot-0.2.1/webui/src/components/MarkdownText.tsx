@@ -42,10 +42,6 @@ const MEDIUM_STREAM_COMMIT_MS = 140;
 const LONG_STREAM_COMMIT_MS = 220;
 const STREAMING_HIGHLIGHT_CHAR_LIMIT = 16_000;
 
-export function preloadMarkdownText(): void {
-  void loadMarkdownRenderer();
-}
-
 /**
  * Lightweight markdown renderer mirroring agent-chat-ui: GFM + math via
  * ``remark-math`` / ``rehype-katex``, and fenced code blocks delegated to
@@ -60,10 +56,6 @@ export function MarkdownText({
   const highlightCode = streaming
     ? renderedSource.length <= STREAMING_HIGHLIGHT_CHAR_LIMIT
     : renderedSource === children;
-
-  useEffect(() => {
-    if (streaming) preloadMarkdownText();
-  }, [streaming]);
 
   return (
     <Suspense

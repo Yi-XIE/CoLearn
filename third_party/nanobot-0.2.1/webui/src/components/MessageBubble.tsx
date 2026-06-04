@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import { MarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
 import { formatTurnLatency } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
@@ -517,11 +517,6 @@ export function ReasoningBubble({
     setUserToggled(true);
     setOpenLocal((v) => (userToggled ? !v : !open));
   };
-  useEffect(() => {
-    if (open && text.length > 0) {
-      preloadMarkdownText();
-    }
-  }, [open, text.length]);
   return (
     <div
       className={cn(

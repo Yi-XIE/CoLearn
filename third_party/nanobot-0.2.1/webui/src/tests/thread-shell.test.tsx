@@ -1359,7 +1359,7 @@ describe("ThreadShell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "CoLearn" }));
 
-    const panel = await screen.findByRole("dialog", { name: "CoLearn" });
+    const panel = await screen.findByRole("complementary", { name: "CoLearn" });
     expect(within(panel).getByText("Learn recursive trees")).toBeInTheDocument();
   });
 });

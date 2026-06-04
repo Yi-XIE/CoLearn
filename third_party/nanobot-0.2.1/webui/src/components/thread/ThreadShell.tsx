@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { fetchCliApps, fetchCoLearnApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
@@ -33,6 +33,7 @@ import type {
 } from "@/lib/types";
 import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
+import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
@@ -613,29 +614,30 @@ export function ThreadShell({
           minimal={!session && !loading}
         />
       ) : null}
-      <ThreadViewport
-        messages={displayMessages}
-        isStreaming={isStreaming}
-        emptyState={emptyState}
-        composer={composer}
-        scrollToBottomSignal={scrollToBottomSignal}
-        conversationKey={historyKey}
-        showScrollToBottomButton={!!session}
-        cliApps={cliApps}
-        mcpPresets={mcpPresets}
-      />
-      <Sheet open={colearnPanelOpen} onOpenChange={setCoLearnPanelOpen}>
-        <SheetContent
-          side="right"
-          className="w-[min(44rem,92vw)] border-l border-border/55 p-0 sm:max-w-none"
-        >
-          <SheetTitle className="sr-only">CoLearn</SheetTitle>
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="border-b border-border/55 px-4 py-3">
-              <div className="text-[13px] font-semibold text-foreground">CoLearn</div>
-              <div className="mt-1 text-[12px] text-muted-foreground">
-                只读学习看板与图谱摘要
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className={cn("min-h-0 min-w-0 transition-[flex-basis,max-width] duration-300", colearnPanelOpen ? "basis-[60%] max-w-[60%]" : "basis-full max-w-full")}>
+          <ThreadViewport
+            messages={displayMessages}
+            isStreaming={isStreaming}
+            emptyState={emptyState}
+            composer={composer}
+            scrollToBottomSignal={scrollToBottomSignal}
+            conversationKey={historyKey}
+            showScrollToBottomButton={!!session}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+          />
+        </div>
+        {colearnPanelOpen ? (
+          <aside aria-label="CoLearn" className="flex min-h-0 min-w-[320px] flex-[0_0_40%] flex-col border-l border-border/55 bg-background">
+            <div className="flex items-start justify-between gap-3 border-b border-border/55 px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-foreground">CoLearn</div>
+                <div className="mt-1 text-[12px] text-muted-foreground">只读学习看板与图谱摘要</div>
               </div>
+              <button type="button" className="rounded-full p-1 text-muted-foreground hover:bg-muted/55 hover:text-foreground" aria-label="Close CoLearn panel" onClick={() => setCoLearnPanelOpen(false)}>
+                <X className="h-4 w-4" aria-hidden />
+              </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {colearnApps.length ? (
@@ -645,14 +647,12 @@ export function ThreadShell({
                   ))}
                 </div>
               ) : (
-                <div className="rounded-[12px] border border-dashed border-border/55 p-4 text-sm text-muted-foreground">
-                  当前没有可展示的 CoLearn 会话。
-                </div>
+                <div className="rounded-[12px] border border-dashed border-border/55 p-4 text-sm text-muted-foreground">当前没有可展示的 CoLearn 会话。</div>
               )}
             </div>
-          </div>
-        </SheetContent>
-      </Sheet>
+          </aside>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -710,3 +710,7 @@ function MiniList({ title, items }: { title: string; items: string[] }) {
     </div>
   );
 }
+
+
+
+

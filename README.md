@@ -3,7 +3,7 @@
 CoLearn is a NanoBot-oriented learning plugin demo. This repository packages:
 
 - a standalone `colearn` plugin runtime
-- NanoBot host wiring for hooks, commands, and read-only Apps UI
+- NanoBot host wiring for hooks, commands, thread-side CoLearn UI, and read-only Apps UI
 - `.colearn/` session state and wiki-backed learning context
 - a vendored NanoBot reference snapshot in `third_party/nanobot-0.2.1/`
 
@@ -16,8 +16,11 @@ This branch targets a working demo, not a finished product:
 - `/colearn` can show the current blackboard snapshot
 - LEARNING mode injects CoLearn context into the real model request path
 - turn end performs minimal blackboard writeback
+- WebUI thread view can show a read-only CoLearn side panel
 - WebUI Apps can show a read-only CoLearn entry
 - CoLearn exposes read-only host APIs for blackboard, graph, and session state
+
+The primary user path is now the chat thread itself. Apps remains a secondary discovery entry.
 
 CoLearn remains the source of truth for learning data:
 
@@ -113,9 +116,11 @@ After `python run_colearn.py webui --port 8080`:
 2. open the command palette or type commands directly
 3. verify `/learn` and `/colearn` are available
 4. run `/learn linear algebra basics`
-5. open Settings > Apps
-6. verify the CoLearn app card is visible
-7. open the CoLearn read-only view and confirm blackboard / graph data load
+5. click the `CoLearn` button near the thread composer
+6. verify the CoLearn panel opens on the right side in the same thread page
+7. confirm the thread area and CoLearn panel are shown side by side
+8. open Settings > Apps
+9. verify the CoLearn app card is visible
 
 ## Host Endpoints
 
@@ -136,6 +141,13 @@ CoLearn currently exposes two host-level commands:
 `/learn` is the formal learning-mode entry.
 
 `/colearn` is read-only and does not switch mode by itself.
+
+## Current Frontend Shape
+
+- the primary CoLearn entry is inside the chat thread
+- the thread page can open a right-side CoLearn panel without leaving the conversation
+- the thread content and CoLearn panel render side by side at about `6:4`
+- `Settings > Apps` remains a secondary discovery and read-only entry
 
 ## Current Integration Shape
 

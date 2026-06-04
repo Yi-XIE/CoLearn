@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,
+      modulePreload: false,
       sourcemap: false,
       rollupOptions: {
         output: {
